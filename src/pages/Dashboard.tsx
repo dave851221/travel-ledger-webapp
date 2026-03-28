@@ -199,7 +199,7 @@ const Dashboard: React.FC = () => {
       memberDetails[m] = { totalOwed: 0, categories: {} };
       balances['GRAND_TOTAL'][m] = 0;
     });
-    expenses.filter(e => !e.is_settlement).forEach(e => {
+    expenses.forEach(e => {
       const rate = trip.rates[e.currency] || 1;
       const amountInBase = e.amount * rate;
       if (!byCurrency[e.currency]) {
@@ -209,19 +209,28 @@ const Dashboard: React.FC = () => {
       }
       const pMe = currentUser ? (e.payer_data[currentUser] || 0) : 0;
       const oMe = currentUser ? (e.split_data[currentUser] || 0) : 0;
-      byCurrency[e.currency].total += e.amount;
-      byCurrency[e.currency].paidByMe += pMe;
-      byCurrency[e.currency].owedByMe += oMe;
-      grandBase.total += amountInBase;
-      grandBase.paidByMe += (pMe * rate);
-      grandBase.owedByMe += (oMe * rate);
-      categoryMap[e.category] = (categoryMap[e.category] || 0) + amountInBase;
+
+      // 只有「非結清」紀錄才計入總支出與分類統計
+      if (!e.is_settlement) {
+        byCurrency[e.currency].total += e.amount;
+        byCurrency[e.currency].paidByMe += pMe;
+        byCurrency[e.currency].owedByMe += oMe;
+        grandBase.total += amountInBase;
+        grandBase.paidByMe += (pMe * rate);
+        grandBase.owedByMe += (oMe * rate);
+        categoryMap[e.category] = (categoryMap[e.category] || 0) + amountInBase;
+        trip.members.forEach(m => {
+          const owed = e.split_data[m] || 0;
+          const owedInBase = owed * rate;
+          memberDetails[m].totalOwed += owedInBase;
+          memberDetails[m].categories[e.category] = (memberDetails[m].categories[e.category] || 0) + owedInBase;
+        });
+      }
+
+      // 所有紀錄（含結清）都要計入餘額，用來計算誰該給誰多少錢
       trip.members.forEach(m => {
         const paid = e.payer_data[m] || 0;
         const owed = e.split_data[m] || 0;
-        const owedInBase = owed * rate;
-        memberDetails[m].totalOwed += owedInBase;
-        memberDetails[m].categories[e.category] = (memberDetails[m].categories[e.category] || 0) + owedInBase;
         balances[e.currency][m] += (paid - owed);
         balances['GRAND_TOTAL'][m] += ((paid - owed) * rate);
       });
