@@ -75,7 +75,7 @@ const TripPortal: React.FC = () => {
               type="password"
               maxLength={6}
               placeholder="請輸入 4-6 位密碼"
-              className="w-full text-center text-2xl tracking-[1em] px-4 py-3 rounded-xl border-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 outline-none transition-all"
+              className="w-full text-center text-2xl tracking-[0.5em] placeholder:tracking-normal placeholder:text-sm px-4 py-4 rounded-xl border-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 outline-none transition-all"
               value={code}
               onChange={e => setCode(e.target.value)}
               autoFocus
