@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Home from './pages/Home';
 import TripPortal from './pages/TripPortal';
@@ -34,7 +34,7 @@ function App() {
   }, []);
 
   return (
-    <Router basename="/travel-ledger-webapp">
+    <Router>
       <div className="relative min-h-screen">
         {/* PWA Update Notification */}
         {needRefresh && (

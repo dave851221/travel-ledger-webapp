@@ -1,20 +1,15 @@
-# GitHub Actions 部署 Vite 專案到 GitHub Pages
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: ["main"]
-
-  # 允許手動從 Actions 頁面執行
   workflow_dispatch:
 
-# 設定權限
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# 限制同時間只有一個部署在執行
 concurrency:
   group: "pages"
   cancel-in-progress: true
@@ -50,7 +45,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # 打包輸出資料夾
           path: './dist'
 
       - name: Deploy to GitHub Pages
