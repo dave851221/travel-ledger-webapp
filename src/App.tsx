@@ -34,7 +34,7 @@ function App() {
   }, []);
 
   return (
-    <Router>
+    <Router basename="/travel-ledger-webapp">
       <div className="relative min-h-screen">
         {/* PWA Update Notification */}
         {needRefresh && (
