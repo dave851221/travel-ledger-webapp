@@ -235,7 +235,9 @@ const Dashboard: React.FC = () => {
         balances['GRAND_TOTAL'][m] += ((paid - owed) * rate);
       });
     });
-    const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
+    const categoryData = Object.entries(categoryMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
     return { byCurrency, grandBase, categoryData, memberDetails, balances };
   }, [expenses, trip, currentUser]);
 
@@ -475,7 +477,7 @@ const Dashboard: React.FC = () => {
                     {/* Table Area */}
                     <div className="w-full space-y-3">
                       <div className="grid grid-cols-1 divide-y divide-slate-50 dark:divide-slate-800 border-t border-slate-50 dark:border-slate-800 pt-6">
-                        {stats.categoryData.sort((a, b) => b.value - a.value).map((cat, idx) => (
+                        {stats.categoryData.map((cat, idx) => (
                           <div key={cat.name} className="flex items-center justify-between py-3 px-2">
                             <div className="flex items-center gap-3"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} /><span className="text-sm font-black text-slate-700 dark:text-slate-300">{cat.name}</span></div>
                             <div className="flex items-baseline gap-3"><span className="text-sm font-black text-slate-900 dark:text-white">{fmt(cat.value, trip?.base_currency || 'TWD', trip?.precision_config)}</span><span className="text-[10px] text-slate-400 font-bold w-10 text-right">{((cat.value / stats.grandBase.total) * 100).toFixed(1)}%</span></div>
