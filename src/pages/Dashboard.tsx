@@ -591,9 +591,15 @@ const Dashboard: React.FC = () => {
                               </div>
                               <div className="h-3 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
                               <span className="text-[9px] sm:text-xs text-slate-500 font-bold truncate">
-                                <span className="text-emerald-600">{Object.keys(exp.payer_data).join(', ')}</span>
+                                <span className="text-emerald-600">
+                                  {Object.entries(exp.payer_data).filter(([_, val]) => val !== 0).map(([name]) => name).join(', ')}
+                                </span>
                                 {exp.is_settlement ? ' ➡️ ' : ' 付 '}
-                                <span className="text-blue-600">{exp.is_settlement ? Object.keys(exp.split_data).join(', ') : ''}</span>
+                                <span className="text-blue-600">
+                                  {exp.is_settlement 
+                                    ? Object.entries(exp.split_data).filter(([_, val]) => val !== 0).map(([name]) => name).join(', ') 
+                                    : ''}
+                                </span>
                               </span>
                             </div>
                           </div>
@@ -677,7 +683,9 @@ const Dashboard: React.FC = () => {
                           <span className="text-sm sm:text-lg font-black text-slate-900 dark:text-white">總額: {fmt(data.totalOwed, trip?.base_currency || 'TWD', trip?.precision_config)} {trip?.base_currency}</span>
                         </div>
                         <div className="grid grid-cols-1 gap-3">
-                          {Object.entries(data.categories).map(([cat, val]) => (
+                          {Object.entries(data.categories)
+                            .filter(([_, val]) => val !== 0)
+                            .map(([cat, val]) => (
                             <div key={cat} className="flex items-center justify-between text-xs sm:text-base font-black text-slate-700 dark:text-slate-300">
                               <span>{cat}</span>
                               <div className="flex gap-4"><span>{fmt(val, trip?.base_currency || 'TWD', trip?.precision_config)}</span><span className="text-[10px] text-slate-400 w-12 text-right">({((val / data.totalOwed) * 100).toFixed(0)}%)</span></div>
