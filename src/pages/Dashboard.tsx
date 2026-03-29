@@ -62,6 +62,7 @@ const Dashboard: React.FC = () => {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [isUserSelectorOpen, setIsUserSelectorOpen] = useState(false);
+  const [isWelcomeSelectorOpen, setIsWelcomeSelectorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
@@ -112,7 +113,11 @@ const Dashboard: React.FC = () => {
     setLoading(true);
     await Promise.all([fetchTripData(), fetchExpenses(), fetchDeletedExpenses()]);
     const savedUser = localStorage.getItem(`me_${id}`);
-    if (savedUser) setCurrentUser(savedUser);
+    if (savedUser) {
+      setCurrentUser(savedUser);
+    } else {
+      setIsWelcomeSelectorOpen(true);
+    }
     setLoading(false);
   };
 
@@ -189,6 +194,7 @@ const Dashboard: React.FC = () => {
     setCurrentUser(name);
     localStorage.setItem(`me_${id}`, name);
     setIsUserSelectorOpen(false);
+    setIsWelcomeSelectorOpen(false);
   };
 
   const filteredExpenses = useMemo(() => {
@@ -572,10 +578,17 @@ const Dashboard: React.FC = () => {
                               {exp.description}
                             </h4>
                             <div className="flex items-center gap-2 mt-1">
-                              <span className={`text-sm sm:text-lg font-black ${exp.is_settlement ? 'text-emerald-600' : 'text-slate-900 dark:text-white'}`}>
-                                <span className="text-[8px] sm:text-xs mr-0.5 opacity-50 font-bold">{exp.currency}</span>
-                                {fmt(exp.amount, exp.currency, trip?.precision_config)}
-                              </span>
+                              <div className="flex flex-col">
+                                <span className={`text-sm sm:text-lg font-black ${exp.is_settlement ? 'text-emerald-600' : 'text-slate-900 dark:text-white'}`}>
+                                  <span className="text-[8px] sm:text-xs mr-0.5 opacity-50 font-bold">{exp.currency}</span>
+                                  {fmt(exp.amount, exp.currency, trip?.precision_config)}
+                                </span>
+                                {currentUser && exp.split_data[currentUser] !== undefined && !exp.is_settlement && (
+                                  <span className="text-[10px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">
+                                    {currentUser} 花費 {fmt(exp.split_data[currentUser], exp.currency, trip?.precision_config)}
+                                  </span>
+                                )}
+                              </div>
                               <div className="h-3 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
                               <span className="text-[9px] sm:text-xs text-slate-500 font-bold truncate">
                                 <span className="text-emerald-600">{Object.keys(exp.payer_data).join(', ')}</span>
@@ -745,7 +758,7 @@ const Dashboard: React.FC = () => {
       )}
 
       {/* Mobile Nav */}
-      <div className="md:hidden fixed bottom-6 left-6 right-6 z-40">
+      <div className="md:hidden fixed bottom-2 left-6 right-6 z-40">
         <div className="bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-2xl text-white rounded-[2.5rem] p-2 shadow-2xl flex justify-around items-center border border-white/10 ring-1 ring-black/20">
           <button onClick={() => setActiveTab('itinerary')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'itinerary' ? 'text-blue-400' : 'text-slate-500'} ${!showItineraryTab ? 'hidden' : ''}`}>
             <Map size={20} strokeWidth={activeTab === 'itinerary' ? 3 : 2} />
@@ -793,6 +806,43 @@ const Dashboard: React.FC = () => {
               <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
               <button onClick={handleDeleteExpense} className="flex-1 px-6 py-4 rounded-2xl bg-rose-500 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-600 transition-all flex items-center justify-center gap-2">確認刪除</button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Welcome Identity Selector Modal */}
+      {trip && (
+        <Modal 
+          isOpen={isWelcomeSelectorOpen} 
+          onClose={() => setIsWelcomeSelectorOpen(false)} 
+          title="👋 歡迎回來！"
+        >
+          <div className="py-4 space-y-6 text-center">
+            <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
+              <User size={32} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-slate-900 dark:text-white">請選擇您的身分</h3>
+              <p className="text-sm text-slate-500 font-bold leading-relaxed">
+                選定身分後，系統將為您高亮顯示<br/>個人的分帳與墊付資訊。
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {trip.members.map(member => (
+                <button
+                  key={member}
+                  onClick={() => handleSetCurrentUser(member)}
+                  className="px-4 py-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all group"
+                >
+                  <div className="text-base font-black text-slate-700 dark:text-slate-300 group-hover:text-blue-600 transition-colors">
+                    {member}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400 font-bold">
+              之後隨時可以從右上角選單更改。
+            </p>
           </div>
         </Modal>
       )}
