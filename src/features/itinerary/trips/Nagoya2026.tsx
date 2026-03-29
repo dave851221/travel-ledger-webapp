@@ -82,7 +82,14 @@ const Nagoya2026: React.FC = () => {
       color: '#0d6efd', weight: 4, opacity: 0.7, dashArray: '10, 10'
     }).addTo(leafletMap.current);
 
-    leafletMap.current.fitBounds(currentPolyline.current.getBounds(), { padding: [50, 50] });
+    // Optimized Auto-Zoom: Using flyToBounds for smoother transition
+    // Reduced padding from [50, 50] to [30, 30] to zoom in closer
+    // Added maxZoom: 13 to prevent being too close on short routes
+    leafletMap.current.flyToBounds(currentPolyline.current.getBounds(), { 
+      padding: [30, 30],
+      duration: 1.5,
+      maxZoom: 13 
+    });
 
     const isTrain = ['day1', 'day6', 'day7', 'day8'].includes(day);
     const icon = L.divIcon({
@@ -104,7 +111,7 @@ const Nagoya2026: React.FC = () => {
   return (
     <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-500 pb-10">
       {/* Map Section */}
-      <div ref={mapRef} className="w-full h-56 sm:h-96 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner z-0" />
+      <div ref={mapRef} className="w-full h-40 sm:h-96 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner z-0" />
 
       {/* Tabs */}
       <div className="flex overflow-x-auto pb-2 no-scrollbar gap-2">

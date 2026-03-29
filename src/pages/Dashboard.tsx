@@ -63,9 +63,20 @@ const Dashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [isUserSelectorOpen, setIsUserSelectorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
   const [previewAlbum, setPreviewAlbum] = useState<string[] | null>(null);
   const [currentPhotoIdx, setCurrentPhotoIdx] = useState(0);
+
+  // Toast State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 2500);
+  };
+
+  // Delete Confirmation State
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Settlement Confirmation State
   const [settleConfirm, setSettleConfirm] = useState<{ from: string, to: string, amount: number, cur: string } | null>(null);
@@ -145,13 +156,14 @@ const Dashboard: React.FC = () => {
     } catch (err) { console.error(err); }
   };
 
-  const handleDeleteExpense = async (expenseId: string) => {
-    if (!window.confirm('確定要將此紀錄移至垃圾桶嗎？')) return;
-    if (!supabase) return;
+  const handleDeleteExpense = async () => {
+    if (!deleteConfirmId || !supabase) return;
     try {
-      const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', expenseId);
+      const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', deleteConfirmId);
       if (error) throw error;
-    } catch (err: any) { alert('刪除失敗: ' + err.message); }
+      showToast('紀錄已移至垃圾桶');
+      setDeleteConfirmId(null);
+    } catch (err: any) { showToast('刪除失敗: ' + err.message, 'error'); }
   };
 
   const handleRestoreExpense = async (expenseId: string) => {
@@ -159,8 +171,8 @@ const Dashboard: React.FC = () => {
     try {
       const { error } = await supabase.from('expenses').update({ deleted_at: null }).eq('id', expenseId);
       if (error) throw error;
-      alert('紀錄已從垃圾桶還原！');
-    } catch (err: any) { alert('還原失敗: ' + err.message); }
+      showToast('紀錄已還原');
+    } catch (err: any) { showToast('還原失敗: ' + err.message, 'error'); }
   };
 
   const handleEditExpense = (exp: Expense) => {
@@ -180,13 +192,19 @@ const Dashboard: React.FC = () => {
   };
 
   const filteredExpenses = useMemo(() => {
-    if (!searchQuery.trim()) return expenses;
-    const q = searchQuery.toLowerCase();
-    return expenses.filter(e => 
-      e.description.toLowerCase().includes(q) || e.category.toLowerCase().includes(q) ||
-      Object.keys(e.payer_data).some(p => p.toLowerCase().includes(q))
-    );
-  }, [expenses, searchQuery]);
+    const q = searchQuery.toLowerCase().trim();
+    return expenses.filter(e => {
+      const matchesSearch = !q || (
+        e.description.toLowerCase().includes(q) || 
+        e.category.toLowerCase().includes(q) ||
+        Object.keys(e.payer_data).some(p => p.toLowerCase().includes(q))
+      );
+      
+      const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(e.category);
+      
+      return matchesSearch && matchesCategory;
+    });
+  }, [expenses, searchQuery, selectedCategories]);
 
   const stats = useMemo(() => {
     const byCurrency: Record<string, { total: number, paidByMe: number, owedByMe: number }> = {};
@@ -240,6 +258,65 @@ const Dashboard: React.FC = () => {
       .sort((a, b) => b.value - a.value);
     return { byCurrency, grandBase, categoryData, memberDetails, balances };
   }, [expenses, trip, currentUser]);
+
+  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
+
+  const groupedExpenses = useMemo(() => {
+    const groups: Record<string, { expenses: Expense[], totals: Record<string, number> }> = {};
+    const chineseDays = ['(日)', '(一)', '(二)', '(三)', '(四)', '(五)', '(六)'];
+
+    filteredExpenses.forEach(exp => {
+      if (!groups[exp.date]) {
+        groups[exp.date] = { expenses: [], totals: {} };
+      }
+      groups[exp.date].expenses.push(exp);
+      
+      // Only count non-settlement for daily totals
+      if (!exp.is_settlement) {
+        groups[exp.date].totals[exp.currency] = (groups[exp.date].totals[exp.currency] || 0) + exp.amount;
+      }
+    });
+    
+    // Sort dates descending
+    const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+    return sortedDates.map(date => {
+      const d = new Date(date);
+      const dayName = chineseDays[d.getDay()];
+      return { 
+        date, 
+        displayDate: `${date} ${dayName}`,
+        ...groups[date] 
+      };
+    });
+  }, [filteredExpenses]);
+
+  const toggleCategory = (cat: string) => {
+    setSelectedCategories(prev => 
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const toggleDate = (date: string) => {
+    setExpandedDates(prev => ({
+      ...prev,
+      [date]: prev[date] === false ? true : false
+    }));
+  };
+
+  const getCategoryColor = (category: string) => {
+    const lowerCat = category.toLowerCase();
+    if (lowerCat.includes('食') || lowerCat.includes('飯') || lowerCat.includes('餐')) return 'bg-orange-500 text-white';
+    if (lowerCat.includes('住') || lowerCat.includes('宿') || lowerCat.includes('店')) return 'bg-blue-500 text-white';
+    if (lowerCat.includes('行') || lowerCat.includes('車') || lowerCat.includes('交通')) return 'bg-emerald-500 text-white';
+    if (lowerCat.includes('樂') || lowerCat.includes('玩') || lowerCat.includes('門票')) return 'bg-purple-500 text-white';
+    if (lowerCat.includes('買') || lowerCat.includes('物') || lowerCat.includes('街')) return 'bg-rose-500 text-white';
+    if (lowerCat.includes('結清')) return 'bg-slate-700 text-white';
+    
+    // Default rotation for other categories
+    const hash = category.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const colors = ['bg-indigo-500', 'bg-cyan-500', 'bg-teal-500', 'bg-amber-500', 'bg-pink-500'];
+    return `${colors[hash % colors.length]} text-white`;
+  };
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
@@ -358,7 +435,7 @@ const Dashboard: React.FC = () => {
           <div className="bg-white dark:bg-slate-900 py-3 px-4 sm:px-6 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm flex items-center gap-3 sm:gap-4">
             <div className="bg-blue-50 dark:bg-blue-900/20 w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl flex items-center justify-center shrink-0"><Wallet className="text-blue-600 w-4 h-4 sm:w-6 sm:h-6" /></div>
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] sm:text-[10px] font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5">總支出 ({trip?.base_currency})</p>
+              <p className="text-[11px] sm:text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5">總支出 ({trip?.base_currency})</p>
               <p className="text-sm sm:text-xl font-black text-slate-900 dark:text-white leading-tight truncate">{fmt(stats.grandBase.total, trip?.base_currency, trip?.precision_config)}</p>
               <div className="flex flex-wrap gap-x-2 mt-0.5">
                 {Object.entries(stats.byCurrency).map(([cur, data]) => (<span key={cur} className="text-[8px] sm:text-[9px] font-black text-slate-800 dark:text-slate-400 whitespace-nowrap">{fmt(data.total, cur, trip?.precision_config)} <span className="opacity-60">{cur}</span></span>))}
@@ -370,7 +447,7 @@ const Dashboard: React.FC = () => {
           <div className="bg-white dark:bg-slate-900 py-3 px-4 sm:px-6 rounded-2xl sm:rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm flex items-center gap-3 sm:gap-4">
             <div className="bg-amber-50 dark:bg-amber-900/20 w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl flex items-center justify-center shrink-0"><Users className="text-amber-600 w-4 h-4 sm:w-6 sm:h-6" /></div>
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] sm:text-[10px] font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5">成員 ({trip?.members.length})</p>
+              <p className="text-[11px] sm:text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5">成員 ({trip?.members.length})</p>
               <div className="flex flex-wrap gap-1 mt-0.5">{trip?.members.map(m => (<span key={m} className={`px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-black uppercase ${m === currentUser ? 'bg-blue-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-300'}`}>{m}</span>))}</div>
             </div>
           </div>
@@ -379,7 +456,7 @@ const Dashboard: React.FC = () => {
           <div className={`py-3 px-4 sm:px-6 rounded-2xl sm:rounded-[2rem] border transition-all flex items-center gap-3 sm:gap-4 ${currentUser ? 'bg-emerald-50/30 border-emerald-100 dark:bg-emerald-900/10' : 'bg-white dark:bg-slate-900 shadow-sm'}`}>
             <div className={`w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl flex items-center justify-center shrink-0 ${currentUser ? 'bg-emerald-500 text-white' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600'}`}><ArrowUpRight className="w-4 h-4 sm:w-6 sm:h-6" /></div>
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] sm:text-[10px] font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5 truncate">{currentUser ? `${currentUser} 墊付` : '我墊付'}</p>
+              <p className="text-[11px] sm:text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5 truncate">{currentUser ? `${currentUser} 墊付` : '我墊付'}</p>
               <p className="text-sm sm:text-xl font-black text-slate-900 dark:text-white leading-tight truncate">{fmt(stats.grandBase.paidByMe, trip?.base_currency, trip?.precision_config)}</p>
               <div className="flex flex-wrap gap-x-2 mt-0.5">
                 {Object.entries(stats.byCurrency).map(([cur, data]) => (<span key={cur} className="text-[8px] sm:text-[9px] font-black text-emerald-700 dark:text-emerald-400 whitespace-nowrap">{fmt(data.paidByMe, cur, trip?.precision_config)} <span className="opacity-60">{cur}</span></span>))}
@@ -391,7 +468,7 @@ const Dashboard: React.FC = () => {
           <div className={`py-3 px-4 sm:px-6 rounded-2xl sm:rounded-[2rem] border transition-all flex items-center gap-3 sm:gap-4 ${currentUser ? 'bg-rose-50/30 border-rose-100 dark:bg-rose-900/10' : 'bg-white dark:bg-slate-900 shadow-sm'}`}>
             <div className={`w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-2xl flex items-center justify-center shrink-0 ${currentUser ? 'bg-rose-500 text-white' : 'bg-rose-50 text-rose-600'}`}><ArrowDownLeft className="w-4 h-4 sm:w-6 sm:h-6" /></div>
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] sm:text-[10px] font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5 truncate">{currentUser ? `${currentUser} 應付` : '我應付'}</p>
+              <p className="text-[11px] sm:text-xs font-black text-slate-900 dark:text-slate-300 uppercase tracking-widest mb-0.5 truncate">{currentUser ? `${currentUser} 應付` : '我應付'}</p>
               <p className="text-sm sm:text-xl font-black text-slate-900 dark:text-white leading-tight truncate">{fmt(stats.grandBase.owedByMe, trip?.base_currency, trip?.precision_config)}</p>
               <div className="flex flex-wrap gap-x-2 mt-0.5">
                 {Object.entries(stats.byCurrency).map(([cur, data]) => (<span key={cur} className="text-[8px] sm:text-[9px] font-black text-rose-700 dark:text-rose-400 whitespace-nowrap">{fmt(data.owedByMe, cur, trip?.precision_config)} <span className="opacity-60">{cur}</span></span>))}
@@ -413,26 +490,114 @@ const Dashboard: React.FC = () => {
                     </button>
                   )}
                 </div>
-                <div className="relative w-full">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input type="text" placeholder="搜尋描述、類別、成員..." className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm font-bold outline-none transition-all shadow-sm focus:ring-4 focus:ring-blue-500/5" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                <div className="space-y-3">
+                  <div className="relative w-full">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input type="text" placeholder="搜尋描述、類別、成員..." className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm font-bold outline-none transition-all shadow-sm focus:ring-4 focus:ring-blue-500/5" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                  </div>
+                  
+                  {/* Category Filters */}
+                  <div className="flex flex-wrap gap-2">
+                    {trip?.categories.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => toggleCategory(cat)}
+                        className={`px-3 py-1.5 rounded-xl text-[10px] sm:text-xs font-black transition-all border ${
+                          selectedCategories.includes(cat)
+                            ? `${getCategoryColor(cat)} border-transparent shadow-md shadow-blue-500/10`
+                            : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-100 dark:border-slate-800 hover:border-blue-400'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                    {selectedCategories.length > 0 && (
+                      <button 
+                        onClick={() => setSelectedCategories([])}
+                        className="px-3 py-1.5 rounded-xl text-[10px] sm:text-xs font-black bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-rose-600 transition-colors flex items-center gap-1"
+                      >
+                        <X size={12} /> 清除全部
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {deletedExpenses.length > 0 && (<button onClick={() => setActiveTab('recycle')} className="w-full flex items-center justify-center gap-2 py-2 bg-rose-50 dark:bg-rose-900/10 text-rose-600 dark:text-rose-400 text-[10px] sm:text-xs font-black rounded-xl border border-rose-100 dark:border-rose-900/30 hover:bg-rose-100 transition-all"><RotateCcw size={12} /><span>垃圾桶中有 {deletedExpenses.length} 筆可還原紀錄</span></button>)}
               
-              <div className="grid grid-cols-1 gap-4 md:gap-6">
-                {filteredExpenses.map(exp => (
-                  <div key={exp.id} className={`group p-4 sm:p-8 rounded-3xl border transition-all flex items-start gap-4 sm:gap-8 relative overflow-hidden ${exp.is_settlement ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-dashed border-emerald-300' : 'bg-white dark:bg-slate-900 border-slate-100 shadow-sm hover:shadow-xl'}`}>
-                    <div className={`w-16 h-16 sm:w-24 sm:h-24 bg-slate-50 dark:bg-slate-800 rounded-2xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={() => exp.photo_urls?.length && openAlbum(exp.photo_urls)}>
-                      {exp.photo_urls && exp.photo_urls.length > 0 ? (<><img src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${exp.photo_urls[0]}`} className="w-full h-full object-cover" alt="receipt" />{exp.photo_urls.length > 1 && <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-xs font-black text-white">+{exp.photo_urls.length}</div>}</>) : (<div className="bg-slate-50 dark:bg-slate-800/50 w-full h-full flex items-center justify-center text-slate-400">{exp.is_settlement ? <HandCoins size={32} /> : <Receipt size={32} />}</div>)}
+              <div className="space-y-4">
+                {groupedExpenses.map(({ date, displayDate, expenses: dayExpenses, totals }) => (
+                  <div key={date} className="space-y-2">
+                    {/* Date Header (Collapsible) */}
+                    <button 
+                      onClick={() => toggleDate(date)}
+                      className="w-full flex items-center justify-between p-3 sm:p-4 bg-slate-100/50 dark:bg-slate-800/30 rounded-2xl hover:bg-slate-200/50 transition-all group/date gap-2"
+                    >
+                      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+                        <div className={`transition-transform duration-300 shrink-0 ${expandedDates[date] === false ? '' : 'rotate-90'}`}>
+                          <ChevronRight size={18} className="text-slate-400" />
+                        </div>
+                        <span className="text-[13px] sm:text-lg font-black text-slate-900 dark:text-white whitespace-nowrap">{displayDate}</span>
+                        <span className="text-[9px] sm:text-xs font-bold text-slate-400 bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded-full border border-slate-100 dark:border-slate-700 shrink-0">{dayExpenses.length} 筆</span>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-0.5 sm:gap-2 flex-1 min-w-0">
+                        {Object.entries(totals).map(([cur, amt]) => (
+                          <span key={cur} className="text-[9px] sm:text-sm font-black text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-1 sm:px-3 py-1 rounded-xl border border-blue-100 dark:border-blue-900/30 whitespace-nowrap shrink-0">
+                            {fmt(amt, cur, trip?.precision_config)} <span className="text-[7px] sm:text-[8px] opacity-60 ml-0.5">{cur}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </button>
+
+                    {/* Expenses under this date */}
+                    <div className={`grid grid-cols-1 gap-2 overflow-hidden transition-all duration-300 ${expandedDates[date] === false ? 'max-h-0 opacity-0' : 'max-h-[5000px] opacity-100'}`}>
+                      {dayExpenses.map(exp => (
+                        <div key={exp.id} className={`group p-3 sm:p-5 rounded-2xl border transition-all flex items-center gap-4 sm:gap-6 relative overflow-hidden ${exp.is_settlement ? 'bg-emerald-50/20 dark:bg-emerald-900/5 border-dashed border-emerald-200' : 'bg-white dark:bg-slate-900 border-slate-100 shadow-sm hover:shadow-md'}`}>
+                          <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={() => exp.photo_urls?.length && openAlbum(exp.photo_urls)}>
+                            {exp.photo_urls && exp.photo_urls.length > 0 ? (
+                              <><img src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${exp.photo_urls[0]}`} className="w-full h-full object-cover" alt="receipt" />{exp.photo_urls.length > 1 && <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-[8px] font-black text-white">+{exp.photo_urls.length}</div>}</>
+                            ) : (
+                              <div className="bg-slate-50 dark:bg-slate-800/50 w-full h-full flex items-center justify-center text-slate-400">{exp.is_settlement ? <HandCoins size={20} /> : <Receipt size={20} />}</div>
+                            )}
+                          </div>
+                          
+                          <div className="flex-1 min-w-0 pr-10">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`px-1.5 py-0.5 text-[9px] sm:text-[10px] font-black rounded uppercase tracking-wider ${getCategoryColor(exp.category)}`}>
+                                {exp.category}
+                              </span>
+                              {exp.is_settlement && <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">SETTLEMENT</span>}
+                            </div>
+                            <h4 className={`text-xs sm:text-base font-black truncate ${exp.is_settlement ? 'text-emerald-700' : 'text-slate-900 dark:text-white'}`}>
+                              {exp.description}
+                            </h4>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-sm sm:text-lg font-black ${exp.is_settlement ? 'text-emerald-600' : 'text-slate-900 dark:text-white'}`}>
+                                <span className="text-[8px] sm:text-xs mr-0.5 opacity-50 font-bold">{exp.currency}</span>
+                                {fmt(exp.amount, exp.currency, trip?.precision_config)}
+                              </span>
+                              <div className="h-3 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+                              <span className="text-[9px] sm:text-xs text-slate-500 font-bold truncate">
+                                <span className="text-emerald-600">{Object.keys(exp.payer_data).join(', ')}</span>
+                                {exp.is_settlement ? ' ➡️ ' : ' 付 '}
+                                <span className="text-blue-600">{exp.is_settlement ? Object.keys(exp.split_data).join(', ') : ''}</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {!trip?.is_archived && !exp.is_settlement && (
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 sm:gap-1.5">
+                              <button onClick={() => handleEditExpense(exp)} className="p-1.5 sm:p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:bg-blue-600 hover:text-white transition-all shadow-sm">
+                                <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                              <button onClick={() => setDeleteConfirmId(exp.id)} className="p-1.5 sm:p-2 rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-400 dark:text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-sm">
+                                <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex-1 min-w-0 pr-12">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2"><span className={`px-2 py-1 text-[10px] sm:text-xs font-black rounded-lg uppercase tracking-widest ${exp.is_settlement ? 'bg-emerald-500 text-white' : 'bg-blue-600 text-white'}`}>{exp.category}</span><span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">{exp.date}</span></div>
-                      <h4 className={`text-sm sm:text-2xl font-black truncate mb-1 ${exp.is_settlement ? 'text-emerald-700' : 'text-slate-900 dark:text-white'}`}>{exp.description}</h4>
-                      <div className="flex items-baseline gap-2 mt-2"><span className={`text-base sm:text-3xl font-black ${exp.is_settlement ? 'text-emerald-600' : 'text-slate-900 dark:text-white'}`}><span className="text-[10px] sm:text-lg mr-0.5 opacity-50">{exp.currency}</span>{fmt(exp.amount, exp.currency, trip?.precision_config)}</span><span className="text-[10px] sm:text-sm text-slate-700 dark:text-slate-300 font-black ml-2">由 <span className="text-emerald-600 font-black">{Object.keys(exp.payer_data).join(', ')}</span> {exp.is_settlement ? '結清給' : '支付'} <span className="font-black text-blue-600">{exp.is_settlement ? Object.keys(exp.split_data).join(', ') : ''}</span></span></div>
-                    </div>
-                    {!trip?.is_archived && !exp.is_settlement && (<div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-3"><button onClick={() => handleDeleteExpense(exp.id)} className="p-3 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-sm"><Trash2 size={18} /></button><button onClick={() => handleEditExpense(exp)} className="p-3 rounded-xl bg-slate-50 text-slate-500 hover:bg-blue-600 hover:text-white transition-all shadow-sm"><Edit2 size={18} /></button></div>)}
                   </div>
                 ))}
               </div>
@@ -580,18 +745,67 @@ const Dashboard: React.FC = () => {
       )}
 
       {/* Mobile Nav */}
-      <div className="md:hidden fixed bottom-2 left-4 right-4 z-40">
-        <div className="bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-xl text-white rounded-[2.5rem] p-2 shadow-2xl flex justify-around items-center border border-white/10">
-          <button onClick={() => setActiveTab('itinerary')} className={`flex flex-col items-center p-2.5 flex-1 transition-all ${activeTab === 'itinerary' ? 'text-blue-400 bg-white/5 rounded-xl' : 'opacity-40'} ${!showItineraryTab ? 'hidden' : ''}`}><Map size={18} /><span className="text-[7px] font-bold mt-1 uppercase tracking-tighter">行程</span></button>
-          <button onClick={() => setActiveTab('ledger')} className={`flex flex-col items-center p-2.5 flex-1 transition-all ${activeTab === 'ledger' ? 'text-blue-400 bg-white/5 rounded-xl' : 'opacity-40'}`}><Receipt size={18} /><span className="text-[7px] font-bold mt-1 uppercase tracking-tighter">支出</span></button>
-          {!trip?.is_archived && (<button onClick={() => setIsExpenseModalOpen(true)} className="flex flex-col items-center p-2 flex-1 text-white"><div className="bg-blue-600 p-2.5 rounded-lg shadow-lg"><Plus size={18} strokeWidth={3} /></div></button>)}
-          <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center p-2.5 flex-1 transition-all ${activeTab === 'stats' ? 'text-blue-400 bg-white/5 rounded-xl' : 'opacity-40'}`}><PieChartIcon size={18} /><span className="text-[7px] font-bold mt-1 uppercase tracking-tighter">統計</span></button>
-          <button onClick={() => setActiveTab('settlement')} className={`flex flex-col items-center p-2.5 flex-1 transition-all ${activeTab === 'settlement' ? 'text-blue-400 bg-white/5 rounded-xl' : 'opacity-40'}`}><HandCoins size={18} /><span className="text-[7px] font-bold mt-1 uppercase tracking-tighter">結清</span></button>
+      <div className="md:hidden fixed bottom-6 left-6 right-6 z-40">
+        <div className="bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-2xl text-white rounded-[2.5rem] p-2 shadow-2xl flex justify-around items-center border border-white/10 ring-1 ring-black/20">
+          <button onClick={() => setActiveTab('itinerary')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'itinerary' ? 'text-blue-400' : 'text-slate-500'} ${!showItineraryTab ? 'hidden' : ''}`}>
+            <Map size={20} strokeWidth={activeTab === 'itinerary' ? 3 : 2} />
+            <span className="text-[9px] font-black mt-1 uppercase tracking-wider">行程</span>
+          </button>
+          
+          <button onClick={() => setActiveTab('ledger')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'ledger' ? 'text-blue-400' : 'text-slate-500'}`}>
+            <Receipt size={20} strokeWidth={activeTab === 'ledger' ? 3 : 2} />
+            <span className="text-[9px] font-black mt-1 uppercase tracking-wider">支出</span>
+          </button>
+          
+          {!trip?.is_archived && (
+            <button onClick={() => setIsExpenseModalOpen(true)} className="flex flex-col items-center px-1 flex-1">
+              <div className="bg-blue-600 w-12 h-12 rounded-2xl shadow-lg shadow-blue-600/40 flex items-center justify-center active:scale-90 transition-transform">
+                <Plus size={28} strokeWidth={3} className="text-white" />
+              </div>
+            </button>
+          )}
+          
+          <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'stats' ? 'text-blue-400' : 'text-slate-500'}`}>
+            <PieChartIcon size={20} strokeWidth={activeTab === 'stats' ? 3 : 2} />
+            <span className="text-[9px] font-black mt-1 uppercase tracking-wider">統計</span>
+          </button>
+          
+          <button onClick={() => setActiveTab('settlement')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'settlement' ? 'text-blue-400' : 'text-slate-500'}`}>
+            <HandCoins size={20} strokeWidth={activeTab === 'settlement' ? 3 : 2} />
+            <span className="text-[9px] font-black mt-1 uppercase tracking-wider">結清</span>
+          </button>
         </div>
       </div>
 
-      {trip && (<ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => fetchExpenses()} editData={editingExpense} />)}
-      {trip && (<SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} trip={trip} onSuccess={() => fetchTripData()} expenses={expenses} />)}
+      {trip && (<ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { fetchExpenses(); }} showToast={showToast} editData={editingExpense} />)}
+      {trip && (<SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} trip={trip} onSuccess={() => { fetchTripData(); showToast('設定已更新'); }} expenses={expenses} />)}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <Modal isOpen={!!deleteConfirmId} onClose={() => setDeleteConfirmId(null)} title="確認刪除紀錄">
+          <div className="py-6 text-center space-y-6">
+            <div className="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto text-rose-600 shadow-inner"><Trash2 size={40} /></div>
+            <div className="space-y-2">
+              <p className="text-xl font-black text-slate-900 dark:text-white">確定要刪除這筆紀錄嗎？</p>
+              <p className="text-sm text-slate-500 font-bold">刪除後紀錄會移至垃圾桶，24 小時內可還原。</p>
+            </div>
+            <div className="flex gap-4 pt-4">
+              <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
+              <button onClick={handleDeleteExpense} className="flex-1 px-6 py-4 rounded-2xl bg-rose-500 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-600 transition-all flex items-center justify-center gap-2">確認刪除</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className={`px-6 py-3 rounded-full shadow-2xl border flex items-center gap-3 font-black text-sm ${toast.type === 'success' ? 'bg-emerald-500 text-white border-emerald-400' : 'bg-rose-500 text-white border-rose-400'}`}>
+            {toast.type === 'success' ? <Check size={18} strokeWidth={3} /> : <AlertTriangle size={18} strokeWidth={3} />}
+            {toast.message}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

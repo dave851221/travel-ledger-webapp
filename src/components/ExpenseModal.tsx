@@ -27,10 +27,11 @@ interface ExpenseModalProps {
   trip: Trip;
   currentUser: string | null;
   onSuccess: () => void;
+  showToast: (msg: string, type?: 'success' | 'error') => void;
   editData?: Expense | null; // Pass this to enter Edit Mode
 }
 
-const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, currentUser, onSuccess, editData }) => {
+const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, currentUser, onSuccess, showToast, editData }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -238,12 +239,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         // --- Update ---
         const { error: uErr } = await supabase.from('expenses').update(record).eq('id', editData.id);
         if (uErr) throw uErr;
-        alert('支出紀錄已更新！');
+        showToast('支出紀錄已更新！');
       } else {
         // --- Insert ---
         const { error: iErr } = await supabase.from('expenses').insert([record]);
         if (iErr) throw iErr;
-        alert('支出紀錄已新增！');
+        showToast('支出紀錄已新增！');
       }
 
       onSuccess();
