@@ -79,6 +79,13 @@ const Dashboard: React.FC = () => {
   // Delete Confirmation State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // Manual Settlement State
+  const [isManualSettleOpen, setIsManualSettleOpen] = useState(false);
+  const [manualSettleFrom, setManualSettleFrom] = useState('');
+  const [manualSettleTo, setManualSettleTo] = useState('');
+  const [manualSettleAmount, setManualSettleAmount] = useState('');
+  const [manualSettleCurrency, setManualSettleCurrency] = useState('');
+
   // Settlement Confirmation State
   const [settleConfirm, setSettleConfirm] = useState<{ from: string, to: string, amount: number, cur: string } | null>(null);
 
@@ -195,6 +202,26 @@ const Dashboard: React.FC = () => {
     localStorage.setItem(`me_${id}`, name);
     setIsUserSelectorOpen(false);
     setIsWelcomeSelectorOpen(false);
+  };
+
+  const handleOpenManualSettle = () => {
+    if (!trip) return;
+    setManualSettleFrom(trip.members[0]);
+    setManualSettleTo(trip.members[1] || trip.members[0]);
+    setManualSettleAmount('');
+    setManualSettleCurrency(trip.base_currency);
+    setIsManualSettleOpen(true);
+  };
+
+  const submitManualSettle = () => {
+    if (!manualSettleFrom || !manualSettleTo || !manualSettleAmount) return;
+    setSettleConfirm({
+      from: manualSettleFrom,
+      to: manualSettleTo,
+      amount: parseFloat(manualSettleAmount),
+      cur: manualSettleCurrency
+    });
+    setIsManualSettleOpen(false);
   };
 
   const filteredExpenses = useMemo(() => {
@@ -585,7 +612,7 @@ const Dashboard: React.FC = () => {
                                 </span>
                                 {currentUser && exp.split_data[currentUser] !== undefined && !exp.is_settlement && (
                                   <span className="text-[10px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">
-                                    {currentUser} 花費 {fmt(exp.split_data[currentUser], exp.currency, trip?.precision_config)}
+                                    {currentUser} 花費 {fmt(exp.split_data[currentUser], exp.currency, trip?.precision_config)} {exp.currency}
                                   </span>
                                 )}
                               </div>
@@ -706,13 +733,28 @@ const Dashboard: React.FC = () => {
               <section className="bg-white dark:bg-slate-900 p-3 sm:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm">
                 <div className="flex items-center justify-between mb-10 px-2 sm:px-0">
                   <h3 className="text-base sm:text-2xl font-black text-slate-900 dark:text-white flex items-center gap-4"><Scale className="text-blue-600" size={28} />結算試算建議</h3>
-                  <p className="hidden sm:block text-xs text-slate-500 font-black uppercase tracking-widest">點擊圖示一鍵新增結清紀錄</p>
+                  <div className="flex items-center gap-4">
+                    {!trip?.is_archived && (
+                      <button 
+                        onClick={handleOpenManualSettle}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-xl transition-all shadow-lg active:scale-95 text-xs"
+                      >
+                        <Plus size={14} strokeWidth={3} />
+                        <span>手動新增結清</span>
+                      </button>
+                    )}
+                    <p className="hidden sm:block text-xs text-slate-500 font-black uppercase tracking-widest">點擊圖示一鍵新增結清紀錄</p>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-10">
                   {Object.entries(stats.balances).map(([cur, memberBalances]) => {
                     const settlements = calculateSettlements(memberBalances);
                     if (settlements.length === 0) return null;
+                    
                     const isGrand = cur === 'GRAND_TOTAL';
+                    const currencyCount = Object.keys(stats.balances).filter(k => k !== 'GRAND_TOTAL').length;
+                    if (!isGrand && currencyCount === 1) return null;
+
                     const curName = isGrand ? trip?.base_currency : cur;
                     return (
                       <div key={cur} className={`p-4 sm:p-10 rounded-[2rem] border-2 transition-all ${isGrand ? 'bg-blue-50/50 dark:bg-blue-900/10 border-blue-200' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100'}`}>
@@ -760,6 +802,65 @@ const Dashboard: React.FC = () => {
             <div className="flex gap-4 pt-4">
               <button onClick={() => setSettleConfirm(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
               <button onClick={confirmSettleUp} className="flex-1 px-6 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2"><Check size={20} strokeWidth={3} />確認結清</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Manual Settlement Modal */}
+      {isManualSettleOpen && trip && (
+        <Modal isOpen={isManualSettleOpen} onClose={() => setIsManualSettleOpen(false)} title="手動新增結清紀錄">
+          <div className="py-4 space-y-6">
+            <div className="grid grid-cols-1 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">付款人 (誰給錢)</label>
+                <select 
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 font-bold text-sm outline-none border-2 border-transparent focus:border-blue-600"
+                  value={manualSettleFrom}
+                  onChange={e => setManualSettleFrom(e.target.value)}
+                >
+                  {trip.members.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="flex justify-center -my-2 relative z-10">
+                <div className="bg-white dark:bg-slate-800 p-1 rounded-full border border-slate-100 dark:border-slate-700">
+                  <ChevronRight className="text-slate-300 rotate-90" size={20} />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">收款人 (誰收錢)</label>
+                <select 
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 font-bold text-sm outline-none border-2 border-transparent focus:border-blue-600"
+                  value={manualSettleTo}
+                  onChange={e => setManualSettleTo(e.target.value)}
+                >
+                  {trip.members.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">金額與幣別</label>
+                <div className="flex gap-2">
+                  <select 
+                    className="w-24 px-3 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 font-bold text-xs outline-none appearance-none"
+                    value={manualSettleCurrency}
+                    onChange={e => setManualSettleCurrency(e.target.value)}
+                  >
+                    {Object.keys(trip.rates).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input 
+                    type="number" 
+                    step="any"
+                    placeholder="0.00"
+                    className="flex-1 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-black text-lg"
+                    value={manualSettleAmount}
+                    onChange={e => setManualSettleAmount(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-4 pt-4">
+              <button onClick={() => setIsManualSettleOpen(false)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
+              <button onClick={submitManualSettle} className="flex-1 px-6 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all">下一步</button>
             </div>
           </div>
         </Modal>
