@@ -21,7 +21,7 @@ const Nagoya2026: React.FC = () => {
     'day4': [[36.1408, 137.2519], [36.1436, 137.2603], [36.2566, 136.9066], [36.5714, 136.6554], [36.5780, 136.6482]],
     'day5': [[36.5780, 136.6482], [36.5621, 136.6627], [36.3533, 136.3113], [35.8398, 136.1947], [35.4984, 136.2163], [35.0844, 136.7027], [35.1709, 136.8815]],
     'day6': [[35.1709, 136.8815], [35.1705, 136.9032], [35.1264, 136.9089], [35.1709, 136.8815]],
-    'day7': [[35.1709, 136.8815], [35.1599, 136.9007], [35.1709, 136.8815]],
+    'day7': [[35.1709, 136.8815], [34.9667, 136.6167], [34.4914, 136.7095], [34.4550, 136.7258], [34.4914, 136.7095], [34.9667, 136.6167], [35.1709, 136.8815]],
     'day8': [[35.1709, 136.8815], [34.8584, 136.8053]]
   };
 
@@ -83,8 +83,6 @@ const Nagoya2026: React.FC = () => {
     }).addTo(leafletMap.current);
 
     // Optimized Auto-Zoom: Using flyToBounds for smoother transition
-    // Reduced padding from [50, 50] to [30, 30] to zoom in closer
-    // Added maxZoom: 13 to prevent being too close on short routes
     leafletMap.current.flyToBounds(currentPolyline.current.getBounds(), { 
       padding: [30, 30],
       duration: 1.5,
@@ -133,7 +131,7 @@ const Nagoya2026: React.FC = () => {
               {day === 'day4' && '4/7 金澤'}
               {day === 'day5' && '4/8 移動'}
               {day === 'day6' && '4/9 市區'}
-              {day === 'day7' && '4/10 購物'}
+              {day === 'day7' && '4/10 伊勢'}
               {day === 'day8' && '4/11 返程'}
             </span>
           </button>
@@ -308,7 +306,7 @@ const Day3Content = () => (
             <li>飛驒牛壽司 (<a href="https://maps.app.goo.gl/Pxs3mnfucH5NoBHz6" target="_blank" className="text-blue-600 hover:underline">こって牛</a> 或是 <a href="https://maps.app.goo.gl/SFeJ2CYpKiKi9BXz6" target="_blank" className="text-blue-600 hover:underline">坂口屋</a>)</li>
             <li>飛驒牛串燒、五平餅 (米上面塗甜醬油去烤)</li>
             <li>夢幻雪國布丁(<a href="https://maps.app.goo.gl/3yFxhskWw8PftWbc6" target="_blank" className="text-blue-600 hover:underline">高山布丁亭</a>，限量)</li>
-            <li>清酒扭蛋機 ([舩坂酒造店](https://maps.app.goo.gl/NgNuV7z1F63JgaXY8))</li>
+            <li>清酒扭蛋機 (<a href="https://maps.app.goo.gl/NgNuV7z1F63JgaXY8" target="_blank" className="text-blue-600 hover:underline">舩坂酒造店</a>)</li>
           </ul>
         </li>
       </ul>
@@ -506,13 +504,53 @@ const Day6Content = () => (
 const Day7Content = () => (
   <div className="space-y-4">
     <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-0 text-center p-2 sm:p-3 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold mb-4">
-      2026/04/10 (五) - 名古屋市區自由行
+      2026/04/10 (五) - 伊勢神宮參拜
     </div>
     <ItineraryCard icon="🍳">
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">06:30 ~ 09:30 早餐 - 可享用飯店自助餐</h6>
     </ItineraryCard>
-    <ItineraryCard icon="🛍️">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">行程TBD</h6>
+    <ItineraryCard icon="🚆">
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">前往伊勢神宮(<a href="https://www.ticket.kintetsu.co.jp/vs/en/T/TZZ/TZZ10.do?op=tDisplayVisitorMenu" target="_blank" className="text-blue-600 hover:underline">電子票卷查詢</a>)</h6>
+      <ul className="text-slate-500 text-xs sm:text-xs space-y-2 pl-4">
+        <li>搭乘島風號(Shimakaze)
+          <ul className="list-circle pl-4 mt-1 space-y-1">
+            <li className="text-red-500 font-bold">注意: 僅購買特急卷，當下需另行購買乘車券</li>
+            <li>10:25~11:40 近鐵名古屋站 到 伊勢市站</li>
+            <li>座位: 5車5A, 6A & 2車5A, 6A</li>
+          </ul>
+        </li>
+      </ul>
+    </ItineraryCard>
+    <ItineraryCard icon="⛩️">
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">伊勢外宮、內宮</h6>
+      <ul className="text-slate-500 text-xs sm:text-xs space-y-2 pl-4">
+        <li className="text-emerald-600 font-bold">記得要吃赤福(紅豆泥裹麻糬)</li>
+        <li>11:50 ~ 12:30 伊勢外宮參拜</li>
+        <li>12:50 ~ 14:00 坐計程車到伊勢內宮</li>
+        <li><strong>14:00 ~ 15:50 托福橫丁 & 厄除町 美食行程</strong>
+          <ul className="list-circle pl-4 mt-1 space-y-1">
+            <li>這兩條街道就在內宮出口處</li>
+            <li>赤福 (Akafuku) 本店、伊勢烏龍麵 (Ise Udon)、手捏壽司 (Tekone-zushi)、松阪牛串燒/可樂餅</li>
+          </ul>
+        </li>
+        <li>15:50 ~ 16:10 返回伊勢市站
+          <ul className="list-circle pl-4 mt-1">
+            <li className="text-red-500 font-bold">由於回程島風號不等人，建議 15:50 前就在內宮計程車站搭車回「伊勢市站」，避免公車塞車風險</li>
+          </ul>
+        </li>
+      </ul>
+    </ItineraryCard>
+    <ItineraryCard icon="🚆">
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">回程名古屋(<a href="https://www.ticket.kintetsu.co.jp/vs/en/T/TZZ/TZZ10.do?op=tDisplayVisitorMenu" target="_blank" className="text-blue-600 hover:underline">電子票卷查詢</a>)</h6>
+      <ul className="text-slate-500 text-xs sm:text-xs space-y-2 pl-4">
+        <li>搭乘島風號(Shimakaze)
+          <ul className="list-circle pl-4 mt-1 space-y-1">
+            <li className="text-red-500 font-bold">注意: 僅購買特急卷，當下需另行購買乘車券</li>
+            <li className="bg-amber-100 dark:bg-amber-900/30 px-1 font-black">16:24~17:44 伊勢市站 到 近鐵名古屋站 (要注意時間，車票時間固定)</li>
+            <li>座位: 5車4B, 4C, 6B, 6C</li>
+          </ul>
+        </li>
+      </ul>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">續住<a href="https://maps.app.goo.gl/z1fYhM3hFzkaPTk57" target="_blank" className="text-blue-600 hover:underline">Comfort Hotel Nagoya Shinkansenguchi</a></h6>
