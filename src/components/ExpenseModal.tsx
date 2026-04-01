@@ -153,8 +153,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     });
   }, [numAmount, splitActive, splitLocked, adjustmentMember, runDistribution]);
 
-  const payerSum = useMemo(() => Object.values(payerData).reduce((a, b) => a + (Number(b) || 0), 0), [payerData]);
-  const splitSum = useMemo(() => Object.values(splitData).reduce((a, b) => a + (Number(b) || 0), 0), [splitData]);
+  const payerSum = useMemo(() => Object.values(payerData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [payerData]);
+  const splitSum = useMemo(() => Object.values(splitData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [splitData]);
 
   const isPayerValid = Math.abs(payerSum - numAmount) < 0.01;
   const isSplitValid = Math.abs(splitSum - numAmount) < 0.01;

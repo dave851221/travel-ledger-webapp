@@ -87,8 +87,18 @@ src/
 - **財務精度:** **絕對禁止使用 JS 原生浮點數運算金額**。所有加減乘除必須透過 `src/utils/finance.ts` 中的工具函數或 `decimal.js` 處理。
 - **樣式規範:** 使用 Tailwind CSS (v4) 的 Utility classes。需確保全站原生支援 **Dark Mode** 且具備流暢的響應式設計 (Mobile-First)。
 
-## 6. 建置與執行 (Commands)
+### 6. 建置與執行 (Commands)
 - **開發模式:** `npm run dev` (Vite 伺服器)
 - **生產建置:** `npm run build` (包含型別檢查與代碼壓縮)
 - **程式碼檢查:** `npm run lint` (ESLint 規則檢查)
 - **預覽建置:** `npm run preview` (測試生產包效能與 PWA 行為)
+
+### 7. AI 運作經驗紀錄 (AI Operational Lessons)
+#### Windows 環境指令執行 (CLI Workaround)
+- **問題描述:** 在 Windows PowerShell 環境下，執行 `.ps1` 腳本（如預設的 `npm`, `npx`, `tsc`）常會因執行原則 (Execution Policy) 導致 `UnauthorizedAccess` 錯誤。
+- **解決方案:** AI 在執行 shell 指令時，若遇到權限錯誤，應優先嘗試在指令後加上 `.cmd` 後綴（例如：使用 `npm.cmd run build` 取代 `npm run build`，或 `npx.cmd tsc` 取代 `npx tsc`）。這能繞過 PowerShell 的腳本限制。
+
+#### 財務計算型別安全 (Financial Type Safety)
+- **問題描述:** 使用 `reduce` 計算 `Record<string, number | string>` 類型數據時，TypeScript 易誤推斷累加器型別。
+- **解決方案:** 務必顯式指定 `reduce<number>((a, b) => a + (Number(b) || 0), 0)`，確保結果始終為數字，避免後續算術運算（如 `Math.abs`）報錯。
+

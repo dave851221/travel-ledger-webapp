@@ -127,7 +127,16 @@ travel-ledger-webapp/
 1. 實作資料匯出模組。
 2. 根據需求插入各別旅程的行程網頁。
 
-## 7. 未來願景與擴充性 (Future Vision)
+## 8. LINE Bot 自然語言記帳整合 (LINE Bot Integration) - [進行中]
+- **目標**: 讓使用者透過 LINE 訊息，以自然語言快速記帳，資料自動同步至 Supabase。
+- **技術架構**: LINE Messaging API + Supabase Edge Functions + **Gemini Pro API**。
+- **核心功能**:
+    - **身分綁定**: 使用 `linebot_id` (6 位隨機碼) 與 `access_code` 進行安全驗證。
+    - **AI 解析**: 透過 Gemini Pro 將語音或文字解析為結構化的 JSON 支出資料。
+    - **預覽確認**: 透過 LINE Flex Message 顯示解析結果，點擊「確認」後存入資料庫。
+    - **精度同步**: 確保 Edge Function 運算邏輯與網頁版 `decimal.js` 完全一致。
+
+## 9. 未來願景與擴充性 (Future Vision)
 - **公費管理 (Kitty Pot):** 支援虛擬「公費」成員扣款與餘額追蹤。
-- **AI 智慧記帳 & OCR:** 整合 AI 進行自然語言輸入與收據辨識自動填表。
-- **多平台整合:** Line Bot / Telegram Bot 快速記帳介面。
+- **收據 OCR:** 整合 AI 進行收據照片辨識與自動填表。
+- **Telegram Bot:** 擴充至其他社群平台記帳介面。

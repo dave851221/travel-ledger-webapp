@@ -38,9 +38,17 @@
 - [x] 實作離線偵測提示與版本更新 UI
 - [x] 通過生產環境打包驗證 (`npm run build`)
 
+## 🤖 第八階段：LINE Bot 自然語言記帳 🚧 進行中
+- [x] **SQL 基礎建設**: 建立 `line_trip_id_mapping` 與 `line_user_states` (透過 `SQL_LINE_UPDATE.sql`)
+- [x] **網頁端顯示**: 在旅程設定頁面顯示與複製 `linebot_id`
+- [ ] **環境準備**: 申請 LINE Messaging API 與 Gemini Pro API Key
+- [ ] **雙重驗證綁定**: 實作 Edge Function 處理 ID 綁定與密碼驗證
+- [ ] **AI 解析核心**: 整合 Gemini Pro 進行自然語言解析
+- [ ] **互動優化**: 實作 Flex Message 預覽與確認存入功能
+
 ---
 
-# 🎉 專案開發達成！
+# 🎉 專案開發達成！ (Web 版全數完成)
 目前所有功能已根據計畫書與您的回饋完美實作。
 - [x] 高精度多人分帳 (Decimal.js)
 - [x] 即時匯率換算

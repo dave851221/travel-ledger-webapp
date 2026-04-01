@@ -58,3 +58,32 @@ ALTER TABLE line_user_states ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public read on mapping" ON line_trip_id_mapping FOR SELECT USING (true);
 CREATE POLICY "Allow public all on user_states" ON line_user_states FOR ALL USING (true) WITH CHECK (true);
+
+-- 8. 建立對話紀錄表 (用於提供 AI 上下文)
+CREATE TABLE IF NOT EXISTS line_chat_history (
+    id BIGSERIAL PRIMARY KEY,
+    line_user_id TEXT NOT NULL REFERENCES line_user_states(line_user_id) ON DELETE CASCADE,
+    role TEXT NOT NULL, -- 'user' 或 'model'
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 建立索引以提升查詢速度
+CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON line_chat_history(line_user_id);
+
+-- 9. 開啟 RLS 並設定權限
+ALTER TABLE line_chat_history ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public all on chat_history" ON line_chat_history FOR ALL USING (true) WITH CHECK (true);
+
+-- 10. 建立動作鎖定表，防止重複點擊按鈕
+CREATE TABLE IF NOT EXISTS line_processed_actions (
+    nonce TEXT PRIMARY KEY,
+    line_user_id TEXT NOT NULL REFERENCES line_user_states(line_user_id) ON DELETE CASCADE,
+    action_type TEXT NOT NULL, -- 'save' 或 'cancel'
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 設定 RLS
+ALTER TABLE line_processed_actions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all on processed_actions" ON line_processed_actions FOR ALL USING (true) WITH CHECK (true);
+

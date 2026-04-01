@@ -41,7 +41,7 @@
 ## 4. 實作階段 (Phased Implementation)
 
 ### 第一階段：資料庫與網頁顯示 (Database & Web UI) - [已完成]
-*   [x] **SQL 部署：**
+*   [x] **SQL 部署：** (已透過 `SQL_LINE_UPDATE.sql` 完成)
     *   建立 `line_trip_id_mapping` 與 `line_user_states`。
     *   撰寫 PostgreSQL Function 與 Trigger，確保建立新旅程時自動生成 `linebot_id`。
 *   [x] **網頁更新：**

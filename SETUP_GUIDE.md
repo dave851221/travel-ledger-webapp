@@ -68,5 +68,32 @@ npm run dev
 - `SQL_SETUP.sql` (資料庫結構)
 - `PROJECT_PLAN.md` & `TODO_LIST.md` (開發紀錄)
 
-## 5. 部署 (Deployment)
+## 5. LINE Bot 整合與部署 (Edge Functions)
+
+### A. Supabase CLI 初始化 (第一次架設時)
+若您的電腦尚未安裝或連結 Supabase，請執行以下步驟：
+1. **安裝 CLI**: `npm install supabase --save-dev`
+2. **登入帳號**: `npx supabase login` (會跳出瀏覽器要求授權)
+3. **連結專案**: `npx supabase link --project-ref [您的_PROJECT_ID]` (Project ID 可在專案設定的 General 中找到)
+
+### B. 環境變數設定 (Supabase Secrets)
+請在 Supabase Dashboard 的 Edge Functions 設定中加入以下 Secrets：
+- `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging API 的 Access Token。
+- `LINE_CHANNEL_SECRET`: LINE Basic Settings 中的 Channel Secret。
+- `GEMINI_API_KEY`: Google AI Studio 申請的 Gemini Pro API Key。
+
+### C. 部署 Edge Function
+在本地開發端執行：
+```bash
+# 部署 Webhook (務必加上 --no-verify-jwt 參數)
+npx supabase functions deploy line-webhook --no-verify-jwt
+```
+
+### D. 設定 Webhook URL
+1. 到 LINE Developers 控制台，進入您的 Channel -> Messaging API。
+2. 在 **Webhook URL** 填入部署後的網址：`https://[PROJECT_ID].supabase.co/functions/v1/line-webhook`。
+3. 開啟 **Use webhook** 選項。
+4. 點擊 **Verify** 測試連通性。
+
+## 6. 部署 (Deployment - WebApp)
 專案已配置好支援 GitHub Pages 的生產環境打包。詳細步驟請參考 Git 教學說明。
