@@ -14,7 +14,10 @@ import {
   ChevronRight,
   Archive,
   Download,
-  ShieldCheck
+  ShieldCheck,
+  Copy,
+  Check,
+  MessageCircle
 } from 'lucide-react';
 import Modal from './Modal';
 import { supabase } from '../api/supabase';
@@ -42,6 +45,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [isArchived, setIsArchived] = useState(trip.is_archived);
   const [members, setMembers] = useState<string[]>([...trip.members]);
   const [categories, setCategories] = useState<string[]>([...trip.categories]);
+  const [lineBotId, setLineBotId] = useState<string>('');
+  const [copied, setCopied] = useState(false);
   
   // Track renames: { oldName: newName }
   const [memberRenames, setMemberRenames] = useState<Record<string, string>>({});
@@ -71,8 +76,60 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       const pStr: Record<string, string> = {};
       Object.keys(trip.precision_config).forEach(k => pStr[k] = trip.precision_config[k].toString());
       setPrecisionStr(pStr);
+
+      // Fetch LineBot ID
+      const fetchLineBotId = async () => {
+        if (!supabase) return;
+        const { data, error: fetchErr } = await supabase
+          .from('line_trip_id_mapping')
+          .select('linebot_id')
+          .eq('trip_id', trip.id)
+          .single();
+        
+        if (!fetchErr && data) {
+          setLineBotId(data.linebot_id);
+        }
+      };
+      fetchLineBotId();
     }
   }, [isOpen, trip]);
+
+  const handleCopy = () => {
+    if (lineBotId) {
+      // Primary method: modern clipboard API
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(lineBotId).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }).catch(() => {
+          // Fallback if it fails
+          fallbackCopy(lineBotId);
+        });
+      } else {
+        // Fallback for non-secure contexts or older browsers
+        fallbackCopy(lineBotId);
+      }
+    }
+  };
+
+  const fallbackCopy = (text: string) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Fallback copy failed', err);
+    }
+    document.body.removeChild(textArea);
+  };
 
   const handleMemberRename = (index: number, newName: string) => {
     const oldName = trip.members[index];
@@ -251,6 +308,30 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <input type="text" maxLength={6} className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={accessCode} onChange={e => setAccessCode(e.target.value)} />
                 </div>
               </div>
+
+              {/* LineBot Binding Section */}
+              <div className="p-4 sm:p-6 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
+                <div className="flex items-center gap-3 sm:gap-4 mb-3 sm:mb-5">
+                  <div className="p-2 sm:p-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-lg sm:rounded-xl"><MessageCircle size={20} /></div>
+                  <div>
+                    <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">LINE Bot 快速記帳</p>
+                    <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">使用專屬 ID 綁定 LINE 機器人</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 sm:gap-3">
+                  <div className="flex-1 px-4 py-3 sm:py-4 bg-white dark:bg-slate-800 border-2 border-emerald-100 dark:border-emerald-900/30 rounded-xl sm:rounded-2xl font-black text-center text-xl sm:text-2xl tracking-[0.2em] text-emerald-600">
+                    {lineBotId || '------'}
+                  </div>
+                  <button 
+                    onClick={handleCopy}
+                    className="px-4 sm:px-6 flex items-center justify-center bg-white dark:bg-slate-800 border-2 border-emerald-100 dark:border-emerald-900/30 hover:border-emerald-600 text-emerald-600 rounded-xl sm:rounded-2xl transition-all active:scale-95"
+                  >
+                    {copied ? <Check size={20} className="text-emerald-500" /> : <Copy size={20} />}
+                  </button>
+                </div>
+                <p className="mt-3 text-[9px] sm:text-xs text-slate-400 font-medium leading-relaxed">在 LINE 中輸入 <b>ID:{lineBotId}</b> 即可開始智慧記帳。</p>
+              </div>
+
               <div className="pt-4 sm:pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4 sm:space-y-6">
                 <div className="flex items-center justify-between p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
                   <div className="flex items-center gap-3 sm:gap-4">

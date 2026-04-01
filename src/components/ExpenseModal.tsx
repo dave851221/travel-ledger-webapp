@@ -43,12 +43,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [category, setCategory] = useState(trip.categories[0] || '其他');
   
   // Payer Control
-  const [payerData, setPayerData] = useState<Record<string, number>>({});
+  const [payerData, setPayerData] = useState<Record<string, number | string>>({});
   const [payerActive, setPayerActive] = useState<Set<string>>(new Set());
   const [payerLocked, setPayerLocked] = useState<Set<string>>(new Set());
   
   // Split Control
-  const [splitData, setSplitData] = useState<Record<string, number>>({});
+  const [splitData, setSplitData] = useState<Record<string, number | string>>({});
   const [splitActive, setSplitActive] = useState<Set<string>>(new Set(trip.members));
   const [splitLocked, setSplitLocked] = useState<Set<string>>(new Set());
   const [adjustmentMember, setAdjustmentMember] = useState<string | null>(null);
@@ -116,13 +116,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     total: number, 
     active: Set<string>, 
     locked: Set<string>, 
-    currentData: Record<string, number>,
+    currentData: Record<string, number | string>,
     adjMember: string | null
   ) => {
     const activeList = Array.from(active);
     const lockedMap: Record<string, number> = {};
     locked.forEach(m => {
-      if (active.has(m)) lockedMap[m] = currentData[m] || 0;
+      if (active.has(m)) lockedMap[m] = Number(currentData[m]) || 0;
     });
     return calculateDistribution(total, activeList, lockedMap, adjMember, precision);
   }, [precision]);
@@ -131,18 +131,30 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   useEffect(() => {
     if (payerLocked.size === payerActive.size && payerLocked.size > 0) return;
     const newData = runDistribution(numAmount, payerActive, payerLocked, payerData, null);
-    setPayerData(prev => ({ ...prev, ...newData }));
+    setPayerData(prev => {
+      const next = { ...prev };
+      Object.keys(newData).forEach(m => {
+        if (!payerLocked.has(m)) next[m] = newData[m];
+      });
+      return next;
+    });
   }, [numAmount, payerActive, payerLocked, runDistribution]);
 
   // Auto-recalculate Splitters
   useEffect(() => {
     if (splitLocked.size === splitActive.size && splitLocked.size > 0) return;
     const newData = runDistribution(numAmount, splitActive, splitLocked, splitData, adjustmentMember);
-    setSplitData(prev => ({ ...prev, ...newData }));
+    setSplitData(prev => {
+      const next = { ...prev };
+      Object.keys(newData).forEach(m => {
+        if (!splitLocked.has(m)) next[m] = newData[m];
+      });
+      return next;
+    });
   }, [numAmount, splitActive, splitLocked, adjustmentMember, runDistribution]);
 
-  const payerSum = useMemo(() => Object.values(payerData).reduce((a, b) => a + b, 0), [payerData]);
-  const splitSum = useMemo(() => Object.values(splitData).reduce((a, b) => a + b, 0), [splitData]);
+  const payerSum = useMemo(() => Object.values(payerData).reduce((a, b) => a + (Number(b) || 0), 0), [payerData]);
+  const splitSum = useMemo(() => Object.values(splitData).reduce((a, b) => a + (Number(b) || 0), 0), [splitData]);
 
   const isPayerValid = Math.abs(payerSum - numAmount) < 0.01;
   const isSplitValid = Math.abs(splitSum - numAmount) < 0.01;
@@ -175,13 +187,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   };
 
   const handleManualEdit = (member: string, val: string, type: 'payer' | 'split') => {
-    const n = parseFloat(val) || 0;
+    // Store as string to allow typing freely (empty string, decimals)
     if (type === 'payer') {
-      setPayerData(prev => ({ ...prev, [member]: n }));
+      setPayerData(prev => ({ ...prev, [member]: val }));
       setPayerLocked(prev => new Set(prev).add(member));
       if (!payerActive.has(member)) setPayerActive(prev => new Set(prev).add(member));
     } else {
-      setSplitData(prev => ({ ...prev, [member]: n }));
+      setSplitData(prev => ({ ...prev, [member]: val }));
       setSplitLocked(prev => new Set(prev).add(member));
       if (!splitActive.has(member)) setSplitActive(prev => new Set(prev).add(member));
     }
@@ -350,7 +362,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                     <span className={`text-xs font-bold ${splitActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <input type="number" step="any" disabled={!splitActive.has(member)} className={`w-24 text-right bg-transparent font-black text-sm outline-none ${splitLocked.has(member) ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 rounded' : 'text-slate-400'}`} value={splitData[member] ?? 0} onChange={e => handleManualEdit(member, e.target.value, 'split')} />
+                    <input type="number" step="any" disabled={!splitActive.has(member)} placeholder="0" className={`w-24 text-right bg-transparent font-black text-sm outline-none ${splitLocked.has(member) ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 rounded' : 'text-slate-400'}`} value={splitData[member] ?? ''} onChange={e => handleManualEdit(member, e.target.value, 'split')} />
                     <button type="button" onClick={() => setSplitLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!splitActive.has(member)} className={`p-1 transition-colors ${splitLocked.has(member) ? 'text-blue-500' : 'text-slate-200'}`}>
                       {splitLocked.has(member) ? <Lock size={12} /> : <Unlock size={12} />}
                     </button>
