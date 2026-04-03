@@ -78,6 +78,8 @@ const Dashboard: React.FC = () => {
 
   // Delete Confirmation State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [permDeleteConfirmId, setPermDeleteConfirmId] = useState<string | null>(null);
+  const [isEmptyTrashConfirmOpen, setIsEmptyTrashConfirmOpen] = useState(false);
 
   // Manual Settlement State
   const [isManualSettleOpen, setIsManualSettleOpen] = useState(false);
@@ -185,6 +187,71 @@ const Dashboard: React.FC = () => {
       if (error) throw error;
       showToast('紀錄已還原');
     } catch (err: any) { showToast('還原失敗: ' + err.message, 'error'); }
+  };
+
+  const handlePermanentlyDeleteExpense = async () => {
+    if (!permDeleteConfirmId || !supabase) return;
+    try {
+      // 1. 先取得該筆紀錄的資料以獲取照片路徑
+      const { data: exp, error: fetchError } = await supabase
+        .from('expenses')
+        .select('photo_urls')
+        .eq('id', permDeleteConfirmId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+
+      // 2. 如果有照片，先從 Storage 刪除
+      if (exp?.photo_urls && exp.photo_urls.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from('travel-images')
+          .remove(exp.photo_urls);
+        if (storageError) console.error('照片刪除失敗:', storageError);
+      }
+
+      // 3. 刪除資料庫紀錄
+      const { error } = await supabase.from('expenses').delete().eq('id', permDeleteConfirmId);
+      if (error) throw error;
+      
+      showToast('紀錄已永久刪除');
+      setPermDeleteConfirmId(null);
+      fetchDeletedExpenses();
+    } catch (err: any) { showToast('刪除失敗: ' + err.message, 'error'); }
+  };
+
+  const handleEmptyTrash = async () => {
+    if (!supabase || !id) return;
+    try {
+      // 1. 先取得垃圾桶內所有紀錄的照片清單
+      const { data: exps, error: fetchError } = await supabase
+        .from('expenses')
+        .select('photo_urls')
+        .eq('trip_id', id)
+        .not('deleted_at', 'is', null);
+      
+      if (fetchError) throw fetchError;
+
+      // 2. 整理出所有照片路徑
+      const allPhotoUrls = (exps || [])
+        .flatMap((exp: { photo_urls: string[] | null }) => exp.photo_urls || [])
+        .filter((url: string) => !!url);
+
+      // 3. 如果有照片，整批從 Storage 刪除
+      if (allPhotoUrls.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from('travel-images')
+          .remove(allPhotoUrls);
+        if (storageError) console.error('整批照片刪除失敗:', storageError);
+      }
+
+      // 4. 刪除資料庫紀錄
+      const { error } = await supabase.from('expenses').delete().eq('trip_id', id).not('deleted_at', 'is', null);
+      if (error) throw error;
+
+      showToast('垃圾桶已完全清空');
+      setIsEmptyTrashConfirmOpen(false);
+      fetchDeletedExpenses();
+    } catch (err: any) { showToast('清空失敗: ' + err.message, 'error'); }
   };
 
   const handleEditExpense = (exp: Expense) => {
@@ -652,8 +719,57 @@ const Dashboard: React.FC = () => {
 
           {activeTab === 'recycle' && (
             <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between"><h2 className="text-xl sm:text-3xl font-black text-rose-600 tracking-tight flex items-center gap-4"><RotateCcw size={24} />垃圾桶</h2><div className="flex items-center gap-2 bg-rose-50 px-4 py-2 rounded-xl text-rose-600 text-xs sm:text-sm font-black"><AlertTriangle size={18} /><span>僅顯示 24 小時內刪除的紀錄</span></div></div>
-              <div className="grid grid-cols-1 gap-4 md:gap-6">{deletedExpenses.map(exp => (<div key={exp.id} className="bg-white/60 p-4 sm:p-8 rounded-3xl border border-rose-100 flex items-center gap-4 sm:gap-8 relative grayscale"><div className="w-16 h-16 sm:w-24 sm:h-24 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 shrink-0"><Receipt size={32} /></div><div className="flex-1 min-w-0 pr-24"><h4 className="text-sm sm:text-xl font-black text-slate-500 line-through truncate">{exp.description}</h4><p className="text-xs text-slate-400 mt-2 font-bold">刪除於: {new Date(exp.deleted_at!).toLocaleString()}</p></div><button onClick={() => handleRestoreExpense(exp.id)} className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-6 py-3 rounded-2xl transition-all shadow-xl active:scale-95">還原</button></div>))}</div>
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h2 className="text-xl sm:text-3xl font-black text-rose-600 tracking-tight flex items-center gap-4"><RotateCcw size={24} />垃圾桶</h2>
+                <div className="flex items-center gap-2 sm:gap-4">
+                  <div className="hidden sm:flex items-center gap-2 bg-rose-50 dark:bg-rose-900/10 px-4 py-2 rounded-xl text-rose-600 dark:text-rose-400 text-xs font-black">
+                    <AlertTriangle size={18} />
+                    <span>僅顯示 24 小時內刪除的紀錄</span>
+                  </div>
+                  <button 
+                    onClick={() => setIsEmptyTrashConfirmOpen(true)}
+                    disabled={deletedExpenses.length === 0}
+                    className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-200 dark:disabled:bg-slate-800 text-white font-black px-4 py-2 sm:px-6 sm:py-3 rounded-xl transition-all shadow-lg shadow-rose-500/20 active:scale-95 text-xs sm:text-sm"
+                  >
+                    <Trash2 size={16} />
+                    <span>清空垃圾桶</span>
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:gap-6">
+                {deletedExpenses.map(exp => (
+                  <div key={exp.id} className="bg-white/60 dark:bg-slate-900/40 p-4 sm:p-8 rounded-3xl border border-rose-100 dark:border-rose-900/30 flex items-center gap-4 sm:gap-8 relative grayscale group hover:grayscale-0 transition-all">
+                    <div className="w-12 h-12 sm:w-24 sm:h-24 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-400 shrink-0">
+                      <Receipt size={32} />
+                    </div>
+                    <div className="flex-1 min-w-0 pr-16 sm:pr-40">
+                      <h4 className="text-sm sm:text-xl font-black text-slate-500 line-through truncate">{exp.description}</h4>
+                      <p className="text-[10px] sm:text-xs text-slate-400 mt-2 font-bold">刪除於: {new Date(exp.deleted_at!).toLocaleString()}</p>
+                    </div>
+                    <div className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 flex flex-col sm:flex-row gap-2">
+                      <button 
+                        onClick={() => handleRestoreExpense(exp.id)} 
+                        className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl transition-all shadow-xl active:scale-95 text-[10px] sm:text-sm"
+                      >
+                        <RotateCcw size={14} className="sm:w-4 sm:h-4" />
+                        <span>還原</span>
+                      </button>
+                      <button 
+                        onClick={() => setPermDeleteConfirmId(exp.id)} 
+                        className="flex items-center justify-center gap-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white font-black px-3 py-2 sm:px-4 sm:py-3 rounded-xl sm:rounded-2xl transition-all border border-rose-200 dark:border-rose-900/50 active:scale-95 text-[10px] sm:text-sm"
+                      >
+                        <Trash2 size={14} className="sm:w-4 sm:h-4" />
+                        <span className="hidden sm:inline">永久刪除</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {deletedExpenses.length === 0 && (
+                  <div className="py-20 text-center text-slate-400 font-black border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl">
+                    垃圾桶是空的
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -952,6 +1068,44 @@ const Dashboard: React.FC = () => {
             <p className="text-[10px] text-slate-400 font-bold">
               之後隨時可以從右上角選單更改。
             </p>
+          </div>
+        </Modal>
+      )}
+
+      {/* Permanent Delete Confirmation Modal */}
+      {permDeleteConfirmId && (
+        <Modal isOpen={!!permDeleteConfirmId} onClose={() => setPermDeleteConfirmId(null)} title="永久刪除紀錄">
+          <div className="py-6 text-center space-y-6">
+            <div className="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto text-rose-600 shadow-inner">
+              <AlertTriangle size={40} />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xl font-black text-slate-900 dark:text-white">確定要永久刪除嗎？</p>
+              <p className="text-sm text-rose-500 font-bold">此動作將無法復原，該筆支出將永久消失。</p>
+            </div>
+            <div className="flex gap-4 pt-4">
+              <button onClick={() => setPermDeleteConfirmId(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
+              <button onClick={handlePermanentlyDeleteExpense} className="flex-1 px-6 py-4 rounded-2xl bg-rose-600 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-700 transition-all">永久刪除</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Empty Trash Confirmation Modal */}
+      {isEmptyTrashConfirmOpen && (
+        <Modal isOpen={isEmptyTrashConfirmOpen} onClose={() => setIsEmptyTrashConfirmOpen(false)} title="清空垃圾桶">
+          <div className="py-6 text-center space-y-6">
+            <div className="w-20 h-20 bg-rose-600 rounded-full flex items-center justify-center mx-auto text-white shadow-xl shadow-rose-500/30">
+              <Trash2 size={40} />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xl font-black text-slate-900 dark:text-white">確定要清空垃圾桶嗎？</p>
+              <p className="text-sm text-rose-600 font-black px-4 py-2 bg-rose-50 dark:bg-rose-900/20 rounded-xl">警告：所有垃圾桶內的紀錄將會永久刪除且無法復原。</p>
+            </div>
+            <div className="flex gap-4 pt-4">
+              <button onClick={() => setIsEmptyTrashConfirmOpen(false)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
+              <button onClick={handleEmptyTrash} className="flex-1 px-6 py-4 rounded-2xl bg-rose-600 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-700 transition-all">確認清空</button>
+            </div>
           </div>
         </Modal>
       )}

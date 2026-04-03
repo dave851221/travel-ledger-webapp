@@ -1,142 +1,111 @@
-# 旅遊記帳與行程網站專案計畫 (Travel Ledger WebApp - 絕對完整累積版)
+# Travel Ledger WebApp - 專案全指南 (Integrated Project Plan)
 
-## 1. 專案目標
-打造一個極致精確、具備高度隱私、可自定義且支援即時協作的旅遊財務管理系統。支援從 UI 直接管理多個旅程，具備專業的「多人付款/多人分帳」、「公平餘數調整」、「誤刪防護」與「離線支援」功能。
+本文件整合了專案架構、開發進度、功能清單以及未來規劃，是本專案的單一事實來源 (Source of Truth)。
 
-## 2. 技術選型
-- **前端:** React (Vite) + TypeScript + Tailwind CSS (原生支援 Dark Mode)
-- **資料庫/後端:** Supabase (Auth, DB, Storage, **Real-time 即時同步**)
-- **財務運算:** **decimal.js** (確保小數點運算不失真，處理美金等非整數幣別)
-- **離線支援:** Vite PWA Plugin (離線查看與操作)
-- **工具庫:** 
-    - **Recharts** (現代化動態統計圖表)
-    - **browser-image-compression** (前端照片壓縮，節省流量與空間)
-    - **PapaParse** (精準 CSV 資料匯出)
-    - **Lucide React** (現代化圖示庫)
-- **部署:** GitHub Pages + GitHub Actions
+---
 
-## 3. 目錄結構
-```text
-travel-ledger-webapp/
-├── public/                # 靜態資源 (PWA Icons, Manifest)
-├── src/
-│   ├── api/               # Supabase API 客戶端與資料存取邏輯
-│   ├── components/        # 原子級 UI 元件 (Button, Input, Modal, Card)
-│   ├── context/           # TripContext: 儲存當前選定的旅程資訊與身分
-│   ├── features/          # 主要功能模組
-│   │   ├── ledger/        # 記帳、分帳運算、歷史紀錄
-│   │   ├── stats/         # 統計圖表、清算指南
-│   │   └── itinerary/     # 行程顯示 (預留插入點)
-│   ├── hooks/             # 自定義 React Hooks (useSplit, useExpenses)
-│   ├── layouts/           # 頁面佈局
-│   ├── pages/             │   │   ├── Home.tsx       # 旅程列表首頁 (入口點)
-│   │   ├── TripPortal.tsx # 密碼驗證頁面
-│   │   ├── Dashboard.tsx  # 特定旅程主分頁 (記帳 + 統計)
-│   │   └── TrashBin.tsx   # 垃圾桶 (24h 恢復區)
-│   ├── types/             # TypeScript 型別定義
-│   └── utils/             # 財務運算、格式化工具 (decimal.js logic)
-├── PROJECT_PLAN.md
-└── package.json
-```
+## 1. 專案總覽 (Project Overview)
+打造一個極致精確、可自定義且支援即時協作的旅遊財務管理系統。具備專業的「多人付款/多人分帳」、「公平餘數調整」、PWA 離線支援，以及透過 AI 實現的 LINE Bot 自然語言快速記帳功能。
 
-## 4. 資料架構規劃 (Supabase PostgreSQL)
-### Table: `trips` (旅程清單)
-- `id`: UUID (Primary Key)
-- `name`: string (旅程名稱)
-- `access_code`: string (4-6 位訪問密碼，簡單隱私防護)
-- `members`: string[] (參與人員清單)
-- `categories`: string[] (自定義分類清單)
-- `base_currency`: string (主幣別)
-- `rates`: JSON (該次旅程固定匯率設定)
-- `precision_config`: JSON (定義各幣別保留位數, e.g., `{"TWD": 0, "USD": 2}`)
-- `is_archived`: boolean (是否已封存，封存後僅供查看，不可新增、編輯、修改)
-- `created_at`: timestamp
+### 核心技術棧 (Core Tech Stack)
+- **前端:** React 19 (Vite) + TypeScript + Tailwind CSS (v4)
+- **路由:** React Router v7 (`HashRouter`)
+- **圖表與圖示:** Recharts, Lucide React
+- **後端/資料庫:** Supabase (Auth, DB, Storage, Real-time, Edge Functions)
+- **財務運算:** `decimal.js` (確保高精度運算，杜絕浮點數誤差)
+- **AI 引擎:** Gemini 1.5 Pro / Flash Lite (用於 LINE Bot 自然語言解析)
+- **離線與效能:** `vite-plugin-pwa`, `browser-image-compression`
 
-### Table: `expenses` (帳務紀錄)
-- `id`: UUID
-- `trip_id`: UUID (Foreign Key)
-- `date`: date
-- `category`: string
-- `description`: string
-- `amount`: numeric (總金額)
-- `currency`: string (消費幣別)
-- `payer_data`: JSON (多人付款明細, e.g., `{"UserA": 100, "UserB": 200}`)
-- `split_data`: JSON (多人分帳明細, e.g., `{"UserA": 150, "UserB": 150}`)
-- `adjustment_member`: string (手動指派承擔微小餘數的成員 ID)
-- `photo_urls`: string[] (Supabase Storage 連結)
-- `is_settlement`: boolean (是否為轉帳結清紀錄)
-- `deleted_at`: timestamp (誤刪恢復機制，24 小時內可還原)
+---
 
-## 5. 核心功能細節
-### A. 安全、隱私與多旅程管理
-- **首頁入口:** 列出所有已建立的旅程連結。
-- **訪問控制:** 進入特定旅程前需驗證 `access_code`。驗證成功後 Token 存入 `localStorage`。
-- **UI 配置:** 在網頁介面直接新增/編輯旅程（人員、匯率、分類）。
+## 2. 系統架構與功能清單 (Architecture & Features)
 
-### B. 高精確度分帳系統 (核心財務邏輯)
-- **公平餘數處理 (The "Last Cent" Logic):** 
-    - 使用 `decimal.js` 運算。當 `Σ(分帳) != 總額` 時，系統自動計算 0.01 差異。
-    - 預設分配給第一人，但 UI 允許點擊成員頭像，自由指派餘數由誰承擔。
-- **鎖定機制 (移植自 GAS):** 支援「百分比鎖定」與「金額鎖定」，系統自動平衡剩餘成員。
-- **貨幣優化:** 自動顯示符號 ($/¥/£)，並動態調整輸入框小數點位數。
+### 2.1 基礎設施與 PWA
+- **PWA 支援**: 包含安裝至主畫面提示、版本更新通知 Banner (`useRegisterSW`)，以及網路斷線時的離線狀態警告 (`navigator.onLine`)。
+- **Real-time 同步**: 使用 Supabase 頻道監聽 `expenses` 表的變更，確保多位使用者同時操作時，畫面能即時更新。
 
-### C. 個人化視圖與即時同步
-- **"Set as Me" 功能:** 使用者選定身分後，高亮顯示「我墊付」與「我應付」。
-- **Real-time Sync:** Supabase 即時連動，一人記帳全家同步。
+### 2.2 首頁與旅程管理 (`Home.tsx`, `TripPortal.tsx`)
+- **旅程建立**: 支援輸入名稱、成員清單 (逗號分隔)、主幣別 (TWD/JPY/USD/EUR) 及 4-6 位存取密碼 (`access_code`)。預設載入 6 大分類。
+- **旅程列表**: 顯示所有旅程卡片，包含匯率資訊、成員人數、建立日期與「已封存 (唯讀)」狀態標籤。
+- **門禁系統**: 進入特定旅程前需在 `TripPortal.tsx` 輸入 `access_code`。驗證成功後將狀態寫入 `localStorage` (`auth_{id}`)。
 
-### D. 媒體、搜尋與篩選
-- **照片壓縮:** 上傳前自動壓縮至 1MB 以下，支援多張照片並行上傳。
-- **進階搜尋:** 支援描述關鍵字、分類、成員的多重篩選。
+### 2.3 財務主控台 (`Dashboard.tsx`)
+主控台分為五大頁籤 (Tab)，支援響應式設計與行動版底部導覽列：
+1. **支出紀錄 (Ledger)**
+   - **搜尋與過濾**: 支援文字搜尋 (描述、類別、成員) 與類別標籤快速篩選。
+   - **分組顯示**: 依日期降冪分組，可摺疊收納，並顯示單日各幣別總花費。
+   - **明細卡片**: 顯示金額、分類、付款人與分攤人。特殊處理「結清紀錄」使其視覺上有所區別。支援點擊照片開啟全螢幕輪播預覽。
+2. **統計分析 (Stats)**
+   - **總覽數據**: 頂部卡片顯示「總支出」、「我墊付」、「我應付」，並自動以 `rates` 匯率折算回主幣別。
+   - **分類圓餅圖**: 使用 Recharts 顯示各分類佔比與總額。
+   - **個人消費明細表**: 詳細列出每位成員在各分類的應付總額。
+3. **結清指南 (Settlement)**
+   - **最佳化結算演算法**: 自動計算成員間的淨結餘 (Balances)，並推算出「最少轉帳次數」的結清路徑 (誰該給誰多少錢)。
+   - **一鍵結清與手動結清**: 支援點擊按鈕直接產生對應的「結清類型」支出紀錄，並扣除相應帳務。
+4. **垃圾桶 (Recycle Bin)**
+   - **軟刪除機制**: 刪除的支出會壓上 `deleted_at` 標記。垃圾桶僅顯示 24 小時內刪除的紀錄，並支援一鍵還原。
+5. **行程規劃 (Itinerary)**
+   - 動態載入專屬行程組件 (透過 `src/features/itinerary/registry.ts`)。
 
-### E. 離線操作、Dark Mode 與還原
-- **PWA 支援:** 離線查看與緩存。
-- **Dark Mode:** 全站支援深色模式，保護夜間視力。
-- **誤刪恢復:** 24 小時內可從垃圾桶一鍵還原。
+### 2.4 核心財務引擎 (`src/utils/finance.ts`)
+- **高精度運算**: 全面使用 `decimal.js` 進行金額的加減乘除，防止 JavaScript 原生浮點數誤差 (如 `0.1 + 0.2`)。
+- **公平餘數演算法 (`calculateDistribution`)**: 負責處理除不盡的金額。支援「鎖定金額 (Locked Data)」與「餘數承擔者 (Adjustment Member)」，確保分攤總和絕對等於總金額。
+- **CSV 匯出**: 提供將支出明細匯出為 CSV 檔案的功能。
 
-### F. 資料匯出與結清
-- **一鍵 CSV:** 導出該旅程專屬資料，嚴格隔離。
-- **清算指南:** 實作「最少次數清算演算法」並提供一鍵生成結清紀錄功能。
+### 2.5 LINE Bot 整合 (`SQL_LINE_UPDATE.sql`, `line-webhook/index.ts`)
+- **短碼綁定系統**: 自動為每個旅程產生 6 位數去混淆英數短碼 (`linebot_id`)。使用者輸入 `ID:短碼` 後，需再輸入旅程密碼進行雙重驗證綁定。
+- **使用者狀態機 (`line_user_states`)**: 記錄 LINE 使用者的當前旅程、綁定中旅程與個人化指令偏好 (`default_config`)。
+- **自然語言記帳 (Gemini AI)**: 
+  - 解析使用者的隨意輸入 (例如：「午餐 500 小明付的」)，並結合資料庫的歷史對話上下文 (`line_chat_history`) 產出標準 JSON 格式。
+  - 防呆機制：若旅程已封存，AI 會拒絕記帳指令。
+- **Flex Message 與防重複提交**: 
+  - 記帳前會回傳精美的 Flex Message 預覽卡片，要求使用者點擊確認。
+  - 使用 `nonce` 與 `line_processed_actions` 資料表，防止使用者連點按鈕造成重複記帳。
+  - **重要設計**: 邊緣運算 (Edge Function) 內部也實作了一套與 Webapp 相同的 `calculateDistribution` 演算法，在存入資料庫前進行最後的總額精確度校驗，若校驗失敗會拒絕寫入。
 
-### G. 行程網頁動態擴充機制 (Dynamic Itinerary)
-- **設計邏輯**: 考慮到各旅程行程內容差異極大，採「隨插即用」模式。
-- **實作方式**: 
-    - 於 `src/features/itinerary/registry.ts` 維護一組 ID 對應表。
-    - Dashboard 載入時偵測當前旅程 ID 是否有對應組件。
-    - 若有，則解鎖「行程」分頁，否則隱藏。
-- **開發位置**: 各別行程頁面放置於 `src/features/itinerary/trips/`。
+---
 
-### H. 封存與唯讀模式 (Archiving & Read-only)
-- **邏輯控制**: 當 `trips.is_archived` 為 `true` 時：
-    - Dashboard 隱藏「新增支出」、「編輯」、「刪除」以及「清算」按鈕。
-    - 顯示「唯讀模式」提示標籤。
-    - 確保歷史紀錄仍可供查詢與匯出。
+## 3. 開發進度 (Development Progress)
 
-## 6. 實施步驟
-### 第一階段：基礎建設、隱私與 Dark Mode (已完成)
-### 第二階段：Dashboard UI 佈局與分頁系統
-1. 實作 `itinerary/registry.ts` 機構。
-2. 建立 Dashboard 分頁系統 (支出、統計、結清、行程)。
-3. 實作基礎統計資訊 (總支出、我墊付、我應付)。
-### 第三階段：深度財務與分帳邏輯 (新增支出表單)
-1. 整合 `decimal.js` 建立分帳運算引擎（鎖定邏輯與餘數處理）。
-2. 實作高級記帳表單：支援多人付款、多人分攤與照片壓縮上傳。
-### 第四階段：統計、結算與垃圾桶
-1. 實作最少次數清算演算法與一鍵結清。
-2. 實作 Recharts 統計儀表板與 `deleted_at` 還原機制。
-### 第五階段：CSV 匯出與行程預留
-1. 實作資料匯出模組。
-2. 根據需求插入各別旅程的行程網頁。
+### ✅ 已完成項目 (Completed Milestones)
+- [x] **基礎建設**: Vite + Tailwind v4 + Supabase 整合。
+- [x] **隱私入口**: 首頁旅程列表與 `access_code` 密碼驗證。
+- [x] **身分系統**: 「設定我為...」功能，高亮與我相關的支出。
+- [x] **核心財務引擎**: 整合 `decimal.js`，實作多人付款/分帳與公平餘數指派。
+- [x] **媒體管理**: 支援多圖壓縮上傳與全螢幕相簿預覽。
+- [x] **誤刪恢復**: 24 小時緩衝期垃圾桶機制 (軟刪除)。
+- [x] **統計與結算**: Recharts 分類圓餅圖、最小轉帳次數演算法、手動/一鍵結清。
+- [x] **離線支援**: PWA 離線查看與版本更新通知。
+- [x] **LINE Bot 整合**: SQL 短碼產生、雙重驗證綁定、Gemini AI 解析、防重複提交與邊緣運算精度校驗。
+- [x] **收據 OCR 與照片同步**: 透過 LINE 上傳收據照片，AI 自動辨識品項/金額/日期，並同步壓縮上傳至 Supabase Storage，網頁版可即時查看。
 
-## 8. LINE Bot 自然語言記帳整合 (LINE Bot Integration) - [進行中]
-- **目標**: 讓使用者透過 LINE 訊息，以自然語言快速記帳，資料自動同步至 Supabase。
-- **技術架構**: LINE Messaging API + Supabase Edge Functions + **Gemini Pro API**。
-- **核心功能**:
-    - **身分綁定**: 使用 `linebot_id` (6 位隨機碼) 與 `access_code` 進行安全驗證。
-    - **AI 解析**: 透過 Gemini Pro 將語音或文字解析為結構化的 JSON 支出資料。
-    - **預覽確認**: 透過 LINE Flex Message 顯示解析結果，點擊「確認」後存入資料庫。
-    - **精度同步**: 確保 Edge Function 運算邏輯與網頁版 `decimal.js` 完全一致。
+### 🚧 進行中項目 (In Progress)
+- 目前核心功能皆已實作完成，進入維護與問題修復階段。
 
-## 9. 未來願景與擴充性 (Future Vision)
-- **公費管理 (Kitty Pot):** 支援虛擬「公費」成員扣款與餘額追蹤。
-- **收據 OCR:** 整合 AI 進行收據照片辨識與自動填表。
-- **Telegram Bot:** 擴充至其他社群平台記帳介面。
+---
+
+## 4. 待確認 / 修復的問題清單 (Review Items)
+*以下為原始碼分析過程中發現的潛在風險與問題，需逐一 Review 並決定是否修正。處理完成後方可移除。*
+
+1. **[安全性] 前端身分驗證薄弱 (Auth Bypass)**
+   - **問題**: `TripPortal.tsx` 僅將密碼驗證結果存在 `localStorage.getItem('auth_{id}')`。由於資料庫 RLS 設定為 `FOR ALL USING (true)`，任何知道 Trip ID 的人只要在瀏覽器開發者工具手動設定 localStorage，即可繞過密碼並具備讀寫權限。
+   - **建議**: 應考慮導入 Supabase JWT 或將存取碼驗證移至後端/Edge Function，配合 RLS 策略確保資料安全。
+2. **[穩定性] LINE Bot 依賴的 Gemini 模型版本**
+   - **問題**: `line-webhook/index.ts` 中固定呼叫 `gemini-3.1-flash-lite-preview`。該預覽版模型可能隨時被 Google 下架或更改名稱，導致 LINE Bot 突然失效。
+   - **建議**: 更改為穩定版模型 (如 `gemini-1.5-flash`) 或將模型名稱抽離為環境變數。
+3. **[邏輯] 垃圾桶 24 小時判斷依賴客戶端時間**
+   - **問題**: `Dashboard.tsx` 在過濾 `deleted_at` 時，使用 `new Date()` (客戶端時間) 與資料庫時間做相減。若使用者設備時間不準，可能導致提早清空或一直保留。
+   - **建議**: 考慮在 Supabase 建立一個 View 或在查詢時直接交由資料庫過濾 `deleted_at > NOW() - INTERVAL '24 HOURS'`。
+4. **[UX/體驗] 登出與身分快取**
+   - **問題**: 使用者身分 `currentUser` 存在 `localStorage`。如果清空快取，使用者將會失去其身分設定，需重新選擇。目前沒有大問題，但可考慮是否有更好的作法。
+
+---
+
+## 5. 未來規劃 (Future Works)
+
+### 短期目標 (Short-term)
+- 處理上述「待確認 / 修復的問題清單」。
+
+### 長期願景 (Long-term)
+- **行程規劃整合**: 將記帳與每日行程（景點導航）更緊密結合。
+- **多帳號整合**: 正式導入 Supabase Auth 使用者系統，取代單純的 `access_code`。

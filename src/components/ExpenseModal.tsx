@@ -91,9 +91,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         // --- New Mode ---
         setDescription('');
         setAmount('');
-        setCurrency(trip.base_currency);
+        setCurrency(trip.default_currency || trip.base_currency);
         setDate(new Date().toISOString().split('T')[0]);
-        setCategory(trip.categories[0] || '其他');
+        setCategory(trip.default_category || trip.categories[0] || '其他');
         setExistingPhotos([]);
         setPhotos([]);
         setPreviews([]);

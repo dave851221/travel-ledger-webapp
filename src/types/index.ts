@@ -5,6 +5,8 @@ export interface Trip {
   members: string[];
   categories: string[];
   base_currency: string;
+  default_currency?: string;
+  default_category?: string;
   rates: Record<string, number>;
   precision_config: Record<string, number>;
   is_archived: boolean;

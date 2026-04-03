@@ -39,3 +39,8 @@ ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public read/write on trips" ON trips FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write on expenses" ON expenses FOR ALL USING (true) WITH CHECK (true);
+
+-- 5. 增加預設幣別與預設類別欄位
+ALTER TABLE trips 
+ADD COLUMN IF NOT EXISTS default_currency TEXT,
+ADD COLUMN IF NOT EXISTS default_category TEXT;

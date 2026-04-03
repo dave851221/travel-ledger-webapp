@@ -54,6 +54,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [ratesStr, setRatesStr] = useState<Record<string, string>>({});
   const [precisionStr, setPrecisionStr] = useState<Record<string, string>>({});
   const [baseCurrency, setBaseCurrency] = useState(trip.base_currency);
+  const [defaultCurrency, setDefaultCurrency] = useState(trip.default_currency || trip.base_currency);
+  const [defaultCategory, setDefaultCategory] = useState(trip.default_category || trip.categories[0] || '');
 
   const [newMember, setNewMember] = useState('');
   const [newCategory, setNewCategory] = useState('');
@@ -67,6 +69,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setMembers([...trip.members]);
       setCategories([...trip.categories]);
       setBaseCurrency(trip.base_currency);
+      setDefaultCurrency(trip.default_currency || trip.base_currency);
+      setDefaultCategory(trip.default_category || trip.categories[0] || '');
       setMemberRenames({});
 
       const rStr: Record<string, string> = {};
@@ -96,18 +100,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
   const handleCopy = () => {
     if (lineBotId) {
+      const fullId = `ID:${lineBotId}`;
       // Primary method: modern clipboard API
       if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(lineBotId).then(() => {
+        navigator.clipboard.writeText(fullId).then(() => {
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }).catch(() => {
           // Fallback if it fails
-          fallbackCopy(lineBotId);
+          fallbackCopy(fullId);
         });
       } else {
         // Fallback for non-secure contexts or older browsers
-        fallbackCopy(lineBotId);
+        fallbackCopy(fullId);
       }
     }
   };
@@ -175,7 +180,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           categories,
           rates: finalRates,
           precision_config: finalPrecision,
-          base_currency: baseCurrency
+          base_currency: baseCurrency,
+          default_currency: defaultCurrency,
+          default_category: defaultCategory
         })
         .eq('id', trip.id);
 
@@ -311,16 +318,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
               {/* LineBot Binding Section */}
               <div className="p-4 sm:p-6 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
-                <div className="flex items-center gap-3 sm:gap-4 mb-3 sm:mb-5">
-                  <div className="p-2 sm:p-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-lg sm:rounded-xl"><MessageCircle size={20} /></div>
-                  <div>
-                    <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">LINE Bot 快速記帳</p>
-                    <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">使用專屬 ID 綁定 LINE 機器人</p>
+                <div className="flex items-center justify-between mb-3 sm:mb-5">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="p-2 sm:p-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-lg sm:rounded-xl"><MessageCircle size={20} /></div>
+                    <div>
+                      <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">LINE Bot 快速記帳</p>
+                      <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">使用專屬 ID 綁定 LINE 機器人</p>
+                    </div>
                   </div>
+                  <a 
+                    href="https://line.me/R/ti/p/%40457ctfgb" 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] sm:text-xs font-black rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                  >
+                    <Plus size={14} />
+                    <span>加入好友</span>
+                  </a>
                 </div>
                 <div className="flex gap-2 sm:gap-3">
                   <div className="flex-1 px-4 py-3 sm:py-4 bg-white dark:bg-slate-800 border-2 border-emerald-100 dark:border-emerald-900/30 rounded-xl sm:rounded-2xl font-black text-center text-xl sm:text-2xl tracking-[0.2em] text-emerald-600">
-                    {lineBotId || '------'}
+                    ID:{lineBotId || '------'}
                   </div>
                   <button 
                     onClick={handleCopy}
@@ -329,7 +347,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     {copied ? <Check size={20} className="text-emerald-500" /> : <Copy size={20} />}
                   </button>
                 </div>
-                <p className="mt-3 text-[9px] sm:text-xs text-slate-400 font-medium leading-relaxed">在 LINE 中輸入 <b>ID:{lineBotId}</b> 即可開始智慧記帳。</p>
+                <p className="mt-3 text-[9px] sm:text-xs text-slate-400 font-medium leading-relaxed">點擊上方按鈕加入好友後，貼上複製的 ID 即可完成綁定。</p>
               </div>
 
               <div className="pt-4 sm:pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4 sm:space-y-6">
@@ -381,11 +399,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
           {activeTab === 'finance' && (
             <div className="space-y-8 sm:space-y-10 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="p-4 sm:p-6 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/30">
-                <label className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">當前主幣別</label>
-                <div className="relative mt-1 sm:mt-2">
-                  <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-blue-700 dark:text-blue-300 outline-none cursor-pointer appearance-none" value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
-                  <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-blue-300 pointer-events-none" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <div className="p-4 sm:p-6 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/30">
+                  <label className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">當前主幣別</label>
+                  <div className="relative mt-1 sm:mt-2">
+                    <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-blue-700 dark:text-blue-300 outline-none cursor-pointer appearance-none" value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
+                    <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-blue-300 pointer-events-none" />
+                  </div>
+                </div>
+                <div className="p-4 sm:p-6 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
+                  <label className="text-[10px] sm:text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">預設記帳幣別</label>
+                  <div className="relative mt-1 sm:mt-2">
+                    <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-indigo-700 dark:text-indigo-300 outline-none cursor-pointer appearance-none" value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
+                    <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-indigo-300 pointer-events-none" />
+                  </div>
                 </div>
               </div>
               <div className="space-y-4 sm:space-y-6">
@@ -420,6 +447,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
           {activeTab === 'categories' && (
             <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="p-4 sm:p-6 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
+                <label className="text-[10px] sm:text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">預設記帳類別</label>
+                <div className="relative mt-1 sm:mt-2">
+                  <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-indigo-700 dark:text-indigo-300 outline-none cursor-pointer appearance-none" value={defaultCategory} onChange={e => setDefaultCategory(e.target.value)}>{categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select>
+                  <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-indigo-300 pointer-events-none" />
+                </div>
+              </div>
               <div className="flex gap-2 sm:gap-3">
                 <input type="text" placeholder="新增類別" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCategory()} />
                 <button onClick={addCategory} className="px-4 sm:px-5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg active:scale-95"><Plus size={20} strokeWidth={3} /></button>

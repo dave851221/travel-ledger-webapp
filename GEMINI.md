@@ -1,104 +1,60 @@
-# GEMINI.md - 旅遊記帳與行程網站專案背景 (Travel Ledger WebApp Context)
+# GEMINI.md - 旅遊記帳與行程網站專案索引與運作指南
 
-本文件為 AI 代理在處理 **Travel Ledger WebApp** 專案時提供必要的背景資訊、架構說明與開發指令。
+本文件為 AI 代理在處理 **Travel Ledger WebApp** 專案時的核心入口。它定義了專案的文件地圖、運作規範以及開發經驗累積。
 
-## 1. 專案總覽 (Project Overview)
-**Travel Ledger WebApp** 是一個極致精確、具備高度隱私的旅遊財務管理系統。支援從 UI 直接管理多個旅程，具備專業的「多人付款/多人分帳」、「公平餘數調整（處理小數點誤差）」以及透過 Supabase 實現的即時資料同步功能。其設計核心在於解決旅遊中複雜的交叉墊付與跨幣別結算問題。
+---
 
-### 核心技術棧 (Core Tech Stack)
-- **前端 (Frontend):** React 19 (Vite), TypeScript, Tailwind CSS (v4)
-- **狀態與路由:** React Router v7
-- **後端/資料庫 (Backend/Database):** Supabase (Postgres, Real-time, RLS 權限控制)
-- **檔案儲存 (Storage):** Supabase Storage (收據與旅遊圖片)
-- **財務運算 (Financial Logic):** `decimal.js` (確保高精度運算，杜絕浮點數誤差)
-- **離線與效能 (Offline & Performance):**
-    - `vite-plugin-pwa`: Service Worker 離線快取與 Manifest 支援 (支援「添加到主畫面」)
-    - `browser-image-compression`: 前端圖片壓縮，上傳至雲端前自動優化體積
-- **數據與視覺化 (Data & Visualization):**
-    - `recharts`: 分類消費圓餅圖、成員消費佔比統計圖表
-    - `papaparse`: CSV 資料導出（支援 utf-8 BOM 避免 Excel 亂碼）
-- **工具庫 (Utilities):**
-    - `lucide-react`: 現代化、向量化的系統圖示庫
+## 1. 核心開發規則 (Core Rules)
+- **【重大規則】功能完成同步**: 
+  每當一個功能模組開發完成且通過驗證，**必須**將該功能的實作重點、關鍵邏輯或注意事項更新回本文件的「3. 專案功能實作紀錄」中。這能確保後續 AI 在接手維護或擴充時，能精準掌握既有系統的特性，避免重複錯誤。
+- **【重大規則】問題與錯誤紀錄**:
+  在開發過程中若遇到任何非預期的 Bug、環境問題或邏輯死角，**必須**將問題現象、根本原因以及最終解決方案記錄於本文件的「4. AI 運作經驗紀錄」中。這旨在建立專案的「錯誤知識庫」，防止未來重蹈覆轍。
+- **【重大規則】視覺化提示優先**: 
+  嚴禁在 WebAPP 中直接調用原生 `alert()` 或 `confirm()`。必須使用專案已封裝的 `Modal` 組件（用於確認動作）或 `showToast`（用於通知訊息），以維持一致的高質感視覺風格。
+- **文件管理**: 
+  - 專案架構、進度與未來規劃統一維護於 `PROJECT_PLAN.md`。
+  - 完成任務後，應同步更新 `PROJECT_PLAN.md` 中的「已完成項目」。
 
-## 2. 核心功能機制 (Core Functional Mechanisms)
+---
 
-### 財務結算演算法
-- **公平餘數調整 (Fair Remainder Adjustment):** 當總額無法除盡時，系統會計算 0.01 的餘數差異，並允許手動或自動指派給特定成員 (`adjustment_member`) 負擔，確保 `Σ(分帳明細) == 總額`。
-- **最小轉帳次數演算法 (Minimal Settlement):** 結清時自動計算最優化的還款路徑（Debtors to Creditors），將總轉帳次數降至最低。
-- **冗餘顯示優化 (Redundancy Optimization):** 若旅程僅使用單一幣別，系統在結算頁面會自動隱藏「獨立幣別結算」區塊，僅顯示「總結算」，保持視覺簡潔。
-- **手動結清紀錄 (Manual Settlement):** 除了自動計算外，允許使用者手動新增結清動作（誰付給誰多少錢），直接修正餘額狀態。
+## 2. 文件索引 (Document Index)
+當你需要執行特定任務時，請先參閱以下對應文件：
 
-### UI 與互動設計
-- **身分選定系統 (Identity Selection):** 使用者可從「我」的身分選單中設定自己。選定後，系統會自動在支出列表高亮「與我相關」的應付金額，並在統計卡片顯示「我墊付」與「我應付」。
-- **動態行程註冊 (Dynamic Itinerary):** 透過 `src/features/itinerary/registry.ts` 偵測旅程 ID 並動態掛載對應的行程組件（如：`Nagoya2026`, `Osaka2025`）。
-- **誤刪恢復機制 (Soft Delete):** 支出記錄刪除後進入 24 小時緩衝期 (`deleted_at`)。使用者可從「垃圾桶」視圖一鍵還原。
-- **封存模式 (Archiving):** 當旅程標記為 `is_archived` 時，全站介面切換至唯讀狀態，隱藏所有編輯按鈕。
+| 文件名稱 | 用途描述 | 適用時機 |
+| :--- | :--- | :--- |
+| **`PROJECT_PLAN.md`** | **專案單一事實來源**。包含架構、功能清單、待修復問題與未來規劃。 | 了解系統架構、確認已實作細節與後續待辦。 |
+| **`README.md`** | **專案門面與 Git 手冊**。提供快速啟動與 Git 常用/救命指令。 | 執行 Git 操作、需要提交範例時。 |
+| **`SETUP_GUIDE.md`** | **環境架設指南**。包含 Supabase 設定、環境變數與 Edge Functions 部署。 | 設定新環境、部署 Webhook 時。 |
+| **`SQL_SETUP.sql`** | **核心資料庫腳本**。定義 WebApp 基礎表格與 RLS。 | 初始化或檢查資料庫結構時。 |
+| **`SQL_LINE_UPDATE.sql`**| **LINE Bot 資料庫擴充**。定義與 LINE 綁定相關的表格與邏輯。 | 處理 LINE Bot 資料對接時。 |
+| **`supabase/functions/line-webhook/linebot.md`** | **LINE Bot 專屬說明**。定義機器人行為、架構與自我介紹。 | 修改 LINE Bot 邏輯或對話設定時。 |
 
-## 3. 架構與目錄結構 (Architecture & Directory Structure)
-```text
-src/
-├── api/          # Supabase 客戶端配置與公用 API 封裝
-├── assets/       # 靜態資源 (Images, Logos)
-├── components/   # 原子級 UI 元件 (Button, Modal, Card, Toast)
-├── context/      # 全域狀態管理 (如 TripContext)
-├── features/     # 功能模組化開發
-│   ├── ledger/   # 記帳核心、分帳運算、精度校正邏輯
-│   ├── stats/    # Recharts 圓餅圖組件與數據格式化邏輯
-│   └── itinerary/# 行程顯示、動態組件註冊表 (Registry)
-├── hooks/        # 自定義 Hooks (useSplit, useExpenses, useLocalStorage)
-├── pages/        # 主要頁面路由組件 (Dashboard, Home, TripPortal)
-├── types/        # TypeScript 定義 (Trip, Expense, Category, Rate)
-└── utils/        # 工具函式
-    ├── finance.ts # decimal.js 封裝、金額格式化 (formatAmount)
-    └── storage.ts # 圖片壓縮與 Supabase 上傳邏輯
-```
+---
 
-## 4. 資料庫結構 (Database Schema)
+## 3. 專案功能實作紀錄 (Feature Log)
+*本區塊記錄各項功能的關鍵技術細節，由 AI 於功能完成時動態更新。*
 
-### `trips` 表格
-- `members`: `string[]` (成員名稱清單)
-- `rates`: `JSON` (匯率設定，e.g. `{"USD": 32.5, "JPY": 0.22}`)
-- `precision_config`: `JSON` (幣別小數點精度，e.g. `{"TWD": 0, "USD": 2}`)
-- `base_currency`: `string` (主結算幣別)
-- `access_code`: `string` (存取控制密碼)
+- **高精度分帳引擎**: 整合 `decimal.js` 並封裝於 `src/utils/finance.ts`。嚴禁使用原生浮點數。
+- **公平餘數調整**: 支援手動指派承擔成員 (`adjustment_member`)，確保 `Σ(分帳) == 總額`。WebAPP 與 LINE Webhook Edge Function 皆共用此演算法，並於寫入 DB 前做最後防線檢測。
+- **動態行程註冊**: 透過 `src/features/itinerary/registry.ts` 根據旅程 ID 掛載對應組件。
+- **誤刪恢復**: 使用 `deleted_at` 欄位實現 24 小時軟刪除機制。垃圾桶功能實作於 `Dashboard.tsx`。
+- **最佳結算演算法**: 實作於 `Dashboard.tsx` (`calculateSettlements`)，能計算出團隊成員間最小轉帳次數的結清路徑。
+- **即時同步**: 透過 Supabase Real-time channel 監聽 `expenses` 表的更動，並重新拉取資料更新畫面。
+- **LINE 雙重驗證與防呆**: 綁定流程結合 6 位數 `linebot_id` 與旅程 `access_code`。Webhook 實作了基於 `nonce` 的 `line_processed_actions` 表，防止使用者重複點擊按鈕寫入多筆相同帳務。
+- **PWA 支援**: 實作了離線橫幅警告與發現新版本自動提醒的邏輯。
 
-### `expenses` 表格
-- `payer_data`: `JSON` (付款明細，支援多人墊付，e.g. `{"UserA": 100, "UserB": 50}`)
-- `split_data`: `JSON` (分帳明細，e.g. `{"UserA": 75, "UserB": 75}`)
-- `is_settlement`: `boolean` (標記是否為結清紀錄，結清紀錄不計入消費統計)
-- `photo_urls`: `string[]` (儲存於 Supabase Storage 的路徑清單)
-- `deleted_at`: `timestamp` (用於 24h 復原機制)
+---
 
-詳細結構與 RLS 權限設定請參考 `SQL_SETUP.sql`。
+## 4. AI 運作經驗紀錄 (Operational Lessons)
+### Windows 環境
+- 執行 `npm`, `npx` 容易遇到權限錯誤，請使用 `.cmd` 後綴。
+### Supabase Edge Functions
+- 部署 Webhook 需加上 `--no-verify-jwt`。
+- 修改 Secrets 後需重新部署以生效。
+### 型別安全
+- `reduce` 累加金額時，必須顯式轉型並提供初始值：`reduce<number>((a, b) => a + (Number(b) || 0), 0)`。
+### 安全與授權
+- 目前前端採用單純的密碼驗證並快取於 `localStorage`，加上資料庫 RLS 是全面開放的狀態，屬於**不安全**的架構，僅適合高度信任的親友使用。若需正式上線，必須導入完整的 Auth JWT 驗證機制。
 
-## 5. 開發規範與指令 (Development Mandate)
-
-### 文件管理規範
-- **持續累積性:** 每次任務結束後，必須更新 `PROJECT_PLAN.md` 與 `TODO_LIST.md`。
-- **嚴禁刪除:** 除非是修正錯誤，否則嚴禁刪除既有的有效資訊。文件內容應隨專案進度日益詳盡。
-
-### 檔案編輯規範
-- **精準性優先:** 嚴禁頻繁盲目使用 `replace`。在執行編輯前，必須先透過 `read_file` 確認目標代碼的精確狀態、縮排與上下文。
-- **區塊修復:** 優先使用 `write_file` 進行邏輯區塊的完整修復，避免因正則匹配失敗導致代碼殘缺。
-
-### 技術偏好與標準
-- **語言偏好:** 文件與對話使用**繁體中文**，程式碼、註解與變數命名一律使用**英文**。
-- **型別安全:** 務必維持 100% TypeScript 覆蓋率，嚴禁使用 `any`。
-- **財務精度:** **絕對禁止使用 JS 原生浮點數運算金額**。所有加減乘除必須透過 `src/utils/finance.ts` 中的工具函數或 `decimal.js` 處理。
-- **樣式規範:** 使用 Tailwind CSS (v4) 的 Utility classes。需確保全站原生支援 **Dark Mode** 且具備流暢的響應式設計 (Mobile-First)。
-
-### 6. 建置與執行 (Commands)
-- **開發模式:** `npm run dev` (Vite 伺服器)
-- **生產建置:** `npm run build` (包含型別檢查與代碼壓縮)
-- **程式碼檢查:** `npm run lint` (ESLint 規則檢查)
-- **預覽建置:** `npm run preview` (測試生產包效能與 PWA 行為)
-
-### 7. AI 運作經驗紀錄 (AI Operational Lessons)
-#### Windows 環境指令執行 (CLI Workaround)
-- **問題描述:** 在 Windows PowerShell 環境下，執行 `.ps1` 腳本（如預設的 `npm`, `npx`, `tsc`）常會因執行原則 (Execution Policy) 導致 `UnauthorizedAccess` 錯誤。
-- **解決方案:** AI 在執行 shell 指令時，若遇到權限錯誤，應優先嘗試在指令後加上 `.cmd` 後綴（例如：使用 `npm.cmd run build` 取代 `npm run build`，或 `npx.cmd tsc` 取代 `npx tsc`）。這能繞過 PowerShell 的腳本限制。
-
-#### 財務計算型別安全 (Financial Type Safety)
-- **問題描述:** 使用 `reduce` 計算 `Record<string, number | string>` 類型數據時，TypeScript 易誤推斷累加器型別。
-- **解決方案:** 務必顯式指定 `reduce<number>((a, b) => a + (Number(b) || 0), 0)`，確保結果始終為數字，避免後續算術運算（如 `Math.abs`）報錯。
-
+### 檔案編輯 (File Editing)
+- **【重大教訓】精準編輯檔案**: 過去曾發生在修改檔案（如 `index.ts`）時，因不夠精準導致程式碼結尾重複（例如多出額外的 `catch` 與 `return` 區塊），引發語法錯誤（如 `Expression expected`）導致部署失敗。未來在使用 `replace` 或其他編輯工具時，**務必極度精準地鎖定要替換的舊字串**，並在修改後仔細檢查變更範圍，避免破壞原本的程式碼結構。
