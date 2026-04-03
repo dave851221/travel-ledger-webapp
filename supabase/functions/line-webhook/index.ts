@@ -326,7 +326,7 @@ serve(async (req) => {
 
 ### 背景資訊
 - 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${tripId}/dashboard)
-- 成員：${trip.members.join(', ')}
+- 成員清單(僅能從中選擇成員)：${trip.members.join(', ')}
 - 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
 - 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
 - 今日：${today}
@@ -342,9 +342,10 @@ serve(async (req) => {
 4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用預設分類。
 5. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
    - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
+   - payer_data 及 split_details 內的成員，必須要在背景資訊內的「成員清單」中。
    - 墊付邏輯的優先權(payer_data):
      1. 使用者設定內所提及的預設付款人
-     2. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及)
+     2. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及，但請注意務必要用「成員清單」內定義的名字)
      3. 由成員中第一位擔任付款人
    - 金額分攤邏輯的優先權(split_details):
      1. 使用者設定所提及的分攤方式
@@ -558,7 +559,7 @@ ${BOT_SELF_INTRODUCTION}
 
 ### 背景資訊 (供你參考)
 - 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${trip.id}/dashboard)
-- 成員：${trip.members.join(', ')}
+- 成員清單(僅能從中選擇成員)：${trip.members.join(', ')}
 - 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
 - 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
 - 今日：${today}
@@ -574,9 +575,10 @@ ${BOT_SELF_INTRODUCTION}
 5. 聊天/查詢回傳 JSON {"type": "chat", "content": "..."}。
 6. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
    - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
+   - payer_data 及 split_details 內的成員，必須要在背景資訊內的「成員清單」中。
    - 墊付邏輯的優先權(payer_data):
      1. 使用者設定內所提及的預設付款人
-     2. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及)
+     2. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及，但請注意務必要用「成員清單」內定義的名字)
      3. 由成員中第一位擔任付款人
    - 金額分攤邏輯的優先權(split_details):
      1. 使用者設定所提及的分攤方式
