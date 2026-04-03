@@ -39,7 +39,7 @@ BEGIN
     ON CONFLICT (trip_id) DO NOTHING;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 5. 綁定 Trigger 到 trips 表
 DROP TRIGGER IF EXISTS tr_generate_line_mapping ON trips;
@@ -56,7 +56,7 @@ ON CONFLICT (trip_id) DO NOTHING;
 ALTER TABLE line_trip_id_mapping ENABLE ROW LEVEL SECURITY;
 ALTER TABLE line_user_states ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read on mapping" ON line_trip_id_mapping FOR SELECT USING (true);
+CREATE POLICY "Allow public all on mapping" ON line_trip_id_mapping FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on user_states" ON line_user_states FOR ALL USING (true) WITH CHECK (true);
 
 -- 8. 建立對話紀錄表 (用於提供 AI 上下文)

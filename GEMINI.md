@@ -55,6 +55,8 @@
 - `reduce` 累加金額時，必須顯式轉型並提供初始值：`reduce<number>((a, b) => a + (Number(b) || 0), 0)`。
 ### 安全與授權
 - 目前前端採用單純的密碼驗證並快取於 `localStorage`，加上資料庫 RLS 是全面開放的狀態，屬於**不安全**的架構，僅適合高度信任的親友使用。若需正式上線，必須導入完整的 Auth JWT 驗證機制。
+- **【重大教訓】RLS 與 Trigger 權限**: 
+  當在一個表（如 `trips`）上設置 Trigger 並在其中寫入另一個表（如 `line_trip_id_mapping`）時，若後者開啟了 RLS 且權限不足（例如僅允許 `SELECT`），則寫入操作會失敗。解決方案是將 Trigger 函數設定為 `SECURITY DEFINER`，使其以函數擁有者的權限執行，並確保目標表的 RLS 策略包含所需的權限（如 `FOR ALL` 或 `INSERT`）。
 
 ### 檔案編輯 (File Editing)
 - **【重大教訓】精準編輯檔案**: 過去曾發生在修改檔案（如 `index.ts`）時，因不夠精準導致程式碼結尾重複（例如多出額外的 `catch` 與 `return` 區塊），引發語法錯誤（如 `Expression expected`）導致部署失敗。未來在使用 `replace` 或其他編輯工具時，**務必極度精準地鎖定要替換的舊字串**，並在修改後仔細檢查變更範圍，避免破壞原本的程式碼結構。
