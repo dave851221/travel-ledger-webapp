@@ -122,6 +122,34 @@ async function askGemini(contents: any[]) {
   return data.candidates[0].content.parts[0].text
 }
 
+async function getGroupMemberName(groupId: string, userId: string): Promise<string> {
+  const LINE_ACCESS_TOKEN = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN");
+  try {
+    const response = await fetch(
+      `https://api.line.me/v2/bot/group/${groupId}/member/${userId}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${LINE_ACCESS_TOKEN}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[LINE API Error] 無法取得成員名稱: ${errorText}`);
+      return ""; // 失敗時的回退機制
+    }
+
+    const profile = await response.json();
+    console.log(`[PROFILE in GROUP] ${JSON.stringify(profile, null, 2)}`)
+  
+    return profile.displayName;
+  } catch (error) {
+    console.error("[Fetch Error] 呼叫 LINE API 失敗:", error);
+    return "";
+  }
+}
+
 serve(async (req) => {
   try {
     const signature = req.headers.get('x-line-signature')
@@ -136,8 +164,13 @@ serve(async (req) => {
       const sourceId = event.source.groupId || event.source.roomId || event.source.userId
       const sourceType = event.source.type
       const isGroup = sourceType !== 'user'
+      console.log(`[EVENT] ${JSON.stringify(event, null, 2)}`);
 
-      console.log(`[SOURCE] ID: ${sourceId}, Type: ${sourceType}, isGroup: ${isGroup}`)
+      // --- 取得群組內該使用者名稱 ---
+      let memberName = "未知";
+      if (event.source.type === "group") {
+        memberName = await getGroupMemberName(event.source.groupId, event.source.userId);
+      }
 
       // --- 取得或初始化使用者狀態 ---
       let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
@@ -299,16 +332,23 @@ serve(async (req) => {
 - 今日：${today}
 - 封存狀態：${trip.is_archived ? '已封存 (唯讀)' : '進行中'}
 - 使用者設定：${userState.default_config || '無'}
+- 使用者名稱(傳訊息的人)：${memberName}
 
 ### 任務規則
 1. 辨識「總金額」與「幣別」。請從符號、地址或語系推斷幣別 (例如：¥/JPY, $/USD, NT/TWD, €/EUR)。
-   - 若無法從收據辨識出幣別，或是使用者沒提及，才可以使用預設幣別。
+   - 決定幣別的優先權為 (1.從收據辨識出幣別; 2.使用者設定中提及; 3.上方背景資訊的預設幣別)
 2. 辨識「日期」。若收據上無明確日期，請使用今日。
 3. 辨識「品項描述」。提取商店名稱或主要品項。若是外文請保留原文，並在括號內加上簡單的繁體中文翻譯 (例如：一蘭ラーメン(拉麵))。
 4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用預設分類。
-5. 請先詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
-   - 以使用者設定內定義的分攤方式為主，若使用者設定中無明確指示，預設由「第一位成員」墊付，且「全員均分」。
-   - 分帳時盡量不要有小數點(除非總金額有小數點)，按照使用者需求分配後，請務必確保總數加起來相等。
+5. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
+   - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
+   - 墊付邏輯的優先權(payer_data):
+     1. 使用者設定內所提及的預設付款人
+     2. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及)
+     3. 由成員中第一位擔任付款人
+   - 金額分攤邏輯的優先權(split_details):
+     1. 使用者設定所提及的分攤方式
+     2. 全員均分
 6. 必須回傳 JSON：
 {
   "type": "expense",
@@ -524,6 +564,7 @@ ${BOT_SELF_INTRODUCTION}
 - 今日：${today}
 - 封存狀態：${trip.is_archived ? '已封存 (唯讀)' : '進行中'}
 - 使用者設定：${userState.default_config || '無'}
+- 使用者名稱(傳訊息的人)：${memberName}
 
 ### 規則
 1. 歷史支出僅供查詢，不要重複記錄。
@@ -531,9 +572,16 @@ ${BOT_SELF_INTRODUCTION}
 3. 若無法從「當前任務」及「使用者設定」判斷幣別，請優先使用「幣別(預設)」。
 4. 記帳回傳 JSON {"type": "expense", "data": {...}}。
 5. 聊天/查詢回傳 JSON {"type": "chat", "content": "..."}。
-6. 若當前任務需要記帳，請務必參考「使用者設定」後，再進行回覆。
-7. 分帳時不要有小數點，按照使用者需求分配後，務必確保總數加起來相等。
-8. AI 不提供修改「使用者設定」，請用特殊指令"設定"來進行。
+6. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
+   - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
+   - 墊付邏輯的優先權(payer_data):
+     1. 使用者設定內所提及的預設付款人
+     2. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及)
+     3. 由成員中第一位擔任付款人
+   - 金額分攤邏輯的優先權(split_details):
+     1. 使用者設定所提及的分攤方式
+     2. 全員均分
+7. AI 不提供修改「使用者設定」，請用特殊指令"設定"來進行。
 
 ### 歷史對話
 ${history.map(h => `${h.role === 'user' ? '使用者' : '耀西'}: ${h.content}`).join('\n')}
