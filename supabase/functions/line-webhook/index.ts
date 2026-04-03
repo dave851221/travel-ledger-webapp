@@ -270,17 +270,18 @@ serve(async (req) => {
 ### 背景資訊
 - 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${tripId}/dashboard)
 - 成員：${trip.members.join(', ')}
-- 分類：${trip.categories.join(', ')}
-- 幣別：${trip.base_currency}
+- 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
+- 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
 - 使用者設定：${userState.default_config || '無'}
 - 今日日期：${today}
 - WebApp 根目錄: https://dave851221.github.io/travel-ledger-webapp/
 
 ### 任務規則
-1. 辨識「總金額」與「幣別」。請從符號、地址或語系推斷幣別 (例如：¥/JPY, $/USD, NT/TWD, €/EUR)。
+1. 辨識「總金額」與「幣別」。請從符號、地址或語系推斷幣別 (例如：¥/JPY, $/USD, NT/TWD, €/EUR)。若無法從收據辨識出幣別，請優先使用「幣別(預設)」。
 2. 辨識「日期」。若收據上無明確日期，請使用今日。
 3. 辨識「品項描述」。提取商店名稱或主要品項。若是外文請保留原文，並在括號內加上簡單的繁體中文翻譯 (例如：一蘭ラーメン(拉麵))。
-4. 參考「使用者設定」決定 payer_data (墊付) 與 split_details (應付)。
+4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用「分類(預設)」。
+5. 參考「使用者設定」決定 payer_data (墊付) 與 split_details (應付)。
    - 若設定中無明確指示，預設由「第一位成員」墊付，且「全員均分」。
 5. 必須回傳 JSON：
 {
@@ -483,8 +484,8 @@ ${BOT_SELF_INTRODUCTION}
 ### 背景資訊 (供你參考)
 - 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${trip.id}/dashboard)
 - 成員：${trip.members.join(', ')}
-- 分類：${trip.categories.join(', ')}
-- 主要幣別：${trip.base_currency}
+- 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
+- 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
 - 今日：${today}
 - 封存狀態：${trip.is_archived ? '已封存 (唯讀)' : '進行中'}
 - 使用者設定：${userState.default_config || '無'}
@@ -492,8 +493,9 @@ ${BOT_SELF_INTRODUCTION}
 ### 規則
 1. 歷史支出僅供查詢，絕對不要重複記錄。
 2. **重要限制**：若封存狀態為「已封存」，嚴禁回傳 type: "expense"，請告知使用者旅程已封存無法記帳，但可以繼續分析或聊天。
-3. 記帳回傳 JSON {"type": "expense", "data": {...}}。
-4. 聊天/查詢回傳 JSON {"type": "chat", "content": "..."}。
+3. 若無法判斷幣別，請優先使用「幣別(預設)」。
+4. 記帳回傳 JSON {"type": "expense", "data": {...}}。
+5. 聊天/查詢回傳 JSON {"type": "chat", "content": "..."}。
 
 ### 歷史對話
 ${history.map(h => `${h.role === 'user' ? '使用者' : '耀西'}: ${h.content}`).join('\n')}
