@@ -75,6 +75,15 @@ function calculateDistribution(
         : unlockedActiveMembers[0];
       result[target] = result[target].plus(remainingAmount);
     }
+  } else if (!remainingAmount.isZero()) {
+    const target = (adjustmentMember && activeMembers.includes(adjustmentMember))
+      ? adjustmentMember
+      : activeMembers[0];
+    if (result[target]) {
+      result[target] = result[target].plus(remainingAmount);
+    } else {
+      result[target] = remainingAmount;
+    }
   }
 
   const finalResult: Record<string, number> = {};
@@ -283,7 +292,7 @@ serve(async (req) => {
 4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用「分類(預設)」。
 5. 參考「使用者設定」決定 payer_data (墊付) 與 split_details (應付)。
    - 若設定中無明確指示，預設由「第一位成員」墊付，且「全員均分」。
-5. 必須回傳 JSON：
+6. 必須回傳 JSON：
 {
   "type": "expense",
   "data": {
@@ -296,7 +305,7 @@ serve(async (req) => {
     "split_details": { "成員": 金額 }
   }
 }
-6. 如果這看起來完全不像收據，請回傳：{"type": "chat", "content": "盡量說讚美的話，給予情緒價值，但字不要太多，一兩句話就足夠。"}
+7. 如果這看起來完全不像收據，請回傳：{"type": "chat", "content": "盡量說讚美的話，給予情緒價值，但字不要太多，一兩句話就足夠。"}
 `
 
           const aiResponse = await askGemini([
@@ -309,13 +318,29 @@ serve(async (req) => {
           const res = JSON.parse(aiResponse)
           if (res.type === 'expense') {
             const expense = res.data
+
+            // --- 修正餘數 ---
+            const precision = (trip?.precision_config as any)?.[expense.currency] ?? (expense.currency === 'TWD' ? 0 : 2)
+            const payerMembers = Object.keys(expense.payer_data)
+            const splitMembers = Object.keys(expense.split_details)
+            if (payerMembers.length > 0) {
+              expense.payer_data = calculateDistribution(expense.amount, payerMembers, expense.payer_data, payerMembers[0], precision)
+            }
+            if (splitMembers.length > 0) {
+              expense.split_details = calculateDistribution(expense.amount, splitMembers, expense.split_details, splitMembers[0], precision)
+            }
+
+            // --- 儲存至對話歷史 ---
+            const photo_ids = [messageId]
+            const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids }, null, 2)}`
+            await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary })
+
             // 縮減 expense 物件鍵名以節省空間
             const exp_short = {
               d: expense.description, a: expense.amount, c: expense.currency,
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
             const nonce = Math.random().toString(36).substring(2, 10) // 更短的 nonce
-            const photo_ids = [messageId] // 只傳 messageId
 
             await replyMessage(replyToken, [{
               type: "flex", altText: `收據辨識預覽: ${expense.description}`,
@@ -496,6 +521,9 @@ ${BOT_SELF_INTRODUCTION}
 3. 若無法判斷幣別，請優先使用「幣別(預設)」。
 4. 記帳回傳 JSON {"type": "expense", "data": {...}}。
 5. 聊天/查詢回傳 JSON {"type": "chat", "content": "..."}。
+6. 若當前任務是記帳，請"務必"參考使用者設定的內容後，再進行回覆。
+7. 分帳時請不要有小數點，按照使用者需求分配後，請務必確保總數加起來相等。
+8. 使用者無法透過聊天進行修改設定，請務必要以"設定"為整句話的開頭才可以進行設定。
 
 ### 歷史對話
 ${history.map(h => `${h.role === 'user' ? '使用者' : '耀西'}: ${h.content}`).join('\n')}
@@ -508,7 +536,21 @@ ${JSON.stringify(expenses)}
 使用者剛剛說：「${userText}」
 
 請分析「當前任務」：
-1. 如果使用者是想「記錄一筆新的支出」，請回傳 JSON：
+1. 請先確認歷史對話，如果前幾筆是"記帳建議"，請判斷使用者剛剛說的內容是否想要「修正該筆新的支出」，是話請修正後金額後回傳 JSON：
+{
+  "type": "expense",
+  "data": {
+    "description": "品項",
+    "amount": 數字,
+    "currency": "ISO代碼",
+    "date": "YYYY-MM-DD",
+    "category": "挑選分類",
+    "payer_data": { "成員": 金額 },
+    "split_details": { "成員": 金額 },
+    "photo_ids": ["從歷史紀錄中獲取，若無則為空陣列"]
+  }
+}
+2. 如果使用者是想「記錄一筆新的支出」，請回傳 JSON：
 {
   "type": "expense",
   "data": {
@@ -521,13 +563,13 @@ ${JSON.stringify(expenses)}
     "split_details": { "成員": 金額 }
   }
 }
-2. 如果使用者是單純聊天、問候、或是查詢上述支出狀況，請回傳 JSON：
+3. 如果使用者是單純聊天、問候、或是查詢上述支出狀況，請回傳 JSON：
 {
   "type": "chat",
   "content": "親切俐落的回覆，若是查詢分析支出內容，建議用條列式呈現並適當換行。"
 }
 
-注意：如果使用者說「那筆改1000」或是「拉麵小明小美各吃200」，請結合「歷史對話」找出是哪一筆並回傳 expense 資料。
+注意：如果使用者說「那筆改1000」或是「改一下小明小美各吃200」，請結合「歷史對話」找出上一筆記帳建議，並完整保留其中的 photo_ids 等所有欄位資訊。
 `
 
         try {
@@ -535,17 +577,44 @@ ${JSON.stringify(expenses)}
           const res = JSON.parse(aiResponse)
           if (res.type === 'expense') {
             const expense = res.data
+
+            // --- 修正餘數 ---
+            const precision = (trip?.precision_config as any)?.[expense.currency] ?? (expense.currency === 'TWD' ? 0 : 2)
+            const payerMembers = Object.keys(expense.payer_data)
+            const splitMembers = Object.keys(expense.split_details)
+            if (payerMembers.length > 0) {
+              expense.payer_data = calculateDistribution(expense.amount, payerMembers, expense.payer_data, payerMembers[0], precision)
+            }
+            if (splitMembers.length > 0) {
+              expense.split_details = calculateDistribution(expense.amount, splitMembers, expense.split_details, splitMembers[0], precision)
+            }
+
+            // --- 儲存至對話歷史 ---
+            const historySummary = `[記帳建議] ${JSON.stringify(expense, null, 2)}`
+            await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary })
+
             // 縮減 expense 物件鍵名以節省空間
             const exp_short = {
               d: expense.description, a: expense.amount, c: expense.currency,
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
             const nonce = Math.random().toString(36).substring(2, 10)
+            const photo_ids = expense.photo_ids || []
 
+            // 取得第一張照片的預覽圖 (如果有)
+            let heroSection: any = null
+            if (photo_ids.length > 0) {
+              const firstId = photo_ids[0]
+              const filePath = firstId.includes('/') ? firstId : `expenses/${trip.id}/${firstId}.jpg`
+              const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(filePath)
+              heroSection = { type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" }
+            }
+            
             await replyMessage(replyToken, [{
               type: "flex", altText: `確認記帳: ${expense.description}`,
               contents: {
                 type: "bubble",
+                hero: heroSection,
                 body: {
                   type: "box", layout: "vertical",
                   contents: [
@@ -569,8 +638,8 @@ ${JSON.stringify(expenses)}
                 footer: {
                   type: "box", layout: "vertical", spacing: "sm",
                   contents: [
-                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", exp: exp_short, n: nonce }) } },
-                    { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: typeof photo_ids !== 'undefined' ? photo_ids : [], n: nonce }) } }
+                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", exp: exp_short, p: photo_ids, n: nonce }) } },
+                    { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: photo_ids, n: nonce }) } }
                   ]
                 }
               }
