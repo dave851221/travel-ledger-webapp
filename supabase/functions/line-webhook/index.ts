@@ -139,8 +139,18 @@ serve(async (req) => {
 
       console.log(`[SOURCE] ID: ${sourceId}, Type: ${sourceType}, isGroup: ${isGroup}`)
 
+      // --- 取得或初始化使用者狀態 ---
+      let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
+      if (!userState) {
+        console.log(`[DB] Registering new state for sourceId: ${sourceId}`)
+        const { data: newState } = await supabase.from('line_user_states').insert({ line_user_id: sourceId }).select().single()
+        userState = newState
+      }
+      const isBinding = !!(userState?.pending_trip_id && !userState?.current_trip_id)
+      const isBound = !!userState?.current_trip_id
+
       // --- 樣板訊息處理 ---
-      if (event.type === 'postback') {
+      if (isBound && (event.type === 'postback')) {
         const postbackData = JSON.parse(event.postback.data)
         console.log(`[POSTBACK] Data: ${event.postback.data}`)
         const nonce = postbackData.nonce
@@ -238,7 +248,7 @@ serve(async (req) => {
       }
 
       // --- 圖片處理 (收據 OCR) ---
-      if (event.type === 'message' && event.message.type === 'image') {
+      if (isBound && (event.type === 'message' && event.message.type === 'image')) {
         const messageId = event.message.id
         let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
         
@@ -274,24 +284,31 @@ serve(async (req) => {
           const today = new Date().toISOString().split('T')[0]
 
           const ocrPrompt = `
-這是一張消費收據或發票的照片。請扮演專業的旅遊記帳小幫手「耀西」進行解析。
+### 你的身份
+你是一位專業又貼心的旅遊記帳小幫手「耀西」，是瑪利歐系列的一位知名角色。
+在遊戲中的叫聲通常是高亢、可愛的「Yoshi! Yoshi!」或「嗯——嗯！」，與使用者聊天時，偶爾可以適當穿插這樣的叫聲。
+
+### 你的任務
+這是一張消費收據或發票的照片。請扮演專業的記帳小幫手並進行解析。
 
 ### 背景資訊
 - 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${tripId}/dashboard)
 - 成員：${trip.members.join(', ')}
 - 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
 - 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
+- 今日：${today}
+- 封存狀態：${trip.is_archived ? '已封存 (唯讀)' : '進行中'}
 - 使用者設定：${userState.default_config || '無'}
-- 今日日期：${today}
-- WebApp 根目錄: https://dave851221.github.io/travel-ledger-webapp/
 
 ### 任務規則
-1. 辨識「總金額」與「幣別」。請從符號、地址或語系推斷幣別 (例如：¥/JPY, $/USD, NT/TWD, €/EUR)。若無法從收據辨識出幣別，請優先使用「幣別(預設)」。
+1. 辨識「總金額」與「幣別」。請從符號、地址或語系推斷幣別 (例如：¥/JPY, $/USD, NT/TWD, €/EUR)。
+   - 若無法從收據辨識出幣別，或是使用者沒提及，才可以使用預設幣別。
 2. 辨識「日期」。若收據上無明確日期，請使用今日。
 3. 辨識「品項描述」。提取商店名稱或主要品項。若是外文請保留原文，並在括號內加上簡單的繁體中文翻譯 (例如：一蘭ラーメン(拉麵))。
-4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用「分類(預設)」。
-5. 參考「使用者設定」決定 payer_data (墊付) 與 split_details (應付)。
-   - 若設定中無明確指示，預設由「第一位成員」墊付，且「全員均分」。
+4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用預設分類。
+5. 請先詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
+   - 以使用者設定內定義的分攤方式為主，若使用者設定中無明確指示，預設由「第一位成員」墊付，且「全員均分」。
+   - 分帳時盡量不要有小數點(除非總金額有小數點)，按照使用者需求分配後，請務必確保總數加起來相等。
 6. 必須回傳 JSON：
 {
   "type": "expense",
@@ -306,6 +323,7 @@ serve(async (req) => {
   }
 }
 7. 如果這看起來完全不像收據，請回傳：{"type": "chat", "content": "盡量說讚美的話，給予情緒價值，但字不要太多，一兩句話就足夠。"}
+8. **重要限制**：若封存狀態為「已封存」，嚴禁回傳 type: "expense"，請告知使用者旅程已封存無法記帳，但可以繼續分析或聊天。
 `
 
           const aiResponse = await askGemini([
@@ -391,28 +409,20 @@ serve(async (req) => {
         continue
       }
 
+      // --- 非文字訊息則跳過處理 ---
       if (event.type !== 'message' || event.message.type !== 'text') {
         console.log(`[SKIP] Not a text message event.`)
         continue
       }
 
+      // --- 接下來僅為文字訊息處理 ---
       const userText = event.message.text.trim()
       console.log(`[USER_TEXT] "${userText}"`)
 
-      // --- 1. 取得或初始化使用者狀態 ---
-      let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
-      if (!userState) {
-        console.log(`[DB] Registering new state for sourceId: ${sourceId}`)
-        const { data: newState } = await supabase.from('line_user_states').insert({ line_user_id: sourceId }).select().single()
-        userState = newState
-      }
-
-      // --- 2. 精確群組喚醒邏輯 ---
+      // 群組內喚醒邏輯
       const isMentioned = event.message.mention?.mentionees?.some((m: any) => m.isSelf === true)
-      const isBinding = !!(userState?.pending_trip_id && !userState?.current_trip_id)
-      const isBound = !!userState?.current_trip_id
       const isIdCommand = userText.toUpperCase().startsWith('ID:') || userText.toUpperCase().startsWith('ID：')
-      const isManagement = userText.includes('設定') || userText === '斷開' || userText === '切換旅程'
+      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程'
       
       let shouldProcess = !isGroup
       if (isGroup) {
@@ -445,13 +455,7 @@ serve(async (req) => {
 
       const cleanText = userText.replace(/@\S+\s*/g, '').replace(/^耀西\s*/, '').trim()
 
-      // 1. 斷開
-      if (cleanText === '斷開' || cleanText === '切換旅程') {
-        await supabase.from('line_user_states').update({ current_trip_id: null, pending_trip_id: null }).eq('line_user_id', sourceId)
-        await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼' }]); continue
-      }
-
-      // 2. ID 綁定
+      // 1. ID 綁定
       if (cleanText.toUpperCase().startsWith('ID:') || cleanText.toUpperCase().startsWith('ID：')) {
         if (userState?.current_trip_id) {
           await replyMessage(replyToken, [{ type: 'text', text: '⚠️ 目前已綁定旅程。請先輸入「斷開」後再重新綁定。' }]); continue
@@ -467,8 +471,14 @@ serve(async (req) => {
         continue
       }
 
+      // 2. 斷開
+      if (isBound && (cleanText === '斷開' || cleanText === '切換旅程')) {
+        await supabase.from('line_user_states').update({ current_trip_id: null, pending_trip_id: null }).eq('line_user_id', sourceId)
+        await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼' }]); continue
+      }
+
       // 3. 設定偏好 (例如：設定:預設付款人是小明)
-      if (cleanText.startsWith('設定:') || cleanText.startsWith('設定：')) {
+      if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定：'))) {
         const config = cleanText.substring(3).trim()
         await supabase.from('line_user_states').update({ default_config: config }).eq('line_user_id', sourceId)
         await replyMessage(replyToken, [{ type: 'text', text: `⚙️ 已更新您的偏好，之後記帳時會參考此設定。` }])
@@ -476,7 +486,7 @@ serve(async (req) => {
       }
 
       // 4. 密碼驗證
-      if (userState?.pending_trip_id && !userState?.current_trip_id) {
+      if (isBinding) {
         const { data: trip } = await supabase.from('trips').select('access_code, name, members').eq('id', userState.pending_trip_id).maybeSingle()
         if (trip?.access_code === cleanText) {
           await supabase.from('line_user_states').update({ current_trip_id: userState.pending_trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
@@ -491,7 +501,7 @@ serve(async (req) => {
       }
 
       // 5. AI 核心
-      if (userState?.current_trip_id) {
+      if (isBound) {
         const { data: trip } = await supabase.from('trips').select('*').eq('id', userState.current_trip_id).single()
         const { data: expenses } = await supabase.from('expenses').select('description, amount, currency, payer_data, date').eq('trip_id', trip.id).order('date', { ascending: false })
         const { data: history } = await supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).order('created_at', { ascending: true }).limit(10)
@@ -501,7 +511,7 @@ serve(async (req) => {
         const promptInstruction = `
 ### 你的身份
 你是一位專業又貼心的旅遊記帳小幫手「耀西」，是瑪利歐系列的一位知名角色。
-在遊戲中的叫聲通常是高亢、可愛的「Yoshi! Yoshi!」或「嗯——嗯！」，回答使用者時，偶爾可以適當穿插這樣的叫聲。
+在遊戲中的叫聲通常是高亢、可愛的「Yoshi! Yoshi!」或「嗯——嗯！」，與使用者聊天時，偶爾可以適當穿插這樣的叫聲。
 
 ### 自我介紹 (若使用者請你自我介紹，或是跟你打招呼，請一定要直接回答以下內容)
 ${BOT_SELF_INTRODUCTION}
@@ -516,14 +526,14 @@ ${BOT_SELF_INTRODUCTION}
 - 使用者設定：${userState.default_config || '無'}
 
 ### 規則
-1. 歷史支出僅供查詢，絕對不要重複記錄。
+1. 歷史支出僅供查詢，不要重複記錄。
 2. **重要限制**：若封存狀態為「已封存」，嚴禁回傳 type: "expense"，請告知使用者旅程已封存無法記帳，但可以繼續分析或聊天。
-3. 若無法判斷幣別，請優先使用「幣別(預設)」。
+3. 若無法從「當前任務」及「使用者設定」判斷幣別，請優先使用「幣別(預設)」。
 4. 記帳回傳 JSON {"type": "expense", "data": {...}}。
 5. 聊天/查詢回傳 JSON {"type": "chat", "content": "..."}。
-6. 若當前任務是記帳，請"務必"參考使用者設定的內容後，再進行回覆。
-7. 分帳時請不要有小數點，按照使用者需求分配後，請務必確保總數加起來相等。
-8. 使用者無法透過聊天進行修改設定，請務必要以"設定"為整句話的開頭才可以進行設定。
+6. 若當前任務需要記帳，請務必參考「使用者設定」後，再進行回覆。
+7. 分帳時不要有小數點，按照使用者需求分配後，務必確保總數加起來相等。
+8. AI 不提供修改「使用者設定」，請用特殊指令"設定"來進行。
 
 ### 歷史對話
 ${history.map(h => `${h.role === 'user' ? '使用者' : '耀西'}: ${h.content}`).join('\n')}
@@ -536,7 +546,7 @@ ${JSON.stringify(expenses)}
 使用者剛剛說：「${userText}」
 
 請分析「當前任務」：
-1. 請先確認歷史對話，如果前幾筆是"記帳建議"，請判斷使用者剛剛說的內容是否想要「修正該筆新的支出」，是話請修正後金額後回傳 JSON：
+1. 請先確認歷史對話，如果前幾筆包含"記帳建議"，請判斷使用者剛剛說的內容是否想要「修正該筆新的支出」，是話請修正後金額後回傳 JSON：
 {
   "type": "expense",
   "data": {
@@ -550,6 +560,7 @@ ${JSON.stringify(expenses)}
     "photo_ids": ["從歷史紀錄中獲取，若無則為空陣列"]
   }
 }
+  - 注意：如果使用者說「那筆改1000」或是「改一下小明小美各吃200」，請結合「歷史對話」找出上一筆記帳建議，並完整保留其中的 photo_ids 等所有欄位資訊。
 2. 如果使用者是想「記錄一筆新的支出」，請回傳 JSON：
 {
   "type": "expense",
@@ -568,8 +579,6 @@ ${JSON.stringify(expenses)}
   "type": "chat",
   "content": "親切俐落的回覆，若是查詢分析支出內容，建議用條列式呈現並適當換行。"
 }
-
-注意：如果使用者說「那筆改1000」或是「改一下小明小美各吃200」，請結合「歷史對話」找出上一筆記帳建議，並完整保留其中的 photo_ids 等所有欄位資訊。
 `
 
         try {
@@ -659,8 +668,8 @@ ${JSON.stringify(expenses)}
         continue
       }
 
-      // 6. 其他
-      await replyMessage(replyToken, [{ type: 'text', text: '👋 請輸入 ID:代碼 來連結旅程。' }])
+      // 6. 其他，尚未綁定狀態下的聊天
+      await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程。' }])
     }
     return new Response('OK', { status: 200 })
   } catch (err) {
