@@ -325,12 +325,12 @@ const Dashboard: React.FC = () => {
         balances[e.currency] = {};
         trip.members.forEach(m => balances[e.currency][m] = 0);
       }
-      const pMe = currentUser ? (e.payer_data[currentUser] || 0) : 0;
-      const oMe = currentUser ? (e.split_data[currentUser] || 0) : 0;
+      const pMe = currentUser ? (Number(e.payer_data[currentUser]) || 0) : 0;
+      const oMe = currentUser ? (Number(e.split_data[currentUser]) || 0) : 0;
 
       // 只有「非結清」紀錄才計入總支出與分類統計
       if (!e.is_settlement) {
-        byCurrency[e.currency].total += e.amount;
+        byCurrency[e.currency].total += Number(e.amount) || 0;
         byCurrency[e.currency].paidByMe += pMe;
         byCurrency[e.currency].owedByMe += oMe;
         grandBase.total += amountInBase;
@@ -338,7 +338,7 @@ const Dashboard: React.FC = () => {
         grandBase.owedByMe += (oMe * rate);
         categoryMap[e.category] = (categoryMap[e.category] || 0) + amountInBase;
         trip.members.forEach(m => {
-          const owed = e.split_data[m] || 0;
+          const owed = Number(e.split_data[m]) || 0;
           const owedInBase = owed * rate;
           memberDetails[m].totalOwed += owedInBase;
           memberDetails[m].categories[e.category] = (memberDetails[m].categories[e.category] || 0) + owedInBase;
@@ -347,8 +347,8 @@ const Dashboard: React.FC = () => {
 
       // 所有紀錄（含結清）都要計入餘額，用來計算誰該給誰多少錢
       trip.members.forEach(m => {
-        const paid = e.payer_data[m] || 0;
-        const owed = e.split_data[m] || 0;
+        const paid = Number(e.payer_data[m]) || 0;
+        const owed = Number(e.split_data[m]) || 0;
         balances[e.currency][m] += (paid - owed);
         balances['GRAND_TOTAL'][m] += ((paid - owed) * rate);
       });

@@ -76,17 +76,23 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setPhotos([]);
         setPreviews([]);
 
-        // Set Payers
-        const pActive = new Set(Object.keys(editData.payer_data));
+        // Set Payers (only check if amount > 0)
+        const activePayers = Object.entries(editData.payer_data)
+          .filter(([_, v]) => (Number(v) || 0) !== 0)
+          .map(([m]) => m);
+        const pActive = new Set(activePayers);
         setPayerActive(pActive);
         setPayerData(editData.payer_data);
-        setPayerLocked(new Set(Object.keys(editData.payer_data))); // In edit mode, usually treat as locked initially
+        setPayerLocked(new Set(activePayers)); 
 
-        // Set Splitters
-        const sActive = new Set(Object.keys(editData.split_data));
+        // Set Splitters (only check if amount > 0)
+        const activeSplitters = Object.entries(editData.split_data)
+          .filter(([_, v]) => (Number(v) || 0) !== 0)
+          .map(([m]) => m);
+        const sActive = new Set(activeSplitters);
         setSplitActive(sActive);
         setSplitData(editData.split_data);
-        setSplitLocked(new Set(Object.keys(editData.split_data)));
+        setSplitLocked(new Set(activeSplitters));
       } else {
         // --- New Mode ---
         setDescription('');
@@ -241,9 +247,22 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
       const finalPhotoUrls = [...existingPhotos, ...newPhotoUrls];
 
+      // Ensure all amounts are numbers before saving and filter out zeros
+      const finalPayerData: Record<string, number> = {};
+      Object.entries(payerData).forEach(([m, v]) => {
+        const num = Number(v) || 0;
+        if (num !== 0) finalPayerData[m] = num;
+      });
+
+      const finalSplitData: Record<string, number> = {};
+      Object.entries(splitData).forEach(([m, v]) => {
+        const num = Number(v) || 0;
+        if (num !== 0) finalSplitData[m] = num;
+      });
+
       const record = {
         trip_id: trip.id, date, category, description, amount: numAmount, currency,
-        payer_data: payerData, split_data: splitData, adjustment_member: adjustmentMember,
+        payer_data: finalPayerData, split_data: finalSplitData, adjustment_member: adjustmentMember,
         photo_urls: finalPhotoUrls, is_settlement: false
       };
 
@@ -323,15 +342,51 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             </div>
             <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
               {trip.members.map(member => (
-                <div key={member} className="flex items-center justify-between p-3">
-                  <div className="flex items-center gap-3">
+                <div key={member} className="flex items-center justify-between p-3 gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <input type="checkbox" className="w-4 h-4 rounded-lg accent-blue-600 cursor-pointer" checked={payerActive.has(member)} onChange={() => toggleActive(member, 'payer')} />
-                    <span className={`text-xs font-bold ${payerActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
+                    <span className={`text-[11px] sm:text-xs font-bold truncate max-w-[60px] sm:max-w-[100px] ${payerActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <input type="number" step="any" disabled={!payerActive.has(member)} placeholder="0" className={`w-24 text-right bg-transparent font-black text-sm outline-none ${payerLocked.has(member) ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 rounded' : 'text-slate-400'}`} value={payerData[member] ?? ''} onChange={e => handleManualEdit(member, e.target.value, 'payer')} />
-                    <button type="button" onClick={() => setPayerLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!payerActive.has(member)} className={`p-1 transition-colors ${payerLocked.has(member) ? 'text-emerald-500' : 'text-slate-200'}`}>
-                      {payerLocked.has(member) ? <Lock size={12} /> : <Unlock size={12} />}
+                  
+                  <div className="flex items-center justify-end flex-1 gap-1 sm:gap-3 min-w-0">
+                    {/* Percentage Input */}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        placeholder="0"
+                        disabled={!payerActive.has(member)}
+                        className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${payerLocked.has(member) ? 'text-emerald-600 ring-1 ring-emerald-500/30' : 'text-slate-500'}`}
+                        value={numAmount > 0 ? (Math.round((Number(payerData[member] || 0) / numAmount) * 10000) / 100).toString() : ''}
+                        onChange={e => {
+                          const pctStr = e.target.value;
+                          if (pctStr === '') {
+                            handleManualEdit(member, '0', 'payer');
+                            return;
+                          }
+                          const pct = parseFloat(pctStr);
+                          const newAmt = (numAmount * pct / 100);
+                          handleManualEdit(member, newAmt.toString(), 'payer');
+                        }}
+                      />
+                      <span className="text-[9px] font-black text-slate-300">%</span>
+                    </div>
+
+                    {/* Amount Input */}
+                    <div className="shrink-0">
+                      <input 
+                        type="number" 
+                        step="any" 
+                        disabled={!payerActive.has(member)} 
+                        placeholder="0" 
+                        className={`w-16 sm:w-28 text-right bg-transparent font-black text-[11px] sm:text-sm outline-none transition-all ${payerLocked.has(member) ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1 sm:px-2 py-1.5 rounded-lg' : 'text-slate-400'}`} 
+                        value={payerData[member] ?? ''} 
+                        onChange={e => handleManualEdit(member, e.target.value, 'payer')} 
+                      />
+                    </div>
+
+                    <button type="button" onClick={() => setPayerLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!payerActive.has(member)} className={`p-1 transition-colors shrink-0 ${payerLocked.has(member) ? 'text-emerald-500' : 'text-slate-200'}`}>
+                      {payerLocked.has(member) ? <Lock size={13} /> : <Unlock size={13} />}
                     </button>
                   </div>
                 </div>
@@ -353,18 +408,54 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             </div>
             <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
               {trip.members.map(member => (
-                <div key={member} className="flex items-center justify-between p-3">
-                  <div className="flex items-center gap-3">
+                <div key={member} className="flex items-center justify-between p-3 gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <input type="checkbox" className="w-4 h-4 rounded-lg accent-blue-600 cursor-pointer" checked={splitActive.has(member)} onChange={() => toggleActive(member, 'split')} />
                     <button type="button" onClick={() => setAdjustmentMember(member)} disabled={!splitActive.has(member)} className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all ${adjustmentMember === member ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-300 border-slate-200'}`}>
                       {adjustmentMember === member ? '⭐' : member.charAt(0)}
                     </button>
-                    <span className={`text-xs font-bold ${splitActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
+                    <span className={`text-[11px] sm:text-xs font-bold truncate max-w-[50px] sm:max-w-[100px] ${splitActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <input type="number" step="any" disabled={!splitActive.has(member)} placeholder="0" className={`w-24 text-right bg-transparent font-black text-sm outline-none ${splitLocked.has(member) ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 rounded' : 'text-slate-400'}`} value={splitData[member] ?? ''} onChange={e => handleManualEdit(member, e.target.value, 'split')} />
-                    <button type="button" onClick={() => setSplitLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!splitActive.has(member)} className={`p-1 transition-colors ${splitLocked.has(member) ? 'text-blue-500' : 'text-slate-200'}`}>
-                      {splitLocked.has(member) ? <Lock size={12} /> : <Unlock size={12} />}
+
+                  <div className="flex items-center justify-end flex-1 gap-1 sm:gap-3 min-w-0">
+                    {/* Percentage Input */}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        placeholder="0"
+                        disabled={!splitActive.has(member)}
+                        className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${splitLocked.has(member) ? 'text-blue-600 ring-1 ring-blue-500/30' : 'text-slate-500'}`}
+                        value={numAmount > 0 ? (Math.round((Number(splitData[member] || 0) / numAmount) * 10000) / 100).toString() : ''}
+                        onChange={e => {
+                          const pctStr = e.target.value;
+                          if (pctStr === '') {
+                            handleManualEdit(member, '0', 'split');
+                            return;
+                          }
+                          const pct = parseFloat(pctStr);
+                          const newAmt = (numAmount * pct / 100);
+                          handleManualEdit(member, newAmt.toString(), 'split');
+                        }}
+                      />
+                      <span className="text-[9px] font-black text-slate-300">%</span>
+                    </div>
+
+                    {/* Amount Input */}
+                    <div className="shrink-0">
+                      <input 
+                        type="number" 
+                        step="any" 
+                        disabled={!splitActive.has(member)} 
+                        placeholder="0" 
+                        className={`w-16 sm:w-28 text-right bg-transparent font-black text-[11px] sm:text-sm outline-none transition-all ${splitLocked.has(member) ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-1 sm:px-2 py-1.5 rounded-lg' : 'text-slate-400'}`} 
+                        value={splitData[member] ?? ''} 
+                        onChange={e => handleManualEdit(member, e.target.value, 'split')} 
+                      />
+                    </div>
+
+                    <button type="button" onClick={() => setSplitLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!splitActive.has(member)} className={`p-1 transition-colors shrink-0 ${splitLocked.has(member) ? 'text-blue-500' : 'text-slate-200'}`}>
+                      {splitLocked.has(member) ? <Lock size={13} /> : <Unlock size={13} />}
                     </button>
                   </div>
                 </div>
