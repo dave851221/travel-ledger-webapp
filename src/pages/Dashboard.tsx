@@ -36,9 +36,11 @@ import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { hasItinerary, getItineraryComponent } from '../features/itinerary/registry';
 import ExpenseModal from '../components/ExpenseModal';
+import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import SettingsModal from '../components/SettingsModal';
 import Modal from '../components/Modal';
 import { formatAmount } from '../utils/finance';
+import { getCategoryColor } from '../utils/category';
 import Decimal from 'decimal.js';
 
 type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'recycle';
@@ -68,6 +70,7 @@ const Dashboard: React.FC = () => {
   
   const [previewAlbum, setPreviewAlbum] = useState<string[] | null>(null);
   const [currentPhotoIdx, setCurrentPhotoIdx] = useState(0);
+  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
   // Toast State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -402,20 +405,6 @@ const Dashboard: React.FC = () => {
     }));
   };
 
-  const getCategoryColor = (category: string) => {
-    const lowerCat = category.toLowerCase();
-    if (lowerCat.includes('食') || lowerCat.includes('飯') || lowerCat.includes('餐')) return 'bg-orange-500 text-white';
-    if (lowerCat.includes('住') || lowerCat.includes('宿') || lowerCat.includes('店')) return 'bg-blue-500 text-white';
-    if (lowerCat.includes('行') || lowerCat.includes('車') || lowerCat.includes('交通')) return 'bg-emerald-500 text-white';
-    if (lowerCat.includes('樂') || lowerCat.includes('玩') || lowerCat.includes('門票')) return 'bg-purple-500 text-white';
-    if (lowerCat.includes('買') || lowerCat.includes('物') || lowerCat.includes('街')) return 'bg-rose-500 text-white';
-    if (lowerCat.includes('結清')) return 'bg-slate-700 text-white';
-    
-    // Default rotation for other categories
-    const hash = category.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const colors = ['bg-indigo-500', 'bg-cyan-500', 'bg-teal-500', 'bg-amber-500', 'bg-pink-500'];
-    return `${colors[hash % colors.length]} text-white`;
-  };
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
@@ -484,6 +473,10 @@ const Dashboard: React.FC = () => {
     <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-950 pb-24 md:pb-8 transition-colors duration-500 text-slate-900 dark:text-slate-100">
       
       {/* Album Preview */}
+      {detailExpense && trip && (
+        <ExpenseDetailModal expense={detailExpense} trip={trip} onClose={() => setDetailExpense(null)} />
+      )}
+
       {previewAlbum && (
         <div className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setPreviewAlbum(null)}>
           <button className="absolute top-6 right-6 text-white bg-white/10 p-2 rounded-full"><X size={24} /></button>
@@ -608,7 +601,7 @@ const Dashboard: React.FC = () => {
                         onClick={() => toggleCategory(cat)}
                         className={`px-3 py-1.5 rounded-xl text-[10px] sm:text-xs font-black transition-all border ${
                           selectedCategories.includes(cat)
-                            ? `${getCategoryColor(cat)} border-transparent shadow-md shadow-blue-500/10`
+                            ? `${getCategoryColor(cat, trip?.categories)} border-transparent shadow-md shadow-blue-500/10`
                             : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-100 dark:border-slate-800 hover:border-blue-400'
                         }`}
                       >
@@ -656,8 +649,8 @@ const Dashboard: React.FC = () => {
                     {/* Expenses under this date */}
                     <div className={`grid grid-cols-1 gap-2 overflow-hidden transition-all duration-300 ${expandedDates[date] === false ? 'max-h-0 opacity-0' : 'max-h-[5000px] opacity-100'}`}>
                       {dayExpenses.map(exp => (
-                        <div key={exp.id} className={`group p-3 sm:p-5 rounded-2xl border transition-all flex items-center gap-4 sm:gap-6 relative overflow-hidden ${exp.is_settlement ? 'bg-emerald-50/20 dark:bg-emerald-900/5 border-dashed border-emerald-200' : 'bg-white dark:bg-slate-900 border-slate-100 shadow-sm hover:shadow-md'}`}>
-                          <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={() => exp.photo_urls?.length && openAlbum(exp.photo_urls)}>
+                        <div key={exp.id} onClick={() => setDetailExpense(exp)} className={`group p-3 sm:p-5 rounded-2xl border transition-all flex items-center gap-4 sm:gap-6 relative overflow-hidden cursor-pointer ${exp.is_settlement ? 'bg-emerald-50/20 dark:bg-emerald-900/5 border-dashed border-emerald-200 hover:bg-emerald-50/40' : 'bg-white dark:bg-slate-900 border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50'}`}>
+                          <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={e => { e.stopPropagation(); exp.photo_urls?.length && openAlbum(exp.photo_urls); }}>
                             {exp.photo_urls && exp.photo_urls.length > 0 ? (
                               <><img src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${exp.photo_urls[0]}`} className="w-full h-full object-cover" alt="receipt" />{exp.photo_urls.length > 1 && <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-[8px] font-black text-white">+{exp.photo_urls.length}</div>}</>
                             ) : (
@@ -667,7 +660,7 @@ const Dashboard: React.FC = () => {
                           
                           <div className="flex-1 min-w-0 pr-10">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className={`px-1.5 py-0.5 text-[9px] sm:text-[10px] font-black rounded uppercase tracking-wider ${getCategoryColor(exp.category)}`}>
+                              <span className={`px-1.5 py-0.5 text-[9px] sm:text-[10px] font-black rounded uppercase tracking-wider ${getCategoryColor(exp.category, trip?.categories)}`}>
                                 {exp.category}
                               </span>
                               {exp.is_settlement && <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">SETTLEMENT</span>}
@@ -704,10 +697,10 @@ const Dashboard: React.FC = () => {
 
                           {!trip?.is_archived && !exp.is_settlement && (
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 sm:gap-1.5">
-                              <button onClick={() => handleEditExpense(exp)} className="p-1.5 sm:p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:bg-blue-600 hover:text-white transition-all shadow-sm">
+                              <button onClick={e => { e.stopPropagation(); handleEditExpense(exp); }} className="p-1.5 sm:p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:bg-blue-600 hover:text-white transition-all shadow-sm">
                                 <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                               </button>
-                              <button onClick={() => setDeleteConfirmId(exp.id)} className="p-1.5 sm:p-2 rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-400 dark:text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-sm">
+                              <button onClick={e => { e.stopPropagation(); setDeleteConfirmId(exp.id); }} className="p-1.5 sm:p-2 rounded-lg bg-rose-50 dark:bg-rose-900/20 text-rose-400 dark:text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-sm">
                                 <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                               </button>
                             </div>
