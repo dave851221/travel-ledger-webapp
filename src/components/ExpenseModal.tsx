@@ -240,7 +240,24 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     try {
       setLoading(true);
       setError(null);
-      
+
+      // --- LIFF 防重複：在所有操作前先佔用 nonce ---
+      // 若 nonce 已被 LINE 的「確認存入」或「取消」使用，則中止，避免重複寫入
+      const liffMeta = editData as any;
+      if (liffMeta?.nonce && liffMeta?.line_user_id) {
+        const { error: nonceErr } = await supabase.from('line_processed_actions').insert({
+          nonce: liffMeta.nonce,
+          line_user_id: liffMeta.line_user_id,
+          action_type: 'save'
+        });
+        if (nonceErr) {
+          showToast('此操作已處理過，請勿重複提交。', 'error');
+          onSuccess();
+          onClose();
+          return;
+        }
+      }
+
       // 1. Upload New Photos
       const newPhotoUrls: string[] = [];
       for (const file of photos) {
@@ -284,15 +301,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         showToast('已新增支出紀錄！');
       }
 
-      // --- LIFF 專屬邏輯：通知與標註處理 ---
-      const liffData = editData as any;
-      if (liffData?.nonce && liffData?.line_user_id) {
-        await supabase.from('line_processed_actions').insert({
-          nonce: liffData.nonce,
-          line_user_id: liffData.line_user_id,
-          action_type: 'save'
-        });
-
+      // --- LIFF 通知：儲存成功後傳訊息回群組 ---
+      if (liffMeta?.nonce && liffMeta?.line_user_id) {
         const liff = (window as any).liff;
         if (liff?.isInClient()) {
           try {

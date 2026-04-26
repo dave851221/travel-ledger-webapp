@@ -275,12 +275,22 @@ serve(async (req) => {
           })
           await replyMessage(replyToken, [{ type: 'text', text: `✅ 已存入：${expense.description}` }], sourceId)
         } else if (postbackData.action === 'cancel' || postbackData.act === 'cancel') {
-          const nonce = postbackData.n || postbackData.nonce
-          const photo_ids = postbackData.p || postbackData.photo_urls || []
+          const nonce = postbackData.n ?? postbackData.nonce
+          const photo_ids = postbackData.p ?? postbackData.photo_urls ?? []
+
+          // 先佔用 nonce，防止在 save 之後又執行 cancel（會刪掉已儲存的照片）
+          if (nonce) {
+            const { error: nonceInsertError } = await supabase
+              .from('line_processed_actions')
+              .insert({ nonce, line_user_id: sourceId, action_type: 'cancel' })
+            if (nonceInsertError) {
+              await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }], sourceId); continue
+            }
+          }
 
           if (photo_ids.length > 0) {
             const { data: cancelState } = await supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', sourceId).maybeSingle()
-            const trip_id = postbackData.trip_id || cancelState?.current_trip_id
+            const trip_id = postbackData.trip_id ?? cancelState?.current_trip_id
             if (trip_id) {
               const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
               console.log(`[PHOTO] Remove photo URL: ${urls}`)
@@ -288,7 +298,6 @@ serve(async (req) => {
             }
           }
 
-          if (nonce) await supabase.from('line_processed_actions').insert({ nonce, line_user_id: sourceId, action_type: 'cancel' })
           await replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }], sourceId)
         }
 
