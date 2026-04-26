@@ -225,13 +225,13 @@ serve(async (req) => {
 
           // 解析簡寫欄位
           const expense = {
-            description: expenseRaw.d || expenseRaw.description,
-            amount: expenseRaw.a || expenseRaw.amount,
-            currency: expenseRaw.c || expenseRaw.currency,
-            date: expenseRaw.dt || expenseRaw.date,
-            category: expenseRaw.cat || expenseRaw.category,
-            payer_data: expenseRaw.p || expenseRaw.payer_data,
-            split_details: expenseRaw.s || expenseRaw.split_details
+            description: expenseRaw.d ?? expenseRaw.description,
+            amount: expenseRaw.a ?? expenseRaw.amount,
+            currency: expenseRaw.c ?? expenseRaw.currency,
+            date: expenseRaw.dt ?? expenseRaw.date,
+            category: expenseRaw.cat ?? expenseRaw.category,
+            payer_data: expenseRaw.p ?? expenseRaw.payer_data ?? {},
+            split_details: expenseRaw.s ?? expenseRaw.split_details ?? {}
           }
 
           // 重組圖片路徑 (如果是簡寫格式只傳 messageId)
@@ -246,9 +246,10 @@ serve(async (req) => {
           }
 
           const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
-          
-          const numAmount = parseFloat(expense.amount as any) || 0
-          
+
+          // Round to precision first so target and distribution share the same base
+          const numAmount = new Decimal(parseFloat(expense.amount as any) || 0).toDecimalPlaces(precision).toNumber()
+
           const payerMembers = Object.keys(expense.payer_data).filter(m => trip.members.includes(m))
           const splitMembers = Object.keys(expense.split_details).filter(m => trip.members.includes(m))
 
@@ -394,6 +395,8 @@ serve(async (req) => {
 
             // --- 修正餘數 ---
             const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
+            // Round amount to currency precision before distribution so LIFF page shows clean number
+            expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
             if (payerMembers.length > 0) {
@@ -665,6 +668,8 @@ ${JSON.stringify(expenses)}
 
             // --- 修正餘數 ---
             const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
+            // Round amount to currency precision before distribution so LIFF page shows clean number
+            expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
             if (payerMembers.length > 0) {

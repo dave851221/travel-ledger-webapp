@@ -76,7 +76,7 @@ const LiffEdit: React.FC = () => {
           id: decoded.id || '',
           trip_id: tripId,
           description: String(decoded.d || decoded.description || ''),
-          amount: Number(decoded.a || decoded.amount || 0),
+          amount: Number(decoded.a ?? decoded.amount ?? 0),
           currency: String(decoded.c || decoded.currency || tripData.base_currency),
           date: String(decoded.dt || decoded.date || new Date().toISOString().split('T')[0]),
           category: String(decoded.cat || decoded.category || tripData.categories[0]),
