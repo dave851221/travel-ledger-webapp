@@ -62,69 +62,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const precision = trip.precision_config[currency] ?? (currency === 'TWD' ? 0 : 2);
   const numAmount = useMemo(() => parseFloat(amount) || 0, [amount]);
 
-  // Initialization & Reset
-  useEffect(() => {
-    if (isOpen) {
-      setError(null);
-      setLoading(false);
-      if (editData) {
-        // --- Edit Mode ---
-        setDescription(editData.description);
-        setAmount(editData.amount.toString());
-        setCurrency(editData.currency);
-        setDate(editData.date);
-        setCategory(editData.category);
-        setAdjustmentMember(editData.adjustment_member);
-        setExistingPhotos(editData.photo_urls || []);
-        setPhotos([]);
-        setPreviews([]);
-
-        // Set Payers (only check if amount > 0)
-        const activePayers = Object.entries(editData.payer_data)
-          .filter(([, v]) => (Number(v) || 0) !== 0)
-          .map(([m]) => m);
-        const pActive = new Set(activePayers);
-        setPayerActive(pActive);
-        setPayerData(editData.payer_data);
-        setPayerLocked(new Set(activePayers)); 
-
-        // Set Splitters (only check if amount > 0)
-        const activeSplitters = Object.entries(editData.split_data)
-          .filter(([, v]) => (Number(v) || 0) !== 0)
-          .map(([m]) => m);
-        const sActive = new Set(activeSplitters);
-        setSplitActive(sActive);
-        setSplitData(editData.split_data);
-        setSplitLocked(new Set(activeSplitters));
-      } else {
-        // --- New Mode ---
-        setDescription('');
-        setAmount('');
-        setCurrency(trip.default_currency || trip.base_currency);
-        setDate(new Date().toISOString().split('T')[0]);
-        setCategory(trip.default_category || trip.categories[0] || '其他');
-        setExistingPhotos([]);
-        setPhotos([]);
-        setPreviews([]);
-        
-        const initialPayer = currentUser || trip.members[0];
-        setPayerActive(new Set([initialPayer]));
-        setPayerLocked(new Set());
-        setPayerData({});
-
-        setSplitActive(new Set(trip.members));
-        setSplitLocked(new Set());
-        setSplitData({});
-        setAdjustmentMember(initialPayer);
-      }
-    }
-  }, [isOpen, editData, trip.members, currentUser, trip.base_currency]);
-
   // General Distribution Logic
   const runDistribution = useCallback((
-    total: number, 
-    active: Set<string>, 
-    locked: Set<string>, 
+    total: number,
+    active: Set<string>,
+    locked: Set<string>,
     currentData: Record<string, number | string>,
     adjMember: string | null
   ) => {
@@ -161,6 +103,67 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       return next;
     });
   }, [numAmount, splitActive, splitLocked, adjustmentMember, runDistribution]);
+
+  // Initialization & Reset — declared after auto-recalc effects so that on the
+  // first render, React batches the setSplitData/setPayerData from init AFTER
+  // the recalc effects. Non-functional setters overwrite functional ones,
+  // ensuring editData values are not zeroed out by the initial-state recalc pass.
+  useEffect(() => {
+    if (isOpen) {
+      setError(null);
+      setLoading(false);
+      if (editData) {
+        // --- Edit Mode ---
+        setDescription(editData.description);
+        setAmount(editData.amount.toString());
+        setCurrency(editData.currency);
+        setDate(editData.date);
+        setCategory(editData.category);
+        setAdjustmentMember(editData.adjustment_member);
+        setExistingPhotos(editData.photo_urls || []);
+        setPhotos([]);
+        setPreviews([]);
+
+        // Set Payers (only check if amount > 0)
+        const activePayers = Object.entries(editData.payer_data)
+          .filter(([, v]) => (Number(v) || 0) !== 0)
+          .map(([m]) => m);
+        const pActive = new Set(activePayers);
+        setPayerActive(pActive);
+        setPayerData(editData.payer_data);
+        setPayerLocked(new Set(activePayers));
+
+        // Set Splitters (only check if amount > 0)
+        const activeSplitters = Object.entries(editData.split_data)
+          .filter(([, v]) => (Number(v) || 0) !== 0)
+          .map(([m]) => m);
+        const sActive = new Set(activeSplitters);
+        setSplitActive(sActive);
+        setSplitData(editData.split_data);
+        setSplitLocked(new Set(activeSplitters));
+      } else {
+        // --- New Mode ---
+        setDescription('');
+        setAmount('');
+        setCurrency(trip.default_currency || trip.base_currency);
+        setDate(new Date().toISOString().split('T')[0]);
+        setCategory(trip.default_category || trip.categories[0] || '其他');
+        setExistingPhotos([]);
+        setPhotos([]);
+        setPreviews([]);
+
+        const initialPayer = currentUser || trip.members[0];
+        setPayerActive(new Set([initialPayer]));
+        setPayerLocked(new Set());
+        setPayerData({});
+
+        setSplitActive(new Set(trip.members));
+        setSplitLocked(new Set());
+        setSplitData({});
+        setAdjustmentMember(initialPayer);
+      }
+    }
+  }, [isOpen, editData, trip.members, currentUser, trip.base_currency]);
 
   const payerSum = useMemo(() => Object.values(payerData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [payerData]);
   const splitSum = useMemo(() => Object.values(splitData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [splitData]);
