@@ -15,9 +15,10 @@ npm run preview   # 本機預覽正式建置結果
 
 **Supabase Edge Function（LINE Bot）：**
 ```bash
-supabase functions serve line-webhook    # 本機開發 Edge Function
-supabase functions deploy line-webhook   # 部署至 Supabase
+supabase functions serve line-webhook                          # 本機開發 Edge Function
+supabase functions deploy line-webhook --no-verify-jwt        # 部署至 Supabase（--no-verify-jwt 必填！）
 ```
+> ⚠️ **重要**：部署時若缺少 `--no-verify-jwt`，LINE Webhook 呼叫會因為不帶 Supabase JWT Token 而收到 401 Unauthorized，導致 Bot 完全無反應。本機 `node_modules/.bin/supabase` 也適用同樣旗標。
 
 ## 架構概覽
 
@@ -44,7 +45,7 @@ supabase functions deploy line-webhook   # 部署至 Supabase
 - **資料庫：** `trips` 與 `expenses` 資料表含有 JSONB 欄位（`payer_data`、`split_data`、`rates`、`precision_config`）。軟刪除使用 `deleted_at` 欄位；結算紀錄以 `is_settlement` 標記。
 - **即時同步：** `trips` 與 `expenses` 皆透過 `supabase_realtime` 發布，Dashboard 訂閱即時更新。
 - **儲存空間：** `travel-images` bucket，收據照片路徑為 `expenses/{tripId}/{messageId}.jpg`。
-- **驗證機制：** 未使用 Supabase Auth，旅程以明文 `access_code` 保護，驗證狀態存於 localStorage。RLS 政策目前為開放狀態（`FOR ALL USING (true)`）。
+- **驗證機制：** 未使用 Supabase Auth。密碼驗證透過 Supabase RPC `verify_trip_code(p_trip_id, p_code)` 在伺服器端完成，`access_code` 不會傳至瀏覽器。驗證結果以 `auth_{tripId}` 存於 localStorage。RLS 政策目前為開放狀態（`FOR ALL USING (true)`）。
 
 ### LINE Bot Edge Function（`supabase/functions/line-webhook/index.ts`）
 
@@ -70,5 +71,5 @@ supabase functions deploy line-webhook   # 部署至 Supabase
 ## 部署方式
 
 - **前端：** 透過 `.github/workflows/deploy.yml` 部署至 GitHub Pages，推送至 `main` 分支時自動觸發。
-- **Edge Function：** 執行 `supabase functions deploy line-webhook` 部署，Webhook URL 須在 LINE Developer Console 中登錄。
+- **Edge Function：** 執行 `supabase functions deploy line-webhook --no-verify-jwt` 部署（**`--no-verify-jwt` 必填**），Webhook URL 須在 LINE Developer Console 中登錄。
 - **環境變數：** `.env` 含 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`；Edge Function 密鑰透過 `supabase secrets set` 設定。

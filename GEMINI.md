@@ -49,7 +49,12 @@
 ### Windows 環境
 - 執行 `npm`, `npx` 容易遇到權限錯誤，請使用 `.cmd` 後綴。
 ### Supabase Edge Functions
-- 部署 Webhook 需加上 `--no-verify-jwt`。
+- **【重大教訓】部署 Webhook 必須加上 `--no-verify-jwt`**：
+  Supabase Edge Function 預設會驗證請求中的 Supabase JWT Token。LINE Messaging API 的 Webhook 呼叫不帶此 Token，因此若部署時未加 `--no-verify-jwt`，LINE Bot 會對所有訊息完全無回應，且 Supabase Dashboard 的函式日誌會顯示 `401 Unauthorized`。
+  - **正確指令**：`supabase functions deploy line-webhook --no-verify-jwt`
+  - **本機 node_modules 版本**：`node_modules/.bin/supabase functions deploy line-webhook --no-verify-jwt`
+  - **症狀**：LINE 訊息無反應，後台看到 POST 401。
+  - **修復**：重新以正確指令部署即可，無需修改程式碼或 Secrets。
 - 修改 Secrets 後需重新部署以生效。
 ### 型別安全
 - `reduce` 累加金額時，必須顯式轉型並提供初始值：`reduce<number>((a, b) => a + (Number(b) || 0), 0)`。
