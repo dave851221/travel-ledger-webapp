@@ -25,35 +25,16 @@ const Nagoya2026: React.FC = () => {
     'day8': [[35.1709, 136.8815], [34.8584, 136.8053]]
   };
 
-  useEffect(() => {
-    if (!window.L || !mapRef.current || leafletMap.current) return;
-
-    const L = window.L;
-    leafletMap.current = L.map(mapRef.current).setView([35.1738, 136.8994], 9);
-    
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(leafletMap.current);
-
-    updateMap('day1');
-
-    return () => {
-      if (leafletMap.current) {
-        leafletMap.current.remove();
-        leafletMap.current = null;
-      }
-    };
-  }, []);
-
   const animateCar = (route: [number, number][], index: number) => {
     if (index >= route.length - 1 || !carMarker.current) return;
-    
+
     const start = route[index];
     const end = route[index + 1];
     const duration = 1000;
-    const startTime = performance.now();
+    let startTime: number | null = null;
 
     const step = (time: number) => {
+      if (startTime === null) startTime = time;
       const progress = (time - startTime) / duration;
       if (progress > 1) {
         animateCar(route, index + 1);
@@ -100,6 +81,27 @@ const Nagoya2026: React.FC = () => {
     carMarker.current = L.marker(route[0], { icon }).addTo(leafletMap.current);
     animateCar(route, 0);
   };
+
+  useEffect(() => {
+    if (!window.L || !mapRef.current || leafletMap.current) return;
+
+    const L = window.L;
+    leafletMap.current = L.map(mapRef.current).setView([35.1738, 136.8994], 9);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap.current);
+
+    updateMap('day1');
+
+    return () => {
+      if (leafletMap.current) {
+        leafletMap.current.remove();
+        leafletMap.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleTabChange = (day: string) => {
     setActiveTab(day);

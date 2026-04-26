@@ -27,4 +27,5 @@ export interface Expense {
   photo_urls: string[];
   is_settlement: boolean;
   deleted_at: string | null;
+  created_at: string;
 }

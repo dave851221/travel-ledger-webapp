@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import Papa from 'papaparse';
+import type { Expense } from '../types';
 
 /**
  * High-precision financial utilities using decimal.js
@@ -66,7 +67,7 @@ export const calculateDistribution = (
 /**
  * Exports expense data to CSV format
  */
-export const exportExpensesToCSV = (expenses: any[], tripName: string) => {
+export const exportExpensesToCSV = (expenses: Expense[], tripName: string) => {
   const csvData = expenses.map(e => ({
     '日期': e.date,
     '類別': e.category,

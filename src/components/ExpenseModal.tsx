@@ -64,6 +64,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   // Initialization & Reset
   useEffect(() => {
     if (isOpen) {
+      setError(null);
+      setLoading(false);
       if (editData) {
         // --- Edit Mode ---
         setDescription(editData.description);
@@ -78,7 +80,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
         // Set Payers (only check if amount > 0)
         const activePayers = Object.entries(editData.payer_data)
-          .filter(([_, v]) => (Number(v) || 0) !== 0)
+          .filter(([, v]) => (Number(v) || 0) !== 0)
           .map(([m]) => m);
         const pActive = new Set(activePayers);
         setPayerActive(pActive);
@@ -87,7 +89,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
         // Set Splitters (only check if amount > 0)
         const activeSplitters = Object.entries(editData.split_data)
-          .filter(([_, v]) => (Number(v) || 0) !== 0)
+          .filter(([, v]) => (Number(v) || 0) !== 0)
           .map(([m]) => m);
         const sActive = new Set(activeSplitters);
         setSplitActive(sActive);
@@ -170,18 +172,17 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     if (type === 'payer') {
       const next = new Set(payerActive);
       const isRemoving = next.has(member);
-      isRemoving ? next.delete(member) : next.add(member);
+      if (isRemoving) { next.delete(member); } else { next.add(member); }
       setPayerActive(next);
-      
+
       if (isRemoving) {
-        // Clear data and lock when removing
         setPayerData(prev => ({ ...prev, [member]: 0 }));
         setPayerLocked(prev => { const n = new Set(prev); n.delete(member); return n; });
       }
     } else {
       const next = new Set(splitActive);
       const isRemoving = next.has(member);
-      isRemoving ? next.delete(member) : next.add(member);
+      if (isRemoving) { next.delete(member); } else { next.add(member); }
       setSplitActive(next);
       
       if (isRemoving) {
@@ -239,7 +240,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       // 1. Upload New Photos
       const newPhotoUrls: string[] = [];
       for (const file of photos) {
-        const filePath = `expenses/${trip.id}/${Math.random()}.${file.name.split('.').pop()}`;
+        const ext = file.name.split('.').pop() || 'jpg';
+        const filePath = `expenses/${trip.id}/${crypto.randomUUID()}.${ext}`;
         const { error: uErr } = await supabase.storage.from('travel-images').upload(filePath, file);
         if (uErr) throw uErr;
         newPhotoUrls.push(filePath);
@@ -266,16 +268,41 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         photo_urls: finalPhotoUrls, is_settlement: false
       };
 
-      if (editData) {
+      if (editData && editData.id) {
         // --- Update ---
         const { error: uErr } = await supabase.from('expenses').update(record).eq('id', editData.id);
         if (uErr) throw uErr;
-        showToast('支出紀錄已更新！');
+        showToast('已更新支出紀錄！');
       } else {
         // --- Insert ---
         const { error: iErr } = await supabase.from('expenses').insert([record]);
         if (iErr) throw iErr;
-        showToast('支出紀錄已新增！');
+        showToast('已新增支出紀錄！');
+      }
+
+      // --- LIFF 專屬邏輯：通知與標註處理 ---
+      const liffData = editData as any;
+      if (liffData?.nonce && liffData?.line_user_id) {
+        await supabase.from('line_processed_actions').insert({
+          nonce: liffData.nonce,
+          line_user_id: liffData.line_user_id,
+          action_type: 'save'
+        });
+
+        const liff = (window as any).liff;
+        if (liff?.isInClient()) {
+          try {
+            const context = liff.getContext();
+            if (context?.type === 'group' || context?.type === 'room' || context?.type === 'utou') {
+              await liff.sendMessages([{
+                type: 'text',
+                text: `✅ 已透過網頁存入：${description}\n💰 金額：${numAmount} ${currency}`
+              }]);
+            }
+          } catch (err) {
+            console.error('[LIFF] sendMessages error:', err);
+          }
+        }
       }
 
       onSuccess();
@@ -385,7 +412,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                       />
                     </div>
 
-                    <button type="button" onClick={() => setPayerLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!payerActive.has(member)} className={`p-1 transition-colors shrink-0 ${payerLocked.has(member) ? 'text-emerald-500' : 'text-slate-200'}`}>
+                    <button type="button" onClick={() => setPayerLocked(prev => { const n = new Set(prev); if (n.has(member)) { n.delete(member); } else { n.add(member); } return n; })} disabled={!payerActive.has(member)} className={`p-1 transition-colors shrink-0 ${payerLocked.has(member) ? 'text-emerald-500' : 'text-slate-200'}`}>
                       {payerLocked.has(member) ? <Lock size={13} /> : <Unlock size={13} />}
                     </button>
                   </div>
@@ -454,7 +481,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                       />
                     </div>
 
-                    <button type="button" onClick={() => setSplitLocked(prev => { const n = new Set(prev); n.has(member) ? n.delete(member) : n.add(member); return n; })} disabled={!splitActive.has(member)} className={`p-1 transition-colors shrink-0 ${splitLocked.has(member) ? 'text-blue-500' : 'text-slate-200'}`}>
+                    <button type="button" onClick={() => setSplitLocked(prev => { const n = new Set(prev); if (n.has(member)) { n.delete(member); } else { n.add(member); } return n; })} disabled={!splitActive.has(member)} className={`p-1 transition-colors shrink-0 ${splitLocked.has(member) ? 'text-blue-500' : 'text-slate-200'}`}>
                       {splitLocked.has(member) ? <Lock size={13} /> : <Unlock size={13} />}
                     </button>
                   </div>
@@ -491,7 +518,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
           <button disabled={loading} type="submit" className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4">
             {loading ? <Loader2 className="animate-spin" size={20} /> : (editData ? <Save size={20} /> : <Plus size={20} strokeWidth={3} />)}
-            <span>{loading ? '儲存中...' : (editData ? '儲存修改' : '確認新增支出')}</span>
+            <span>{loading ? '儲存中...' : (editData?.id ? '儲存修改' : '確認新增支出')}</span>
           </button>
         </form>
       </div>

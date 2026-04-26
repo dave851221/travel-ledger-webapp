@@ -26,35 +26,16 @@ const Osaka2025: React.FC = () => {
     'day8': [[34.6687, 135.5013], [34.6641, 135.5013], [34.4320, 135.2304]] // Namba to KIX
   };
 
-  useEffect(() => {
-    if (!window.L || !mapRef.current || leafletMap.current) return;
-
-    const L = window.L;
-    leafletMap.current = L.map(mapRef.current).setView([34.6937, 135.5023], 10);
-    
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(leafletMap.current);
-
-    updateMap('day1');
-
-    return () => {
-      if (leafletMap.current) {
-        leafletMap.current.remove();
-        leafletMap.current = null;
-      }
-    };
-  }, []);
-
   const animateCar = (route: [number, number][], index: number) => {
     if (index >= route.length - 1 || !carMarker.current) return;
-    
+
     const start = route[index];
     const end = route[index + 1];
     const duration = 1500;
-    const startTime = performance.now();
+    let startTime: number | null = null;
 
     const step = (time: number) => {
+      if (startTime === null) startTime = time;
       const progress = (time - startTime) / duration;
       if (progress > 1) {
         animateCar(route, index + 1);
@@ -101,6 +82,27 @@ const Osaka2025: React.FC = () => {
     carMarker.current = L.marker(route[0], { icon }).addTo(leafletMap.current);
     animateCar(route, 0);
   };
+
+  useEffect(() => {
+    if (!window.L || !mapRef.current || leafletMap.current) return;
+
+    const L = window.L;
+    leafletMap.current = L.map(mapRef.current).setView([34.6937, 135.5023], 10);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap.current);
+
+    updateMap('day1');
+
+    return () => {
+      if (leafletMap.current) {
+        leafletMap.current.remove();
+        leafletMap.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleTabChange = (day: string) => {
     setActiveTab(day);

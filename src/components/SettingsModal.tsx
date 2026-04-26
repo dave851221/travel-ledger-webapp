@@ -260,7 +260,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     if (members.length > 1) {
       setMembers(members.filter(item => item !== m));
     } else {
-      alert('至少需要一位成員');
+      setError('至少需要一位成員');
     }
   };
 
@@ -282,13 +282,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
   const removeCurrency = (code: string) => {
     if (code === baseCurrency) {
-      alert('不能刪除主幣別');
+      setError('不能刪除主幣別');
       return;
     }
-    const { [code]: _, ...newRates } = ratesStr;
-    const { [code]: __, ...newPrec } = precisionStr;
-    setRatesStr(newRates);
-    setPrecisionStr(newPrec);
+    setRatesStr(Object.fromEntries(Object.entries(ratesStr).filter(([k]) => k !== code)));
+    setPrecisionStr(Object.fromEntries(Object.entries(precisionStr).filter(([k]) => k !== code)));
   };
 
   return (

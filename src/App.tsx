@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Home from './pages/Home';
 import TripPortal from './pages/TripPortal';
 import Dashboard from './pages/Dashboard';
+import LiffEdit from './pages/LiffEdit';
 import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 
@@ -12,7 +13,7 @@ function App() {
 
   // PWA 更新邏輯
   const {
-    needRefresh: [needRefresh, _setNeedRefresh],
+    needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW();
 
@@ -68,6 +69,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/trip/:id" element={<TripPortal />} />
           <Route path="/trip/:id/dashboard" element={<Dashboard />} />
+          <Route path="/liff/edit" element={<LiffEdit />} />
         </Routes>
       </div>
     </Router>

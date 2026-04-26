@@ -9,6 +9,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || ''
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 
+const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp'
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀西」
@@ -100,14 +102,24 @@ async function verifySignature(body: string, signature: string | null): Promise<
   return await crypto.subtle.verify('HMAC', key, decode(signature), encoder.encode(body))
 }
 
-async function replyMessage(replyToken: string, messages: any[]) {
+async function replyMessage(replyToken: string, messages: any[], to?: string) {
   console.log(`[LINE] Replying to ${replyToken}...`)
   const res = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
     body: JSON.stringify({ replyToken, messages }),
   })
-  if (!res.ok) console.error(`[LINE] Reply Error: ${await res.text()}`)
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[LINE] Reply Error: ${errorText}`);
+    if (to) {
+      await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+        body: JSON.stringify({ to, messages: [{ type: 'text', text: `⚠️ 訊息發送失敗：\n${errorText}` }] }),
+      })
+    }
+  }
 }
 
 async function askGemini(contents: any[]) {
@@ -123,13 +135,12 @@ async function askGemini(contents: any[]) {
 }
 
 async function getGroupMemberName(groupId: string, userId: string): Promise<string> {
-  const LINE_ACCESS_TOKEN = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN");
   try {
     const response = await fetch(
       `https://api.line.me/v2/bot/group/${groupId}/member/${userId}`,
       {
         headers: {
-          "Authorization": `Bearer ${LINE_ACCESS_TOKEN}`,
+          "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
         },
       }
     );
@@ -186,14 +197,6 @@ serve(async (req) => {
       if (isBound && (event.type === 'postback')) {
         const postbackData = JSON.parse(event.postback.data)
         console.log(`[POSTBACK] Data: ${event.postback.data}`)
-        const nonce = postbackData.nonce
-        if (nonce) {
-          const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
-          if (processed) {
-            console.log(`[POSTBACK] Rejected: Nonce ${nonce} already processed`)
-            await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }]); continue
-          }
-        }
         if (postbackData.action === 'save_expense' || postbackData.act === 'save') {
           const { n: nonce_short, expense: exp_old, exp: exp_new, photo_urls: p_old, p: p_new } = postbackData
           const nonce = nonce_short || postbackData.nonce
@@ -203,15 +206,15 @@ serve(async (req) => {
           if (nonce) {
             const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
             if (processed) {
-              await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }]); continue
+              await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }], sourceId); continue
             }
           }
 
           // 取得 trip_id (從 state 抓取以節省 payload 空間)
-          let { data: userState } = await supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', sourceId).maybeSingle()
+          const { data: userState } = await supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', sourceId).maybeSingle()
           const trip_id = postbackData.trip_id || userState?.current_trip_id
           if (!trip_id) {
-            await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到對應旅程，請重新綁定。` }]); continue
+            await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到對應旅程，請重新綁定。` }], sourceId); continue
           }
 
           // 解析簡寫欄位
@@ -247,7 +250,7 @@ serve(async (req) => {
 
           if (!payerSum.equals(target) || !splitSum.equals(target)) {
             console.error(`[CRITICAL_VALIDATION_ERROR] Sum mismatch. P:${payerSum}, S:${splitSum}, T:${target}`)
-            await replyMessage(replyToken, [{ type: 'text', text: `❌ 財務運算發生錯誤，請聯絡管理員。` }])
+            await replyMessage(replyToken, [{ type: 'text', text: `❌ 財務運算發生錯誤，請聯絡管理員。` }], sourceId)
             continue
           }
 
@@ -258,14 +261,14 @@ serve(async (req) => {
             photo_urls: photo_urls,
             adjustment_member: splitMembers[0]
           })
-          await replyMessage(replyToken, [{ type: 'text', text: `✅ 已存入：${expense.description}` }])
+          await replyMessage(replyToken, [{ type: 'text', text: `✅ 已存入：${expense.description}` }], sourceId)
         } else if (postbackData.action === 'cancel' || postbackData.act === 'cancel') {
           const nonce = postbackData.n || postbackData.nonce
           const photo_ids = postbackData.p || postbackData.photo_urls || []
 
           if (photo_ids.length > 0) {
-            const { data: userState } = await supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', sourceId).maybeSingle()
-            const trip_id = postbackData.trip_id || userState?.current_trip_id
+            const { data: cancelState } = await supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', sourceId).maybeSingle()
+            const trip_id = postbackData.trip_id || cancelState?.current_trip_id
             if (trip_id) {
               const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
               console.log(`[PHOTO] Remove photo URL: ${urls}`)
@@ -274,7 +277,7 @@ serve(async (req) => {
           }
 
           if (nonce) await supabase.from('line_processed_actions').insert({ nonce, line_user_id: sourceId, action_type: 'cancel' })
-          await replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }])
+          await replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }], sourceId)
         }
 
         continue
@@ -283,10 +286,10 @@ serve(async (req) => {
       // --- 圖片處理 (收據 OCR) ---
       if (isBound && (event.type === 'message' && event.message.type === 'image')) {
         const messageId = event.message.id
-        let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
+        const { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
         
         if (!userState?.current_trip_id) {
-          await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程，再傳送收據照片喔！' }])
+          await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程，再傳送收據照片喔！' }], sourceId)
           continue
         }
 
@@ -325,7 +328,7 @@ serve(async (req) => {
 這是一張消費收據或發票的照片。請扮演專業的記帳小幫手並進行解析。
 
 ### 背景資訊
-- 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${tripId}/dashboard)
+- 旅程：${trip.name} (網址: ${WEBAPP_URL}/#/trip/${tripId}/dashboard)
 - 成員清單(僅能從中選擇成員)：${trip.members.join(', ')}
 - 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
 - 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
@@ -399,7 +402,15 @@ serve(async (req) => {
               d: expense.description, a: expense.amount, c: expense.currency,
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
-            const nonce = Math.random().toString(36).substring(2, 10) // 更短的 nonce
+            const nonce = Math.random().toString(36).substring(2, 10)
+
+            // 構建 LIFF/Web URL
+            const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
+            const liffData = encode(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
+              .replace(/\+/g, '-')
+              .replace(/\//g, '_')
+              .replace(/=+$/, '');
+            const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
 
             await replyMessage(replyToken, [{
               type: "flex", altText: `收據辨識預覽: ${expense.description}`,
@@ -422,7 +433,7 @@ serve(async (req) => {
                         ...Object.entries(expense.payer_data).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
                       ]},
                       { type: "box", layout: "vertical", margin: "sm", contents: [
-                        { type: "text", text: "分帳明細 (應付)", color: "#aaaaaa", size: "xs" },
+                        { type: "text", text: "分帳明細", color: "#aaaaaa", size: "xs" },
                         ...Object.entries(expense.split_details).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
                       ]}
                     ]}
@@ -432,20 +443,24 @@ serve(async (req) => {
                   type: "box", layout: "vertical", spacing: "sm",
                   contents: [
                     { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", exp: exp_short, p: photo_ids, n: nonce }) } },
-                    { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: typeof photo_ids !== 'undefined' ? photo_ids : [], n: nonce }) } }
+                    { type: "box", layout: "horizontal", spacing: "sm", contents: [
+                      { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
+                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: photo_ids, n: nonce }) } }
+                    ]},
+                    { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
                   ]
                 }
               }
-            }])
+            }], sourceId)
           } else {
             // 如果辨識失敗或不是收據，刪除已上傳的照片
             console.log(`[PHOTO] Not a receipt or unrecognized, deleting: ${filePath}`)
             await supabase.storage.from('travel-images').remove([filePath])
-            await replyMessage(replyToken, [{ type: 'text', text: res.content || '抱歉，這張照片我辨識不出來。' }])
+            await replyMessage(replyToken, [{ type: 'text', text: res.content || '抱歉，這張照片我辨識不出來。' }], sourceId)
           }
         } catch (e) {
           console.error('[OCR_ERROR]', e)
-          await replyMessage(replyToken, [{ type: 'text', text: '😵 處理圖片時發生錯誤。' }])
+          await replyMessage(replyToken, [{ type: 'text', text: '😵 處理圖片時發生錯誤。' }], sourceId)
         }
         continue
       }
@@ -499,15 +514,15 @@ serve(async (req) => {
       // 1. ID 綁定
       if (cleanText.toUpperCase().startsWith('ID:') || cleanText.toUpperCase().startsWith('ID：')) {
         if (userState?.current_trip_id) {
-          await replyMessage(replyToken, [{ type: 'text', text: '⚠️ 目前已綁定旅程。請先輸入「斷開」後再重新綁定。' }]); continue
+          await replyMessage(replyToken, [{ type: 'text', text: '⚠️ 目前已綁定旅程。請先輸入「斷開」後再重新綁定。' }], sourceId); continue
         }
         const linebotId = cleanText.substring(3).trim().toUpperCase()
         const { data: mapping } = await supabase.from('line_trip_id_mapping').select('trip_id').eq('linebot_id', linebotId).maybeSingle()
         if (mapping) {
           await supabase.from('line_user_states').update({ pending_trip_id: mapping.trip_id, current_trip_id: null }).eq('line_user_id', sourceId)
-          await replyMessage(replyToken, [{ type: 'text', text: '🔍 已找到旅程！請輸入密碼驗證。' }])
+          await replyMessage(replyToken, [{ type: 'text', text: '🔍 已找到旅程！請輸入密碼驗證。' }], sourceId)
         } else {
-          await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到代碼 [${linebotId}]` }])
+          await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到代碼 [${linebotId}]` }], sourceId)
         }
         continue
       }
@@ -515,14 +530,14 @@ serve(async (req) => {
       // 2. 斷開
       if (isBound && (cleanText === '斷開' || cleanText === '切換旅程')) {
         await supabase.from('line_user_states').update({ current_trip_id: null, pending_trip_id: null }).eq('line_user_id', sourceId)
-        await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼' }]); continue
+        await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼' }], sourceId); continue
       }
 
       // 3. 設定偏好 (例如：設定:預設付款人是小明)
       if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定：'))) {
         const config = cleanText.substring(3).trim()
         await supabase.from('line_user_states').update({ default_config: config }).eq('line_user_id', sourceId)
-        await replyMessage(replyToken, [{ type: 'text', text: `⚙️ 已更新您的偏好，之後記帳時會參考此設定。` }])
+        await replyMessage(replyToken, [{ type: 'text', text: `⚙️ 已更新您的偏好，之後記帳時會參考此設定。` }], sourceId)
         continue
       }
 
@@ -533,10 +548,10 @@ serve(async (req) => {
           await supabase.from('line_user_states').update({ current_trip_id: userState.pending_trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
           await replyMessage(replyToken, [{ 
             type: 'text', 
-            text: `✅ 綁定成功：\n${trip.name}\n\n目前成員：\n${trip.members.join('、')}\n\n旅程網頁：\nhttps://dave851221.github.io/travel-ledger-webapp/#/trip/${userState.pending_trip_id}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！` 
-          }])
+            text: `✅ 綁定成功：\n${trip.name}\n\n目前成員：\n${trip.members.join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${userState.pending_trip_id}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！` 
+          }], sourceId)
         } else {
-          await replyMessage(replyToken, [{ type: 'text', text: '❌ 密碼錯誤' }])
+          await replyMessage(replyToken, [{ type: 'text', text: '❌ 密碼錯誤' }], sourceId)
         }
         continue
       }
@@ -558,7 +573,7 @@ serve(async (req) => {
 ${BOT_SELF_INTRODUCTION}
 
 ### 背景資訊 (供你參考)
-- 旅程：${trip.name} (網址: https://dave851221.github.io/travel-ledger-webapp/#/trip/${trip.id}/dashboard)
+- 旅程：${trip.name} (網址: ${WEBAPP_URL}/#/trip/${trip.id}/dashboard)
 - 成員清單(僅能從中選擇成員)：${trip.members.join(', ')}
 - 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
 - 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
@@ -610,7 +625,7 @@ ${JSON.stringify(expenses)}
     "photo_ids": ["從歷史紀錄中獲取，若無則為空陣列"]
   }
 }
-  - 注意：如果使用者說「那筆改1000」或是「改一下小明小美各吃200」，請結合「歷史對話」找出上一筆記帳建議，並完整保留其中的 photo_ids 等所有欄位資訊。
+  - 注意：如果使用者說「那筆改1000」或是「改一下小明小美各吃200」，請結合「歷史對話」觀察上一筆記帳建議，並完整保留其中的 photo_ids 等所有欄位資訊。
 2. 如果使用者是想「記錄一筆新的支出」，請回傳 JSON：
 {
   "type": "expense",
@@ -668,6 +683,14 @@ ${JSON.stringify(expenses)}
               const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(filePath)
               heroSection = { type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" }
             }
+
+            // 構建 LIFF URL
+            const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
+            const liffData = encode(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
+              .replace(/\+/g, '-')
+              .replace(/\//g, '_')
+              .replace(/=+$/, '');
+            const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
             
             await replyMessage(replyToken, [{
               type: "flex", altText: `確認記帳: ${expense.description}`,
@@ -688,7 +711,7 @@ ${JSON.stringify(expenses)}
                         ...Object.entries(expense.payer_data).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
                       ]},
                       { type: "box", layout: "vertical", margin: "sm", contents: [
-                        { type: "text", text: "分帳明細 (應付)", color: "#aaaaaa", size: "xs" },
+                        { type: "text", text: "分帳明細", color: "#aaaaaa", size: "xs" },
                         ...Object.entries(expense.split_details).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
                       ]}
                     ]}
@@ -698,28 +721,32 @@ ${JSON.stringify(expenses)}
                   type: "box", layout: "vertical", spacing: "sm",
                   contents: [
                     { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", exp: exp_short, p: photo_ids, n: nonce }) } },
-                    { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: photo_ids, n: nonce }) } }
+                    { type: "box", layout: "horizontal", spacing: "sm", contents: [
+                      { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
+                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: photo_ids, n: nonce }) } }
+                    ]},
+                    { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
                   ]
                 }
               }
-            }])
+            }], sourceId)
           } else {
             let safeContent = res.content || ""
             if (safeContent.length > 4900) {
               safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
             }
             await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent })
-            await replyMessage(replyToken, [{ type: 'text', text: safeContent }])
+            await replyMessage(replyToken, [{ type: 'text', text: safeContent }], sourceId)
           }
         } catch (e) {
           console.error('[AI_ERROR]', e)
-          await replyMessage(replyToken, [{ type: 'text', text: '😵 聽不懂啦。' }])
+          await replyMessage(replyToken, [{ type: 'text', text: '😵 聽不懂啦。' }], sourceId)
         }
         continue
       }
 
       // 6. 其他，尚未綁定狀態下的聊天
-      await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程。' }])
+      await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程。' }], sourceId)
     }
     return new Response('OK', { status: 200 })
   } catch (err) {

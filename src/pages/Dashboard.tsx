@@ -55,7 +55,6 @@ const Dashboard: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isMounted, setIsMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('ledger');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -92,7 +91,6 @@ const Dashboard: React.FC = () => {
   const [settleConfirm, setSettleConfirm] = useState<{ from: string, to: string, amount: number, cur: string } | null>(null);
 
   useEffect(() => {
-    setIsMounted(true);
     const checkAuth = () => {
       const authed = localStorage.getItem(`auth_${id}`);
       if (!authed) {
@@ -462,7 +460,7 @@ const Dashboard: React.FC = () => {
       }]);
       if (error) throw error;
       setSettleConfirm(null); fetchExpenses();
-    } catch (err: any) { alert('結清失敗: ' + err.message); }
+    } catch (err: any) { showToast('結清失敗: ' + err.message, 'error'); }
   };
 
   if (loading) {
@@ -686,12 +684,12 @@ const Dashboard: React.FC = () => {
                               <div className="h-3 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
                               <span className="text-[9px] sm:text-xs text-slate-500 font-bold truncate">
                                 <span className="text-emerald-600">
-                                  {Object.entries(exp.payer_data).filter(([_, val]) => val !== 0).map(([name]) => name).join(', ')}
+                                  {Object.entries(exp.payer_data).filter(([, val]) => val !== 0).map(([name]) => name).join(', ')}
                                 </span>
                                 {exp.is_settlement ? ' ➡️ ' : ' 付 '}
                                 <span className="text-blue-600">
                                   {exp.is_settlement 
-                                    ? Object.entries(exp.split_data).filter(([_, val]) => val !== 0).map(([name]) => name).join(', ') 
+                                    ? Object.entries(exp.split_data).filter(([, val]) => val !== 0).map(([name]) => name).join(', ') 
                                     : ''}
                                 </span>
                               </span>
@@ -783,7 +781,7 @@ const Dashboard: React.FC = () => {
                   <div className="flex flex-col items-center gap-12">
                     {/* Chart Area */}
                     <div className="w-full max-w-[500px] h-[350px] sm:h-[450px] shrink-0">
-                      {isMounted && stats.categoryData.length > 0 ? (
+                      {stats.categoryData.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie data={stats.categoryData} cx="50%" cy="50%" innerRadius="40%" outerRadius="60%" paddingAngle={5} dataKey="value" stroke="none">
@@ -796,7 +794,7 @@ const Dashboard: React.FC = () => {
                         </ResponsiveContainer>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-slate-400 font-black border-2 border-dashed border-slate-100 rounded-3xl">
-                          {stats.categoryData.length === 0 ? '暫無消費數據' : '圖表載入中...'}
+                          暫無消費數據
                         </div>
                       )}
                     </div>
@@ -827,7 +825,7 @@ const Dashboard: React.FC = () => {
                         </div>
                         <div className="grid grid-cols-1 gap-3">
                           {Object.entries(data.categories)
-                            .filter(([_, val]) => val !== 0)
+                            .filter(([, val]) => val !== 0)
                             .map(([cat, val]) => (
                             <div key={cat} className="flex items-center justify-between text-xs sm:text-base font-black text-slate-700 dark:text-slate-300">
                               <span>{cat}</span>
