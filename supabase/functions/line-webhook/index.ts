@@ -11,6 +11,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 
 const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp'
 
+const DEFAULT_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 }
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀西」
@@ -180,7 +182,8 @@ serve(async (req) => {
       // --- 取得群組內該使用者名稱 ---
       let memberName = "未知";
       if (event.source.type === "group") {
-        memberName = await getGroupMemberName(event.source.groupId, event.source.userId);
+        const fetchedName = await getGroupMemberName(event.source.groupId, event.source.userId);
+        memberName = fetchedName || `User_${event.source.userId.substring(0, 8)}`;
       }
 
       // --- 取得或初始化使用者狀態 ---
@@ -204,8 +207,11 @@ serve(async (req) => {
           const photo_ids = p_new || p_old || postbackData.photo_urls || []
           
           if (nonce) {
-            const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
-            if (processed) {
+            // INSERT-first 防重複：需配合 DB 的 UNIQUE constraint on nonce 才能完全防止競爭條件
+            const { error: nonceInsertError } = await supabase
+              .from('line_processed_actions')
+              .insert({ nonce, line_user_id: sourceId, action_type: 'save' });
+            if (nonceInsertError) {
               await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }], sourceId); continue
             }
           }
@@ -232,8 +238,14 @@ serve(async (req) => {
           const photo_urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
 
           // --- 金額精度與總額校驗 ---
-          const { data: trip } = await supabase.from('trips').select('precision_config, members').eq('id', trip_id).single()
-          const precision = (trip?.precision_config as any)?.[expense.currency] ?? (expense.currency === 'TWD' ? 0 : 2)
+          const { data: trip } = await supabase.from('trips').select('precision_config, members, is_archived').eq('id', trip_id).single()
+
+          if (trip?.is_archived) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 此旅程已封存，無法新增支出。' }], sourceId);
+            continue;
+          }
+
+          const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
           
           const numAmount = parseFloat(expense.amount as any) || 0
           
@@ -254,7 +266,6 @@ serve(async (req) => {
             continue
           }
 
-          if (nonce) await supabase.from('line_processed_actions').insert({ nonce, line_user_id: sourceId, action_type: 'save' })
           await supabase.from('expenses').insert({
             trip_id: trip_id, description: expense.description, amount: target.toNumber(), currency: expense.currency,
             payer_data: finalPayerData, split_data: finalSplitData, date: expense.date, category: expense.category,
@@ -382,7 +393,7 @@ serve(async (req) => {
             const expense = res.data
 
             // --- 修正餘數 ---
-            const precision = (trip?.precision_config as any)?.[expense.currency] ?? (expense.currency === 'TWD' ? 0 : 2)
+            const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
             if (payerMembers.length > 0) {
@@ -653,7 +664,7 @@ ${JSON.stringify(expenses)}
             const expense = res.data
 
             // --- 修正餘數 ---
-            const precision = (trip?.precision_config as any)?.[expense.currency] ?? (expense.currency === 'TWD' ? 0 : 2)
+            const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
             if (payerMembers.length > 0) {

@@ -39,6 +39,7 @@ import ExpenseModal from '../components/ExpenseModal';
 import SettingsModal from '../components/SettingsModal';
 import Modal from '../components/Modal';
 import { formatAmount } from '../utils/finance';
+import Decimal from 'decimal.js';
 
 type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'recycle';
 
@@ -430,20 +431,25 @@ const Dashboard: React.FC = () => {
   };
 
   const calculateSettlements = (memberBalances: Record<string, number>) => {
-    const debtors: { name: string, amt: number }[] = [];
-    const creditors: { name: string, amt: number }[] = [];
+    const EPSILON = new Decimal('0.01');
+    const debtors: { name: string, amt: Decimal }[] = [];
+    const creditors: { name: string, amt: Decimal }[] = [];
     Object.entries(memberBalances).forEach(([name, bal]) => {
-      if (bal < -0.01) debtors.push({ name, amt: -bal });
-      else if (bal > 0.01) creditors.push({ name, amt: bal });
+      const d = new Decimal(bal);
+      if (d.lt(EPSILON.negated())) debtors.push({ name, amt: d.negated() });
+      else if (d.gt(EPSILON)) creditors.push({ name, amt: d });
     });
-    debtors.sort((a, b) => b.amt - a.amt); creditors.sort((a, b) => b.amt - a.amt);
+    debtors.sort((a, b) => b.amt.comparedTo(a.amt));
+    creditors.sort((a, b) => b.amt.comparedTo(a.amt));
     const result: { from: string, to: string, amount: number }[] = [];
     let i = 0, j = 0;
     while (i < debtors.length && j < creditors.length) {
-      const minAmt = Math.min(debtors[i].amt, creditors[j].amt);
-      result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt });
-      debtors[i].amt -= minAmt; creditors[j].amt -= minAmt;
-      if (debtors[i].amt < 0.01) i++; if (creditors[j].amt < 0.01) j++;
+      const minAmt = Decimal.min(debtors[i].amt, creditors[j].amt);
+      result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt.toNumber() });
+      debtors[i].amt = debtors[i].amt.minus(minAmt);
+      creditors[j].amt = creditors[j].amt.minus(minAmt);
+      if (debtors[i].amt.lt(EPSILON)) i++;
+      if (creditors[j].amt.lt(EPSILON)) j++;
     }
     return result;
   };

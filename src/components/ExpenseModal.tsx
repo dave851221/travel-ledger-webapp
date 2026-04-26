@@ -19,6 +19,7 @@ import Modal from './Modal';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { calculateDistribution } from '../utils/finance';
+import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
 
 interface ExpenseModalProps {
@@ -384,7 +385,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                         placeholder="0"
                         disabled={!payerActive.has(member)}
                         className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${payerLocked.has(member) ? 'text-emerald-600 ring-1 ring-emerald-500/30' : 'text-slate-500'}`}
-                        value={numAmount > 0 ? (Math.round((Number(payerData[member] || 0) / numAmount) * 10000) / 100).toString() : ''}
+                        value={numAmount > 0 ? new Decimal(Number(payerData[member] || 0)).dividedBy(numAmount).times(100).toDecimalPlaces(2).toString() : ''}
                         onChange={e => {
                           const pctStr = e.target.value;
                           if (pctStr === '') {
@@ -392,7 +393,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                             return;
                           }
                           const pct = parseFloat(pctStr);
-                          const newAmt = (numAmount * pct / 100);
+                          const newAmt = new Decimal(numAmount).times(pct).dividedBy(100);
                           handleManualEdit(member, newAmt.toString(), 'payer');
                         }}
                       />
@@ -453,7 +454,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                         placeholder="0"
                         disabled={!splitActive.has(member)}
                         className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${splitLocked.has(member) ? 'text-blue-600 ring-1 ring-blue-500/30' : 'text-slate-500'}`}
-                        value={numAmount > 0 ? (Math.round((Number(splitData[member] || 0) / numAmount) * 10000) / 100).toString() : ''}
+                        value={numAmount > 0 ? new Decimal(Number(splitData[member] || 0)).dividedBy(numAmount).times(100).toDecimalPlaces(2).toString() : ''}
                         onChange={e => {
                           const pctStr = e.target.value;
                           if (pctStr === '') {
@@ -461,7 +462,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                             return;
                           }
                           const pct = parseFloat(pctStr);
-                          const newAmt = (numAmount * pct / 100);
+                          const newAmt = new Decimal(numAmount).times(pct).dividedBy(100);
                           handleManualEdit(member, newAmt.toString(), 'split');
                         }}
                       />

@@ -31,15 +31,12 @@ const TripPortal: React.FC = () => {
     setError(null);
 
     try {
-      const { data, error } = await supabase
-        .from('trips')
-        .select('access_code')
-        .eq('id', id)
-        .single();
+      const { data: isValid, error } = await supabase
+        .rpc('verify_trip_code', { p_trip_id: id, p_code: code });
 
       if (error) throw error;
 
-      if (data.access_code === code) {
+      if (isValid) {
         localStorage.setItem(`auth_${id}`, 'true');
         navigate(`/trip/${id}/dashboard`);
       } else {

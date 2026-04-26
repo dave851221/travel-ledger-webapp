@@ -11,8 +11,10 @@ export const toDecimal = (val: number | string) => new Decimal(val || 0);
 /**
  * Formats a number based on currency precision
  */
+const DEFAULT_CURRENCY_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 };
+
 export const formatAmount = (amount: number, currency: string, precisionConfig: Record<string, number> = {}) => {
-  const precision = precisionConfig[currency] ?? (currency === 'TWD' ? 0 : 2);
+  const precision = precisionConfig[currency] ?? DEFAULT_CURRENCY_PRECISION[currency] ?? 2;
   return new Decimal(amount).toFixed(precision);
 };
 
@@ -50,11 +52,17 @@ export const calculateDistribution = (
     });
 
     if (!remainingAmount.isZero()) {
-      const target = (adjustmentMember && unlockedActiveMembers.includes(adjustmentMember)) 
-        ? adjustmentMember 
+      const target = (adjustmentMember && unlockedActiveMembers.includes(adjustmentMember))
+        ? adjustmentMember
         : unlockedActiveMembers[0];
       result[target] = result[target].plus(remainingAmount);
     }
+  } else if (!remainingAmount.isZero()) {
+    // 全部成員皆已鎖定但加總不等於總金額時，餘數強制加給調整成員
+    const target = (adjustmentMember && activeMembers.includes(adjustmentMember))
+      ? adjustmentMember
+      : activeMembers[0];
+    result[target] = result[target] ? result[target].plus(remainingAmount) : remainingAmount;
   }
 
   const finalResult: Record<string, number> = {};

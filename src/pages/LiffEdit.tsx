@@ -5,6 +5,13 @@ import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
+const closeLiffWindow = () => {
+  const liff = (window as any).liff;
+  if (liff?.isInClient?.()) {
+    liff.closeWindow();
+  }
+};
+
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -58,7 +65,8 @@ const LiffEdit: React.FC = () => {
             const idStr = String(id);
             // 如果傳進來的是完整的 URL，我們必須截斷它，只保留 travel-images/ 之後的部分
             if (idStr.includes('travel-images/')) {
-                return idStr.split('travel-images/')[1];
+                const markerIdx = idStr.lastIndexOf('travel-images/');
+                return idStr.substring(markerIdx + 'travel-images/'.length);
             }
             // 否則補上路徑字串
             return idStr.includes('/') ? idStr : `expenses/${tripId}/${idStr}.jpg`;
@@ -116,7 +124,7 @@ const LiffEdit: React.FC = () => {
         <CheckCircle2 size={40} />
       </div>
       <h2 className="text-2xl font-black text-slate-900">記帳成功！</h2>
-      <button onClick={() => (window as any).liff?.closeWindow()} className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full">返回 LINE</button>
+      <button onClick={() => closeLiffWindow()} className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full">返回 LINE</button>
     </div>
   );
 
@@ -126,7 +134,7 @@ const LiffEdit: React.FC = () => {
       {trip && initialData && (
         <ExpenseModal 
           isOpen={true}
-          onClose={() => (window as any).liff?.closeWindow()} 
+          onClose={() => closeLiffWindow()} 
           trip={trip}
           currentUser={trip.members[0]} 
           onSuccess={() => setIsSuccess(true)}
