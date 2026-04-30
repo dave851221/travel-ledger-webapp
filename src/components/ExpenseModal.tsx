@@ -152,12 +152,15 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setPhotos([]);
         setPreviews([]);
 
-        const initialPayer = currentUser || trip.members[0];
+        const initialPayer = currentUser || trip.default_payer || trip.members[0];
         setPayerActive(new Set([initialPayer]));
         setPayerLocked(new Set());
         setPayerData({});
 
-        setSplitActive(new Set(trip.members));
+        const defaultSplit = trip.default_split_members?.length
+          ? new Set(trip.default_split_members.filter(m => trip.members.includes(m)))
+          : new Set(trip.members);
+        setSplitActive(defaultSplit.size > 0 ? defaultSplit : new Set(trip.members));
         setSplitLocked(new Set());
         setSplitData({});
         setAdjustmentMember(initialPayer);

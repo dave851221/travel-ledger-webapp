@@ -56,6 +56,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [baseCurrency, setBaseCurrency] = useState(trip.base_currency);
   const [defaultCurrency, setDefaultCurrency] = useState(trip.default_currency || trip.base_currency);
   const [defaultCategory, setDefaultCategory] = useState(trip.default_category || trip.categories[0] || '');
+  const [defaultPayer, setDefaultPayer] = useState(trip.default_payer || '');
+  const [defaultSplitMembers, setDefaultSplitMembers] = useState<string[]>(trip.default_split_members || []);
 
   const [newMember, setNewMember] = useState('');
   const [newCategory, setNewCategory] = useState('');
@@ -71,6 +73,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setBaseCurrency(trip.base_currency);
       setDefaultCurrency(trip.default_currency || trip.base_currency);
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
+      setDefaultPayer(trip.default_payer || '');
+      setDefaultSplitMembers(trip.default_split_members || []);
       setMemberRenames({});
 
       const rStr: Record<string, string> = {};
@@ -182,7 +186,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           precision_config: finalPrecision,
           base_currency: baseCurrency,
           default_currency: defaultCurrency,
-          default_category: defaultCategory
+          default_category: defaultCategory,
+          default_payer: defaultPayer || null,
+          default_split_members: defaultSplitMembers
         })
         .eq('id', trip.id);
 
@@ -392,6 +398,60 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 ))}
               </div>
               <p className="text-[10px] sm:text-xs text-slate-400 px-2 font-medium bg-slate-50 dark:bg-slate-900/50 p-3 sm:p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 leading-relaxed">💡 <b>提示：</b> 您可以直接點擊姓名進行修改，系統會自動同步歷史紀錄。</p>
+
+              {/* Default payer & split */}
+              <div className="pt-2 space-y-5 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest pt-2">記帳預設值</p>
+
+                {/* Default payer */}
+                <div className="space-y-2">
+                  <label className="text-[10px] sm:text-xs font-bold text-slate-500">預設付款人</label>
+                  <div className="flex flex-wrap gap-2">
+                    {members.map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setDefaultPayer(prev => prev === m ? '' : m)}
+                        className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${
+                          defaultPayer === m
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400">未選則以登入身分為準，若未登入則使用第一位成員。</p>
+                </div>
+
+                {/* Default split members */}
+                <div className="space-y-2">
+                  <label className="text-[10px] sm:text-xs font-bold text-slate-500">預設分攤成員</label>
+                  <div className="flex flex-wrap gap-2">
+                    {members.map(m => {
+                      const checked = defaultSplitMembers.includes(m);
+                      return (
+                        <button
+                          key={m}
+                          onClick={() =>
+                            setDefaultSplitMembers(prev =>
+                              checked ? prev.filter(x => x !== m) : [...prev, m]
+                            )
+                          }
+                          className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${
+                            checked
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400">未選則預設全部成員分攤。</p>
+                </div>
+              </div>
             </div>
           )}
 

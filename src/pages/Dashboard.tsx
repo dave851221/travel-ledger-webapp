@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, 
-  Tooltip, Legend, 
+  Tooltip,
   ResponsiveContainer,
   LabelList
 } from 'recharts';
@@ -296,14 +296,13 @@ const Dashboard: React.FC = () => {
   const filteredExpenses = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return expenses.filter(e => {
+      if (e.is_settlement) return false;
       const matchesSearch = !q || (
-        e.description.toLowerCase().includes(q) || 
+        e.description.toLowerCase().includes(q) ||
         e.category.toLowerCase().includes(q) ||
         Object.keys(e.payer_data).some(p => p.toLowerCase().includes(q))
       );
-      
       const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(e.category);
-      
       return matchesSearch && matchesCategory;
     });
   }, [expenses, searchQuery, selectedCategories]);
@@ -362,6 +361,8 @@ const Dashboard: React.FC = () => {
   }, [expenses, trip, currentUser]);
 
   const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
+  const [expandedCatStats, setExpandedCatStats] = useState<Set<string>>(new Set());
+  const [expandedMemberCatStats, setExpandedMemberCatStats] = useState<Set<string>>(new Set());
 
   const groupedExpenses = useMemo(() => {
     const groups: Record<string, { expenses: Expense[], totals: Record<string, number> }> = {};
@@ -774,21 +775,22 @@ const Dashboard: React.FC = () => {
             <div className="space-y-12 sm:space-y-20">
               <h2 className="text-xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-4"><BarChart3 className="text-blue-600 w-7 h-7 sm:w-10 sm:h-10" />數據視覺化分析</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 sm:gap-16">
+
                 {/* Category Pie Chart & Details Table */}
                 <section className="bg-white dark:bg-slate-900 p-6 sm:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
-                  <h3 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white mb-10 uppercase tracking-[0.2em] self-start">消費類別佔比 (總計 {fmt(stats.grandBase.total, trip?.base_currency || 'TWD', trip?.precision_config)})</h3>
-                  <div className="flex flex-col items-center gap-12">
-                    {/* Chart Area */}
-                    <div className="w-full max-w-[500px] h-[350px] sm:h-[450px] shrink-0">
+                  <h3 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white mb-6 uppercase tracking-[0.2em] self-start">消費類別佔比 (總計 {fmt(stats.grandBase.total, trip?.base_currency || 'TWD', trip?.precision_config)})</h3>
+                  <div className="flex flex-col items-center gap-5">
+
+                    {/* Chart Area — no built-in Legend */}
+                    <div className="w-full max-w-[480px] h-[280px] sm:h-[340px] shrink-0">
                       {stats.categoryData.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
-                            <Pie data={stats.categoryData} cx="50%" cy="50%" innerRadius="40%" outerRadius="60%" paddingAngle={5} dataKey="value" stroke="none">
+                            <Pie data={stats.categoryData} cx="50%" cy="50%" innerRadius="38%" outerRadius="56%" paddingAngle={4} dataKey="value" stroke="none">
                               {stats.categoryData.map((_, idx) => (<Cell key={`c-${idx}`} fill={COLORS[idx % COLORS.length]} />))}
-                              <LabelList dataKey="value" position="outside" offset={12} formatter={(v: any) => typeof v === 'number' ? fmt(v, '', trip?.precision_config) : ''} style={{ fontSize: '11px', fontWeight: '900', fill: '#1e293b' }} />
+                              <LabelList dataKey="value" position="outside" offset={10} formatter={(v: any) => typeof v === 'number' ? fmt(v, '', trip?.precision_config) : ''} style={{ fontSize: '10px', fontWeight: '900', fill: '#1e293b' }} />
                             </Pie>
                             <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} formatter={(v: any) => [fmt(Number(v), trip?.base_currency, trip?.precision_config), '金額']} />
-                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
                           </PieChart>
                         </ResponsiveContainer>
                       ) : (
@@ -798,44 +800,133 @@ const Dashboard: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Table Area */}
-                    <div className="w-full space-y-3">
-                      <div className="grid grid-cols-1 divide-y divide-slate-50 dark:divide-slate-800 border-t border-slate-50 dark:border-slate-800 pt-6">
+                    {/* Custom Legend — 2-column grid */}
+                    {stats.categoryData.length > 0 && (
+                      <div className="w-full grid grid-cols-2 gap-x-6 gap-y-1.5 px-1">
                         {stats.categoryData.map((cat, idx) => (
-                          <div key={cat.name} className="flex items-center justify-between py-3 px-2">
-                            <div className="flex items-center gap-3"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} /><span className="text-sm font-black text-slate-700 dark:text-slate-300">{cat.name}</span></div>
-                            <div className="flex items-baseline gap-3"><span className="text-sm font-black text-slate-900 dark:text-white">{fmt(cat.value, trip?.base_currency || 'TWD', trip?.precision_config)}</span><span className="text-[10px] text-slate-400 font-bold w-10 text-right">{((cat.value / stats.grandBase.total) * 100).toFixed(1)}%</span></div>
+                          <div key={cat.name} className="flex items-center gap-2 min-w-0">
+                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 truncate">{cat.name}</span>
+                            <span className="text-[11px] font-black text-slate-400 ml-auto shrink-0">{((cat.value / stats.grandBase.total) * 100).toFixed(1)}%</span>
                           </div>
                         ))}
                       </div>
-                    </div>
+                    )}
+
+                    {/* Table Area — compact rows, expandable */}
+                    {stats.categoryData.length > 0 && (
+                      <div className="w-full border-t border-slate-100 dark:border-slate-800 pt-2">
+                        {stats.categoryData.map((cat, idx) => {
+                          const isExpanded = expandedCatStats.has(cat.name);
+                          const catExpenses = expenses
+                            .filter(e => !e.is_settlement && e.category === cat.name)
+                            .sort((a, b) => b.date.localeCompare(a.date));
+                          return (
+                            <div key={cat.name} className="border-b border-slate-50 dark:border-slate-800 last:border-b-0">
+                              <button
+                                onClick={() => setExpandedCatStats(prev => {
+                                  const next = new Set(prev);
+                                  next.has(cat.name) ? next.delete(cat.name) : next.add(cat.name);
+                                  return next;
+                                })}
+                                className="flex items-center justify-between py-1.5 px-2 w-full hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-lg transition-all"
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                  <span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">{cat.name}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">{fmt(cat.value, trip?.base_currency || 'TWD', trip?.precision_config)}</span>
+                                  <span className="text-[10px] text-slate-400 font-bold w-8 text-right">{((cat.value / stats.grandBase.total) * 100).toFixed(1)}%</span>
+                                  <ChevronRight size={12} className={`text-slate-300 transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                                </div>
+                              </button>
+                              {isExpanded && (
+                                <div className="ml-5 mb-1.5 mt-0.5 space-y-0.5">
+                                  {catExpenses.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400 px-2 py-1">無資料</p>
+                                  ) : catExpenses.map(e => (
+                                    <div key={e.id} className="flex items-center justify-between text-[11px] py-1 px-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-lg">
+                                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                                        <span className="text-slate-400 shrink-0 tabular-nums">{e.date.slice(5)}</span>
+                                        <span className="font-bold text-slate-600 dark:text-slate-400 truncate">{e.description}</span>
+                                      </div>
+                                      <span className="font-black text-slate-700 dark:text-slate-300 shrink-0 ml-3 tabular-nums">
+                                        {e.currency} {formatAmount(e.amount, e.currency, trip?.precision_config || {})}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </section>
 
-                {/* Member Details Table */}
+                {/* Member Details Table — compact + expandable */}
                 <section className="bg-white dark:bg-slate-900 p-6 sm:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-                  <h3 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white mb-10 uppercase tracking-[0.2em]">個人消費明細表 ({trip?.base_currency})</h3>
-                  <div className="space-y-10 max-h-[500px] overflow-y-auto no-scrollbar pr-2">
+                  <h3 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white mb-6 uppercase tracking-[0.2em]">個人消費明細表 ({trip?.base_currency})</h3>
+                  <div className="space-y-5 max-h-[600px] overflow-y-auto no-scrollbar pr-2">
                     {Object.entries(stats.memberDetails).map(([name, data]) => (
-                      <div key={name} className="space-y-4">
-                        <div className="flex items-center justify-between border-b-2 border-slate-100 dark:border-slate-800 pb-2">
-                          <span className="text-base sm:text-xl font-black text-blue-600">{name}</span>
-                          <span className="text-sm sm:text-lg font-black text-slate-900 dark:text-white">總額: {fmt(data.totalOwed, trip?.base_currency || 'TWD', trip?.precision_config)} {trip?.base_currency}</span>
+                      <div key={name} className="space-y-0.5">
+                        <div className="flex items-center justify-between border-b-2 border-slate-100 dark:border-slate-800 pb-1.5 mb-1">
+                          <span className="text-sm sm:text-base font-black text-blue-600">{name}</span>
+                          <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">總額: {fmt(data.totalOwed, trip?.base_currency || 'TWD', trip?.precision_config)} {trip?.base_currency}</span>
                         </div>
-                        <div className="grid grid-cols-1 gap-3">
-                          {Object.entries(data.categories)
-                            .filter(([, val]) => val !== 0)
-                            .map(([cat, val]) => (
-                            <div key={cat} className="flex items-center justify-between text-xs sm:text-base font-black text-slate-700 dark:text-slate-300">
-                              <span>{cat}</span>
-                              <div className="flex gap-4"><span>{fmt(val, trip?.base_currency || 'TWD', trip?.precision_config)}</span><span className="text-[10px] text-slate-400 w-12 text-right">({((val / data.totalOwed) * 100).toFixed(0)}%)</span></div>
-                            </div>
-                          ))}
-                        </div>
+                        {Object.entries(data.categories)
+                          .filter(([, val]) => val !== 0)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([cat, val]) => {
+                            const key = `${name}::${cat}`;
+                            const isExpanded = expandedMemberCatStats.has(key);
+                            const memberCatExpenses = expenses
+                              .filter(e => !e.is_settlement && e.category === cat && (Number(e.split_data[name]) || 0) > 0)
+                              .sort((a, b) => b.date.localeCompare(a.date));
+                            return (
+                              <div key={cat} className="border-b border-slate-50 dark:border-slate-800 last:border-b-0">
+                                <button
+                                  onClick={() => setExpandedMemberCatStats(prev => {
+                                    const next = new Set(prev);
+                                    next.has(key) ? next.delete(key) : next.add(key);
+                                    return next;
+                                  })}
+                                  className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 py-1 px-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors w-full"
+                                >
+                                  <span className="truncate text-left">{cat}</span>
+                                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                                    <span className="tabular-nums">{fmt(val, trip?.base_currency || 'TWD', trip?.precision_config)}</span>
+                                    <span className="text-[10px] text-slate-400 w-9 text-right tabular-nums">({((val / data.totalOwed) * 100).toFixed(0)}%)</span>
+                                    <ChevronRight size={11} className={`text-slate-300 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} />
+                                  </div>
+                                </button>
+                                {isExpanded && (
+                                  <div className="ml-2 mb-1 mt-0.5 space-y-0.5">
+                                    {memberCatExpenses.length === 0 ? (
+                                      <p className="text-[11px] text-slate-400 px-2 py-1">無資料</p>
+                                    ) : memberCatExpenses.map(e => (
+                                      <div key={e.id} className="flex items-center justify-between text-[11px] py-1 px-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-lg">
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                          <span className="text-slate-400 shrink-0 tabular-nums">{e.date.slice(5)}</span>
+                                          <span className="font-bold text-slate-600 dark:text-slate-400 truncate">{e.description}</span>
+                                        </div>
+                                        <span className="font-black text-slate-700 dark:text-slate-300 shrink-0 ml-3 tabular-nums">
+                                          {e.currency} {formatAmount(Number(e.split_data[name]) || 0, e.currency, trip?.precision_config || {})}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                       </div>
                     ))}
                   </div>
                 </section>
+
               </div>
             </div>
           )}
@@ -863,10 +954,15 @@ const Dashboard: React.FC = () => {
                   {Object.entries(stats.balances).map(([cur, memberBalances]) => {
                     const settlements = calculateSettlements(memberBalances);
                     if (settlements.length === 0) return null;
-                    
+
                     const isGrand = cur === 'GRAND_TOTAL';
                     const currencyCount = Object.keys(stats.balances).filter(k => k !== 'GRAND_TOTAL').length;
                     if (!isGrand && currencyCount === 1) return null;
+
+                    // When grand total is already settled, per-currency imbalances cancel out
+                    // in aggregate (e.g. owe 5000 JPY but are owed equivalent TWD) — no action needed.
+                    const grandIsSettled = calculateSettlements(stats.balances['GRAND_TOTAL']).length === 0;
+                    if (!isGrand && grandIsSettled) return null;
 
                     const curName = isGrand ? trip?.base_currency : cur;
                     return (
@@ -891,8 +987,47 @@ const Dashboard: React.FC = () => {
                     );
                   })}
                 </div>
-                {Object.keys(stats.balances).every(cur => calculateSettlements(stats.balances[cur]).length === 0) && (<div className="py-20 text-center text-slate-400 font-black">目前一切都已結清。</div>)}
+                {calculateSettlements(stats.balances['GRAND_TOTAL'] ?? {}).length === 0 && (<div className="py-20 text-center text-slate-400 font-black">目前一切都已結清。</div>)}
               </section>
+
+              {/* Settlement History */}
+              {(() => {
+                const settlementRecords = expenses
+                  .filter(e => e.is_settlement)
+                  .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
+                if (settlementRecords.length === 0) return null;
+                return (
+                  <section className="bg-white dark:bg-slate-900 p-4 sm:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                    <h3 className="text-base sm:text-2xl font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
+                      <Check size={20} className="text-emerald-600" />結清記錄
+                    </h3>
+                    <div className="space-y-2">
+                      {settlementRecords.map(e => {
+                        const from = Object.entries(e.payer_data).filter(([, v]) => v !== 0).map(([n]) => n).join(', ');
+                        const to = Object.entries(e.split_data).filter(([, v]) => v !== 0).map(([n]) => n).join(', ');
+                        return (
+                          <div key={e.id} className="flex items-center gap-3 sm:gap-6 p-3 sm:p-4 bg-emerald-50/40 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
+                            <div className="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">
+                              <HandCoins size={16} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-300">
+                                <span className="text-emerald-600 truncate">{from}</span>
+                                <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                                <span className="truncate">{to}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-bold mt-0.5">{e.date}</p>
+                            </div>
+                            <span className="text-sm sm:text-base font-black text-emerald-600 shrink-0 tabular-nums">
+                              {e.currency} {formatAmount(e.amount, e.currency, trip?.precision_config || {})}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })()}
             </div>
           )}
 
