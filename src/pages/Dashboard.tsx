@@ -58,7 +58,7 @@ const Dashboard: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabType>('ledger');
+  const [activeTab, setActiveTab] = useState<TabType>(() => hasItinerary(id || '') ? 'itinerary' : 'ledger');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -1002,11 +1002,11 @@ const Dashboard: React.FC = () => {
                       <Check size={20} className="text-emerald-600" />結清記錄
                     </h3>
                     <div className="space-y-2">
-                      {settlementRecords.map(e => {
-                        const from = Object.entries(e.payer_data).filter(([, v]) => v !== 0).map(([n]) => n).join(', ');
-                        const to = Object.entries(e.split_data).filter(([, v]) => v !== 0).map(([n]) => n).join(', ');
+                      {settlementRecords.map(sr => {
+                        const from = Object.entries(sr.payer_data).filter(([, v]) => v !== 0).map(([n]) => n).join(', ');
+                        const to = Object.entries(sr.split_data).filter(([, v]) => v !== 0).map(([n]) => n).join(', ');
                         return (
-                          <div key={e.id} className="flex items-center gap-3 sm:gap-6 p-3 sm:p-4 bg-emerald-50/40 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
+                          <div key={sr.id} className="flex items-center gap-3 sm:gap-6 p-3 sm:p-4 bg-emerald-50/40 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
                             <div className="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">
                               <HandCoins size={16} />
                             </div>
@@ -1016,11 +1016,27 @@ const Dashboard: React.FC = () => {
                                 <ChevronRight size={14} className="text-slate-300 shrink-0" />
                                 <span className="truncate">{to}</span>
                               </div>
-                              <p className="text-[10px] text-slate-400 font-bold mt-0.5">{e.date}</p>
+                              <p className="text-[10px] text-slate-400 font-bold mt-0.5">{sr.date}</p>
                             </div>
                             <span className="text-sm sm:text-base font-black text-emerald-600 shrink-0 tabular-nums">
-                              {e.currency} {formatAmount(e.amount, e.currency, trip?.precision_config || {})}
+                              {sr.currency} {formatAmount(sr.amount, sr.currency, trip?.precision_config || {})}
                             </span>
+                            {!trip?.is_archived && (
+                              <div className="flex gap-1 shrink-0">
+                                <button
+                                  onClick={() => handleEditExpense(sr)}
+                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-400 hover:bg-blue-600 hover:text-white transition-all border border-slate-100 dark:border-slate-700"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirmId(sr.id)}
+                                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-400 hover:bg-rose-600 hover:text-white transition-all border border-slate-100 dark:border-slate-700"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

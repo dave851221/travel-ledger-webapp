@@ -56,7 +56,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [baseCurrency, setBaseCurrency] = useState(trip.base_currency);
   const [defaultCurrency, setDefaultCurrency] = useState(trip.default_currency || trip.base_currency);
   const [defaultCategory, setDefaultCategory] = useState(trip.default_category || trip.categories[0] || '');
-  const [defaultPayer, setDefaultPayer] = useState(trip.default_payer || '');
+  const [defaultPayer, setDefaultPayer] = useState<string[]>(trip.default_payer || []);
   const [defaultSplitMembers, setDefaultSplitMembers] = useState<string[]>(trip.default_split_members || []);
 
   const [newMember, setNewMember] = useState('');
@@ -73,7 +73,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setBaseCurrency(trip.base_currency);
       setDefaultCurrency(trip.default_currency || trip.base_currency);
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
-      setDefaultPayer(trip.default_payer || '');
+      setDefaultPayer(trip.default_payer || []);
       setDefaultSplitMembers(trip.default_split_members || []);
       setMemberRenames({});
 
@@ -187,7 +187,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           base_currency: baseCurrency,
           default_currency: defaultCurrency,
           default_category: defaultCategory,
-          default_payer: defaultPayer || null,
+          default_payer: defaultPayer,
           default_split_members: defaultSplitMembers
         })
         .eq('id', trip.id);
@@ -407,19 +407,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <div className="space-y-2">
                   <label className="text-[10px] sm:text-xs font-bold text-slate-500">預設付款人</label>
                   <div className="flex flex-wrap gap-2">
-                    {members.map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setDefaultPayer(prev => prev === m ? '' : m)}
-                        className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${
-                          defaultPayer === m
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
-                        }`}
-                      >
-                        {m}
-                      </button>
-                    ))}
+                    {members.map(m => {
+                      const checked = defaultPayer.includes(m);
+                      return (
+                        <button
+                          key={m}
+                          onClick={() =>
+                            setDefaultPayer(prev =>
+                              checked ? prev.filter(x => x !== m) : [...prev, m]
+                            )
+                          }
+                          className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${
+                            checked
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      );
+                    })}
                   </div>
                   <p className="text-[9px] sm:text-[10px] text-slate-400">未選則以登入身分為準，若未登入則使用第一位成員。</p>
                 </div>

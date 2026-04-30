@@ -152,8 +152,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setPhotos([]);
         setPreviews([]);
 
-        const initialPayer = currentUser || trip.default_payer || trip.members[0];
-        setPayerActive(new Set([initialPayer]));
+        const defaultPayers = (trip.default_payer ?? []).filter(m => trip.members.includes(m));
+        const activePayers = defaultPayers.length > 0
+          ? new Set(defaultPayers)
+          : new Set([currentUser || trip.members[0]]);
+        setPayerActive(activePayers);
         setPayerLocked(new Set());
         setPayerData({});
 
@@ -163,7 +166,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setSplitActive(defaultSplit.size > 0 ? defaultSplit : new Set(trip.members));
         setSplitLocked(new Set());
         setSplitData({});
-        setAdjustmentMember(initialPayer);
+
+        // adjMember: 優先 currentUser（若在預設付款人中）→ 第一個預設付款人 → 第一位成員
+        const adjMember = activePayers.has(currentUser || '')
+          ? currentUser!
+          : [...activePayers][0] ?? trip.members[0];
+        setAdjustmentMember(adjMember);
       }
     }
   }, [isOpen, editData, trip.members, currentUser, trip.base_currency]);

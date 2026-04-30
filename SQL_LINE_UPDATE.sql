@@ -9,11 +9,12 @@ CREATE TABLE IF NOT EXISTS line_trip_id_mapping (
 
 -- 2. 建立 LINE 使用者狀態表
 CREATE TABLE IF NOT EXISTS line_user_states (
-    line_user_id TEXT PRIMARY KEY,
+    line_user_id    TEXT PRIMARY KEY,
     current_trip_id UUID REFERENCES trips(id) ON DELETE SET NULL,
     pending_trip_id UUID REFERENCES trips(id) ON DELETE SET NULL, -- 用於密碼驗證中
-    default_config TEXT,
-    last_active_at TIMESTAMPTZ DEFAULT NOW()
+    default_config  TEXT,
+    last_active_at  TIMESTAMPTZ DEFAULT NOW(),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 3. 自動生成 6 位隨機碼的 Function
@@ -86,4 +87,11 @@ CREATE TABLE IF NOT EXISTS line_processed_actions (
 -- 設定 RLS
 ALTER TABLE line_processed_actions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all on processed_actions" ON line_processed_actions FOR ALL USING (true) WITH CHECK (true);
+
+-- ============================================================
+-- 下方 ALTER TABLE 供「既有資料庫」補齊欄位，全新架設可略過
+-- ============================================================
+
+ALTER TABLE line_user_states
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 

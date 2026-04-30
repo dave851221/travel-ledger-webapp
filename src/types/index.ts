@@ -7,7 +7,7 @@ export interface Trip {
   base_currency: string;
   default_currency?: string;
   default_category?: string;
-  default_payer?: string;
+  default_payer?: string[];
   default_split_members?: string[];
   rates: Record<string, number>;
   precision_config: Record<string, number>;
