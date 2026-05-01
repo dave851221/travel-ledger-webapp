@@ -15,6 +15,61 @@ const DEFAULT_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+// Fix 7: dynamic quick reply based on bound state
+function getQuickReply(bound: boolean) {
+  if (!bound) {
+    return {
+      items: [
+        { type: "action", action: { type: "message", label: "❓ 如何使用", text: "耀西" } },
+      ]
+    }
+  }
+  return {
+    items: [
+      { type: "action", action: { type: "message", label: "📅 今日支出", text: "今日支出" } },
+      { type: "action", action: { type: "message", label: "📊 本月支出", text: "本月支出" } },
+      { type: "action", action: { type: "message", label: "💰 結算", text: "結算" } },
+      { type: "action", action: { type: "message", label: "🗺️ 旅程總覽", text: "旅程總覽" } },
+    ]
+  }
+}
+
+// Fix 3: extract JSON from potential markdown code block wrapper
+function extractJSON(text: string): string {
+  const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (codeBlock) return codeBlock[1].trim()
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start !== -1 && end !== -1 && end > start) return text.substring(start, end + 1)
+  return text.trim()
+}
+
+// Fix 2: store pending expense in chat_history to avoid 300-byte postback limit
+async function storePendingExpense(sourceId: string, nonce: string, data: any) {
+  await supabase.from('line_chat_history').insert({
+    line_user_id: sourceId,
+    role: 'pending',
+    content: JSON.stringify({ n: nonce, ...data })
+  })
+}
+
+async function getPendingExpense(sourceId: string, nonce: string): Promise<any | null> {
+  const { data } = await supabase.from('line_chat_history')
+    .select('content')
+    .eq('line_user_id', sourceId)
+    .eq('role', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(10)
+  if (!data) return null
+  for (const row of data) {
+    try {
+      const parsed = JSON.parse(row.content)
+      if (parsed.n === nonce) return parsed
+    } catch { /* skip malformed */ }
+  }
+  return null
+}
+
 const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀西」
 您可以透過自然語言對我下指令，或是上傳收據照片，我會自動幫您處理記帳！
 
@@ -34,6 +89,10 @@ const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀�
 • 指定付款：說「代杰付了Uber 300」
 • 複雜分帳：說「拉麵 3000 日幣，代杰先付，大家平分」
 • 修正記帳：說「剛剛那筆改 500」
+• 撤銷記帳：說「刪掉上一筆」
+
+📊 快捷查詢（直接輸入或點選下方按鈕）：
+• 今日支出 / 本月支出 / 結算 / 旅程總覽
 
 💡 群組提醒：
 問我問題時，請"@提及"我，或是喊「耀西」喚醒我，不然我平常都躲在蛋裡睡覺唷！
@@ -62,9 +121,6 @@ function getTodayString(timezone = 'Asia/Taipei'): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date())
 }
 
-/**
- * 同步 Webapp 的餘數校正邏輯 (from src/utils/finance.ts)
- */
 function calculateDistribution(
   total: number,
   activeMembers: string[],
@@ -119,7 +175,30 @@ function calculateDistribution(
   return finalResult;
 }
 
-// Fix 9: updated to use decodeBase64 from std@0.224.0
+function calculateSettlements(memberBalances: Record<string, number>): { from: string, to: string, amount: number }[] {
+  const EPSILON = new Decimal('0.01')
+  const debtors: { name: string, amt: Decimal }[] = []
+  const creditors: { name: string, amt: Decimal }[] = []
+  Object.entries(memberBalances).forEach(([name, bal]) => {
+    const d = new Decimal(bal)
+    if (d.lt(EPSILON.negated())) debtors.push({ name, amt: d.negated() })
+    else if (d.gt(EPSILON)) creditors.push({ name, amt: d })
+  })
+  debtors.sort((a, b) => b.amt.comparedTo(a.amt))
+  creditors.sort((a, b) => b.amt.comparedTo(a.amt))
+  const result: { from: string, to: string, amount: number }[] = []
+  let i = 0, j = 0
+  while (i < debtors.length && j < creditors.length) {
+    const minAmt = Decimal.min(debtors[i].amt, creditors[j].amt)
+    result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt.toNumber() })
+    debtors[i].amt = debtors[i].amt.minus(minAmt)
+    creditors[j].amt = creditors[j].amt.minus(minAmt)
+    if (debtors[i].amt.lt(EPSILON)) i++
+    if (creditors[j].amt.lt(EPSILON)) j++
+  }
+  return result
+}
+
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {
   if (!signature || !LINE_CHANNEL_SECRET) return false
   const encoder = new TextEncoder()
@@ -147,10 +226,9 @@ async function replyMessage(replyToken: string, messages: any[], to?: string) {
   }
 }
 
-// Fix 1: null-check for Gemini response
 async function askGemini(contents: any[]) {
-  console.log(`[AI] Calling Gemini Flash Lite...`)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_API_KEY}`
+  console.log(`[AI] Calling Gemini 2.5 Flash...`)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -170,22 +248,14 @@ async function getGroupMemberName(groupId: string, userId: string): Promise<stri
   try {
     const response = await fetch(
       `https://api.line.me/v2/bot/group/${groupId}/member/${userId}`,
-      {
-        headers: {
-          "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
-        },
-      }
+      { headers: { "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` } }
     );
-
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[LINE API Error] 無法取得成員名稱: ${errorText}`);
+      console.error(`[LINE API Error] 無法取得成員名稱: ${await response.text()}`);
       return "";
     }
-
     const profile = await response.json();
     console.log(`[PROFILE in GROUP] ${JSON.stringify(profile, null, 2)}`)
-
     return profile.displayName;
   } catch (error) {
     console.error("[Fetch Error] 呼叫 LINE API 失敗:", error);
@@ -209,7 +279,6 @@ serve(async (req) => {
       const isGroup = sourceType !== 'user'
       console.log(`[EVENT] ${JSON.stringify(event, null, 2)}`);
 
-      // Fix 7: only fetch memberName for text/image messages (not postbacks)
       let memberName = "未知";
       const needsMemberName = event.type === 'message' && (event.message?.type === 'text' || event.message?.type === 'image');
       if (event.source.type === "group" && needsMemberName) {
@@ -217,7 +286,6 @@ serve(async (req) => {
         memberName = fetchedName || `User_${event.source.userId.substring(0, 8)}`;
       }
 
-      // --- 取得或初始化使用者狀態 ---
       let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
       if (!userState) {
         console.log(`[DB] Registering new state for sourceId: ${sourceId}`)
@@ -227,9 +295,8 @@ serve(async (req) => {
       const isBinding = !!(userState?.pending_trip_id && !userState?.current_trip_id)
       const isBound = !!userState?.current_trip_id
 
-      // --- 樣板訊息處理 ---
+      // --- Postback 處理 ---
       if (isBound && (event.type === 'postback')) {
-        // Fix 3: try-catch for postback JSON.parse
         let postbackData: any
         try {
           postbackData = JSON.parse(event.postback.data)
@@ -240,28 +307,64 @@ serve(async (req) => {
         }
 
         console.log(`[POSTBACK] Data: ${event.postback.data}`)
+
+        // Fix 1: 撤銷存入（postback 按鈕）
+        if (postbackData.act === 'undo') {
+          const expenseId = postbackData.eid
+          const description = postbackData.d || '該筆支出'
+          if (expenseId) {
+            const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', expenseId)
+            if (error) {
+              await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
+            } else {
+              await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}`, quickReply: getQuickReply(true) }], sourceId)
+            }
+          } else {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可撤銷的記錄。' }], sourceId)
+          }
+          continue
+        }
+
         if (postbackData.action === 'save_expense' || postbackData.act === 'save') {
           const { n: nonce_short, expense: exp_old, exp: exp_new, photo_urls: p_old, p: p_new } = postbackData
           const nonce = nonce_short || postbackData.nonce
-          const expenseRaw = exp_new || exp_old || postbackData.expense
-          const photo_ids = p_new || p_old || postbackData.photo_urls || []
+
+          // Fix 2: 優先從 chat_history 取得 pending 資料（避免 300 bytes 限制）
+          let expenseRaw = exp_new || exp_old || postbackData.expense
+          let photo_ids = p_new || p_old || postbackData.photo_urls || []
+          let trip_id = postbackData.trip_id || userState?.current_trip_id
+
+          if (!expenseRaw && nonce) {
+            const pending = await getPendingExpense(sourceId, nonce)
+            if (pending) {
+              expenseRaw = pending.exp
+              photo_ids = pending.p || []
+              trip_id = pending.tid || trip_id
+            }
+          }
+
+          if (!expenseRaw) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，請重新記帳。' }], sourceId); continue
+          }
 
           if (nonce) {
             const { error: nonceInsertError } = await supabase
               .from('line_processed_actions')
               .insert({ nonce, line_user_id: sourceId, action_type: 'save' });
             if (nonceInsertError) {
-              await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }], sourceId); continue
+              // Fix 8: 查詢 action_type 提供更明確的回覆
+              const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
+              const msg = processed?.action_type === 'save'
+                ? `⚠️ 此筆支出已於先前成功存入！`
+                : `⚠️ 此操作已處理過囉！`
+              await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId); continue
             }
           }
 
-          // Fix 10: remove redundant userState fetch — use existing userState from top level
-          const trip_id = postbackData.trip_id || userState?.current_trip_id
           if (!trip_id) {
             await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到對應旅程，請重新綁定。` }], sourceId); continue
           }
 
-          // 解析簡寫欄位
           const expense = {
             description: expenseRaw.d ?? expenseRaw.description,
             amount: expenseRaw.a ?? expenseRaw.amount,
@@ -282,15 +385,10 @@ serve(async (req) => {
           }
 
           const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
-
           const numAmount = new Decimal(parseFloat(expense.amount as any) || 0).toDecimalPlaces(precision).toNumber()
-
           const payerMembers = Object.keys(expense.payer_data).filter(m => trip.members.includes(m))
           const splitMembers = Object.keys(expense.split_details).filter(m => trip.members.includes(m))
-
-          // Fix 6: adjustment_member matches payer when possible (mirrors frontend logic)
           const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
-
           const finalPayerData = calculateDistribution(numAmount, payerMembers, expense.payer_data, payerMembers[0], precision)
           const finalSplitData = calculateDistribution(numAmount, splitMembers, expense.split_details, adjustMember, precision)
 
@@ -305,16 +403,42 @@ serve(async (req) => {
             continue
           }
 
-          await supabase.from('expenses').insert({
+          const { data: savedExpense } = await supabase.from('expenses').insert({
             trip_id: trip_id, description: expense.description, amount: target.toNumber(), currency: expense.currency,
             payer_data: finalPayerData, split_data: finalSplitData, date: expense.date, category: expense.category,
-            photo_urls: photo_urls,
-            adjustment_member: adjustMember
-          })
-          await replyMessage(replyToken, [{ type: 'text', text: `✅ 已存入：${expense.description}` }], sourceId)
+            photo_urls: photo_urls, adjustment_member: adjustMember
+          }).select('id').single()
+
+          // Fix 1: 記錄 expense_id 供文字指令撤銷
+          if (savedExpense?.id) {
+            supabase.from('line_chat_history').insert({
+              line_user_id: sourceId, role: 'saved',
+              content: JSON.stringify({ expense_id: savedExpense.id, description: expense.description })
+            }).then(() => {})
+          }
+
+          // Fix 5: 存入後附帶撤銷按鈕
+          const undoItems = savedExpense?.id
+            ? [{ type: "action", action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: savedExpense.id, d: expense.description }) } }]
+            : []
+          await replyMessage(replyToken, [{
+            type: 'text', text: `✅ 已存入：${expense.description}`,
+            quickReply: { items: [...undoItems, ...getQuickReply(true).items] }
+          }], sourceId)
+
         } else if (postbackData.action === 'cancel' || postbackData.act === 'cancel') {
           const nonce = postbackData.n ?? postbackData.nonce
-          const photo_ids = postbackData.p ?? postbackData.photo_urls ?? []
+          let photo_ids = postbackData.p ?? postbackData.photo_urls ?? []
+          let trip_id = postbackData.trip_id ?? userState?.current_trip_id
+
+          // Fix 2: 從 pending 取得照片資訊
+          if (photo_ids.length === 0 && nonce) {
+            const pending = await getPendingExpense(sourceId, nonce)
+            if (pending) {
+              photo_ids = pending.p || []
+              trip_id = pending.tid || trip_id
+            }
+          }
 
           if (nonce) {
             const { error: nonceInsertError } = await supabase
@@ -325,14 +449,10 @@ serve(async (req) => {
             }
           }
 
-          if (photo_ids.length > 0) {
-            // Fix 10: remove redundant userState fetch — use existing userState from top level
-            const trip_id = postbackData.trip_id ?? userState?.current_trip_id
-            if (trip_id) {
-              const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
-              console.log(`[PHOTO] Remove photo URL: ${urls}`)
-              await supabase.storage.from('travel-images').remove(urls)
-            }
+          if (photo_ids.length > 0 && trip_id) {
+            const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
+            console.log(`[PHOTO] Remove photo URL: ${urls}`)
+            await supabase.storage.from('travel-images').remove(urls)
           }
 
           await replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }], sourceId)
@@ -351,16 +471,17 @@ serve(async (req) => {
         }
 
         try {
-          // 1. 下載 LINE 圖片
+          const tripId = userState.current_trip_id
           console.log(`[IMAGE] Downloading messageId: ${messageId}`)
-          const lineRes = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
-            headers: { 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` }
-          })
+          const [lineRes, { data: trip }] = await Promise.all([
+            fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+              headers: { 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` }
+            }),
+            supabase.from('trips').select('*').eq('id', tripId).single()
+          ])
           if (!lineRes.ok) throw new Error('Failed to download image from LINE')
           const imageBuffer = await lineRes.arrayBuffer()
 
-          // 2. 上傳至 Supabase Storage
-          const tripId = userState.current_trip_id
           const filePath = `expenses/${tripId}/${messageId}.jpg`
           console.log(`[STORAGE] Uploading to: ${filePath}`)
           const { error: uploadErr } = await supabase.storage.from('travel-images').upload(filePath, imageBuffer, {
@@ -369,12 +490,7 @@ serve(async (req) => {
           if (uploadErr) throw uploadErr
 
           const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(filePath)
-
-          // 3. Gemini OCR 解析
-          const { data: trip } = await supabase.from('trips').select('*').eq('id', tripId).single()
-          // Fix 9: encodeBase64 from std@0.224.0
           const base64Image = encodeBase64(new Uint8Array(imageBuffer))
-          // Fix 2: timezone inferred from trip's primary currency
           const today = getTodayString(getTripTimezone(trip))
 
           const ocrPrompt = `
@@ -439,11 +555,11 @@ serve(async (req) => {
             ]}
           ])
 
-          const res = JSON.parse(aiResponse)
+          // Fix 3: use extractJSON for robust parsing
+          const res = JSON.parse(extractJSON(aiResponse))
           if (res.type === 'expense') {
             const expense = res.data
 
-            // Fix 6: adjustment_member mirrors payer when possible
             const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
@@ -457,30 +573,28 @@ serve(async (req) => {
             }
 
             const photo_ids = [messageId]
-            const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids }, null, 2)}`
-            await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary })
-
+            const nonce = Math.random().toString(36).substring(2, 10)
             const exp_short = {
               d: expense.description, a: expense.amount, c: expense.currency,
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
-            const nonce = Math.random().toString(36).substring(2, 10)
+
+            // Fix 2: 存入 pending，postback 只傳 nonce（遠低於 300 bytes）
+            await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId })
+
+            const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids }, null, 2)}`
+            await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary })
 
             const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
-            // Fix 9: encodeBase64 from std@0.224.0
             const liffData = encodeBase64(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
-              .replace(/\+/g, '-')
-              .replace(/\//g, '_')
-              .replace(/=+$/, '');
+              .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
 
             await replyMessage(replyToken, [{
               type: "flex", altText: `收據辨識預覽: ${expense.description}`,
               contents: {
                 type: "bubble",
-                hero: {
-                  type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover"
-                },
+                hero: { type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
                 body: {
                   type: "box", layout: "vertical",
                   contents: [
@@ -504,10 +618,10 @@ serve(async (req) => {
                 footer: {
                   type: "box", layout: "vertical", spacing: "sm",
                   contents: [
-                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", exp: exp_short, p: photo_ids, n: nonce }) } },
+                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
                     { type: "box", layout: "horizontal", spacing: "sm", contents: [
                       { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
-                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: photo_ids, n: nonce }) } }
+                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
                     ]},
                     { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
                   ]
@@ -532,14 +646,15 @@ serve(async (req) => {
         continue
       }
 
-      // --- 接下來僅為文字訊息處理 ---
       const userText = event.message.text.trim()
       console.log(`[USER_TEXT] "${userText}"`)
 
-      // 群組內喚醒邏輯
       const isMentioned = event.message.mention?.mentionees?.some((m: any) => m.isSelf === true)
       const isIdCommand = userText.toUpperCase().startsWith('ID:') || userText.toUpperCase().startsWith('ID：')
-      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程'
+      // Fix 6: add 本月支出
+      const QUICK_CMD_KEYWORDS = ['今日支出', '今天支出', '本週支出', '近期支出', '本月支出', '結算', '旅程總覽']
+      const isUndoKeyword = userText.includes('上一筆') && (userText.includes('刪') || userText.includes('取消') || userText.includes('撤銷'))
+      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程' || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword
 
       let shouldProcess = !isGroup
       if (isGroup) {
@@ -563,16 +678,20 @@ serve(async (req) => {
 
       const cleanText = userText.replace(/@\S+\s*/g, '').replace(/^耀西\s*/, '').trim()
 
-      // 1. ID 綁定
+      // 1. ID 綁定 / 切換旅程
       if (cleanText.toUpperCase().startsWith('ID:') || cleanText.toUpperCase().startsWith('ID：')) {
-        if (userState?.current_trip_id) {
-          await replyMessage(replyToken, [{ type: 'text', text: '⚠️ 目前已綁定旅程。請先輸入「斷開」後再重新綁定。' }], sourceId); continue
-        }
         const linebotId = cleanText.substring(3).trim().toUpperCase()
         const { data: mapping } = await supabase.from('line_trip_id_mapping').select('trip_id').eq('linebot_id', linebotId).maybeSingle()
         if (mapping) {
-          await supabase.from('line_user_states').update({ pending_trip_id: mapping.trip_id, current_trip_id: null }).eq('line_user_id', sourceId)
-          await replyMessage(replyToken, [{ type: 'text', text: '🔍 已找到旅程！請輸入密碼驗證。' }], sourceId)
+          if (userState?.current_trip_id === mapping.trip_id) {
+            await replyMessage(replyToken, [{ type: 'text', text: '✅ 您已綁定此旅程，無需重複綁定。' }], sourceId)
+          } else {
+            const msg = userState?.current_trip_id
+              ? '🔄 已找到旅程！請輸入新旅程密碼（原旅程連結將解除）。'
+              : '🔍 已找到旅程！請輸入密碼驗證。'
+            await supabase.from('line_user_states').update({ pending_trip_id: mapping.trip_id, current_trip_id: null }).eq('line_user_id', sourceId)
+            await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
+          }
         } else {
           await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到代碼 [${linebotId}]` }], sourceId)
         }
@@ -582,10 +701,20 @@ serve(async (req) => {
       // 2. 斷開
       if (isBound && (cleanText === '斷開' || cleanText === '切換旅程')) {
         await supabase.from('line_user_states').update({ current_trip_id: null, pending_trip_id: null }).eq('line_user_id', sourceId)
-        await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼' }], sourceId); continue
+        await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼', quickReply: getQuickReply(false) }], sourceId); continue
       }
 
-      // 3. 設定偏好
+      // 3. 查看個人偏好設定
+      if (isBound && (cleanText === '設定?' || cleanText === '設定？')) {
+        const config = userState.default_config
+        const msg = config
+          ? `⚙️ 您目前的個人偏好設定：\n\n${config}\n\n如需修改，輸入「設定: 新設定內容」`
+          : '⚙️ 您尚未設定個人偏好。\n\n輸入「設定: 預設代杰付款，大家均分」來設定。'
+        await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
+        continue
+      }
+
+      // 4. 設定偏好
       if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定：'))) {
         const config = cleanText.substring(3).trim()
         await supabase.from('line_user_states').update({ default_config: config }).eq('line_user_id', sourceId)
@@ -593,14 +722,15 @@ serve(async (req) => {
         continue
       }
 
-      // 4. 密碼驗證
+      // 5. 密碼驗證
       if (isBinding) {
         const { data: trip } = await supabase.from('trips').select('access_code, name, members').eq('id', userState.pending_trip_id).maybeSingle()
         if (trip?.access_code === cleanText) {
           await supabase.from('line_user_states').update({ current_trip_id: userState.pending_trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
           await replyMessage(replyToken, [{
             type: 'text',
-            text: `✅ 綁定成功：\n${trip.name}\n\n目前成員：\n${trip.members.join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${userState.pending_trip_id}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！`
+            text: `✅ 綁定成功：\n${trip.name}\n\n目前成員：\n${trip.members.join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${userState.pending_trip_id}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！`,
+            quickReply: getQuickReply(true)
           }], sourceId)
         } else {
           await replyMessage(replyToken, [{ type: 'text', text: '❌ 密碼錯誤' }], sourceId)
@@ -608,28 +738,177 @@ serve(async (req) => {
         continue
       }
 
-      // 5. AI 核心
+      // 6. AI 核心
       if (isBound) {
-        const { data: trip } = await supabase.from('trips').select('*').eq('id', userState.current_trip_id).single()
+        const tripId = userState.current_trip_id
 
-        // Fix 4 & 5: limit to 30 recent non-settlement expenses, include category
-        const { data: expenses } = await supabase.from('expenses')
-          .select('description, amount, currency, category, payer_data, date')
-          .eq('trip_id', trip.id)
-          .is('deleted_at', null)
-          .not('is_settlement', 'is', true)
-          .order('date', { ascending: false })
-          .limit(30)
+        // Fix 1: 撤銷上一筆（文字指令）
+        const isUndoText = cleanText.includes('上一筆') && (cleanText.includes('刪') || cleanText.includes('取消') || cleanText.includes('撤銷'))
+        if (isUndoText) {
+          const { data: savedHistory } = await supabase.from('line_chat_history')
+            .select('content')
+            .eq('line_user_id', sourceId)
+            .eq('role', 'saved')
+            .order('created_at', { ascending: false })
+            .limit(1)
+          if (savedHistory && savedHistory.length > 0) {
+            try {
+              const saved = JSON.parse(savedHistory[0].content)
+              const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', saved.expense_id)
+              if (error) throw error
+              await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${saved.description}`, quickReply: getQuickReply(true) }], sourceId)
+            } catch {
+              await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
+            }
+          } else {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可以撤銷的最近記錄。' }], sourceId)
+          }
+          continue
+        }
 
-        const { data: history } = await supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).order('created_at', { ascending: true }).limit(10)
+        // ── 快捷指令（直接查 DB，不走 AI）──
+        if (cleanText === '今日支出' || cleanText === '今天支出') {
+          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, default_currency').eq('id', tripId).single()
+          const today = getTodayString(getTripTimezone(trip))
+          const { data: todayExp } = await supabase.from('expenses')
+            .select('description, amount, currency, category')
+            .eq('trip_id', tripId).eq('date', today)
+            .is('deleted_at', null).not('is_settlement', 'is', true)
+            .order('created_at', { ascending: true })
+          if (!todayExp || todayExp.length === 0) {
+            await replyMessage(replyToken, [{ type: 'text', text: `📅 今日（${today.substring(5)}）尚無支出記錄。`, quickReply: getQuickReply(true) }], sourceId)
+          } else {
+            const lines = todayExp.map((e: any) => `• ${e.description}  ${e.amount} ${e.currency}  [${e.category}]`)
+            const totals: Record<string, number> = {}
+            todayExp.forEach((e: any) => { totals[e.currency] = (totals[e.currency] || 0) + e.amount })
+            const totalStr = Object.entries(totals).map(([c, a]) => `${a} ${c}`).join('・')
+            await replyMessage(replyToken, [{ type: 'text', text: `📅 今日支出（${today.substring(5)}）\n\n${lines.join('\n')}\n\n共 ${todayExp.length} 筆 · 合計 ${totalStr}`, quickReply: getQuickReply(true) }], sourceId)
+          }
+          continue
+        }
+
+        if (cleanText === '本週支出' || cleanText === '近期支出') {
+          const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency').eq('id', tripId).single()
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+          const fromDate = new Intl.DateTimeFormat('en-CA', { timeZone: getTripTimezone(trip) }).format(sevenDaysAgo)
+          const { data: weekExp } = await supabase.from('expenses')
+            .select('description, amount, currency, category, date')
+            .eq('trip_id', tripId).gte('date', fromDate)
+            .is('deleted_at', null).not('is_settlement', 'is', true)
+            .order('date', { ascending: false }).limit(30)
+          if (!weekExp || weekExp.length === 0) {
+            await replyMessage(replyToken, [{ type: 'text', text: '📊 近 7 天內尚無支出記錄。', quickReply: getQuickReply(true) }], sourceId)
+          } else {
+            const byDate: Record<string, any[]> = {}
+            weekExp.forEach((e: any) => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e) })
+            const lines: string[] = []
+            Object.entries(byDate).forEach(([date, exps]) => {
+              lines.push(`📌 ${date.substring(5)}`)
+              exps.forEach((e: any) => lines.push(`  • ${e.description}  ${e.amount} ${e.currency}`))
+            })
+            await replyMessage(replyToken, [{ type: 'text', text: `📊 近 7 天支出\n\n${lines.join('\n')}\n\n共 ${weekExp.length} 筆`, quickReply: getQuickReply(true) }], sourceId)
+          }
+          continue
+        }
+
+        // Fix 6: 本月支出
+        if (cleanText === '本月支出') {
+          const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency').eq('id', tripId).single()
+          const tz = getTripTimezone(trip)
+          const todayStr = getTodayString(tz)
+          const monthStart = todayStr.substring(0, 7) + '-01'
+          const { data: monthExp } = await supabase.from('expenses')
+            .select('description, amount, currency, category, date')
+            .eq('trip_id', tripId).gte('date', monthStart)
+            .is('deleted_at', null).not('is_settlement', 'is', true)
+            .order('date', { ascending: false }).limit(50)
+          if (!monthExp || monthExp.length === 0) {
+            await replyMessage(replyToken, [{ type: 'text', text: `📊 本月（${monthStart.substring(0, 7)}）尚無支出記錄。`, quickReply: getQuickReply(true) }], sourceId)
+          } else {
+            const byDate: Record<string, any[]> = {}
+            monthExp.forEach((e: any) => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e) })
+            const lines: string[] = []
+            Object.entries(byDate).forEach(([date, exps]) => {
+              lines.push(`📌 ${date.substring(5)}`)
+              exps.forEach((e: any) => lines.push(`  • ${e.description}  ${e.amount} ${e.currency}`))
+            })
+            const totals: Record<string, number> = {}
+            monthExp.forEach((e: any) => { totals[e.currency] = (totals[e.currency] || 0) + e.amount })
+            const totalStr = Object.entries(totals).map(([c, a]) => `${a} ${c}`).join('・')
+            let text = `📊 本月支出（${monthStart.substring(0, 7)}）\n\n${lines.join('\n')}\n\n共 ${monthExp.length} 筆 · 合計 ${totalStr}`
+            if (text.length > 4900) text = text.substring(0, 4900) + '\n...(過多省略)'
+            await replyMessage(replyToken, [{ type: 'text', text, quickReply: getQuickReply(true) }], sourceId)
+          }
+          continue
+        }
+
+        if (cleanText === '結算') {
+          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates').eq('id', tripId).single()
+          const { data: allExp } = await supabase.from('expenses')
+            .select('amount, currency, payer_data, split_data, is_settlement')
+            .eq('trip_id', tripId).is('deleted_at', null)
+          const rates = trip.rates || {}
+          const baseCurrency = trip.base_currency
+          const grandTotal: Record<string, Decimal> = {}
+          trip.members.forEach((m: string) => { grandTotal[m] = new Decimal(0) })
+          ;(allExp || []).forEach((e: any) => {
+            if (e.is_settlement) return
+            const rate = e.currency === baseCurrency ? 1 : (rates[e.currency] || 1)
+            trip.members.forEach((m: string) => {
+              const net = new Decimal(e.payer_data?.[m] || 0).minus(new Decimal(e.split_data?.[m] || 0))
+              grandTotal[m] = grandTotal[m].plus(net.times(rate))
+            })
+          })
+          const grandTotalNum: Record<string, number> = {}
+          Object.entries(grandTotal).forEach(([m, v]) => { grandTotalNum[m] = v.toNumber() })
+          const settlements = calculateSettlements(grandTotalNum)
+          if (settlements.length === 0) {
+            await replyMessage(replyToken, [{ type: 'text', text: '✅ 目前一切已結清，無需轉帳！', quickReply: getQuickReply(true) }], sourceId)
+          } else {
+            const lines = settlements.map(s => `${s.from} → ${s.to}  ${Math.round(s.amount)} ${baseCurrency}`)
+            await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算（折合 ${baseCurrency}）\n\n${lines.join('\n')}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: getQuickReply(true) }], sourceId)
+          }
+          continue
+        }
+
+        if (cleanText === '旅程總覽') {
+          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, is_archived').eq('id', tripId).single()
+          const today = getTodayString(getTripTimezone(trip))
+          const { data: allExp } = await supabase.from('expenses')
+            .select('amount, currency').eq('trip_id', tripId)
+            .is('deleted_at', null).not('is_settlement', 'is', true)
+          const totals: Record<string, number> = {}
+          ;(allExp || []).forEach((e: any) => { totals[e.currency] = (totals[e.currency] || 0) + e.amount })
+          const totalStr = Object.keys(totals).length > 0
+            ? Object.entries(totals).map(([c, a]) => `  ${a} ${c}`).join('\n')
+            : '  （尚無支出）'
+          const status = trip.is_archived ? '已封存 🔒' : '進行中 ✈️'
+          await replyMessage(replyToken, [{ type: 'text', text: `🗺️ ${trip.name}（${status}）\n\n👥 成員：${trip.members.join('、')}\n📅 今日：${today}\n💵 主幣別：${trip.base_currency}\n\n📊 支出總計：\n${totalStr}\n\n🌐 ${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: getQuickReply(true) }], sourceId)
+          continue
+        }
+
+        const [{ data: trip }, { data: expenses }, { data: history }] = await Promise.all([
+          supabase.from('trips').select('*').eq('id', tripId).single(),
+          supabase.from('expenses')
+            .select('description, amount, currency, category, date')
+            .eq('trip_id', tripId)
+            .is('deleted_at', null)
+            .not('is_settlement', 'is', true)
+            .order('date', { ascending: false })
+            .limit(20),
+          // Fix 7: 排除 pending/saved 內部記錄，只取對話歷史
+          supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: true }).limit(10)
+        ])
         await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'user', content: cleanText })
 
-        // Fix 8: auto-delete chat history older than 30 days (fire-and-forget)
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
         supabase.from('line_chat_history').delete().eq('line_user_id', sourceId).lt('created_at', thirtyDaysAgo).then(() => {})
 
-        // Fix 2: timezone inferred from trip's primary currency
         const today = getTodayString(getTripTimezone(trip))
+
+        const expensesSummary = (expenses ?? []).map((e: any) =>
+          `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}]`
+        ).join('\n')
 
         const promptInstruction = `
 ### 你的身份
@@ -674,8 +953,8 @@ ${BOT_SELF_INTRODUCTION}
 ### 歷史對話
 ${(history ?? []).map(h => `${h.role === 'user' ? '使用者' : '耀西'}: ${h.content}`).join('\n')}
 
-### 資料庫已記錄的近期支出
-${JSON.stringify(expenses)}
+### 資料庫已記錄的近期支出（最近 20 筆）
+${expensesSummary}
 
 ---
 ### 當前任務
@@ -719,7 +998,8 @@ ${JSON.stringify(expenses)}
 
         try {
           const aiResponse = await askGemini([{ role: "user", parts: [{ text: promptInstruction }, { text: `當前任務：${cleanText}` }] }])
-          const res = JSON.parse(aiResponse)
+          // Fix 3: use extractJSON for robust parsing
+          const res = JSON.parse(extractJSON(aiResponse))
           if (res.type === 'expense') {
             const expense = res.data
 
@@ -727,7 +1007,6 @@ ${JSON.stringify(expenses)}
             expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
-            // Fix 6: adjustment_member mirrors payer when possible
             const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
             if (payerMembers.length > 0) {
               expense.payer_data = calculateDistribution(expense.amount, payerMembers, expense.payer_data, payerMembers[0], precision)
@@ -746,6 +1025,9 @@ ${JSON.stringify(expenses)}
             const nonce = Math.random().toString(36).substring(2, 10)
             const photo_ids = expense.photo_ids || []
 
+            // Fix 2: 存入 pending，postback 只傳 nonce
+            await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId })
+
             let heroSection: any = null
             if (photo_ids.length > 0) {
               const firstId = photo_ids[0]
@@ -755,11 +1037,8 @@ ${JSON.stringify(expenses)}
             }
 
             const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
-            // Fix 9: encodeBase64 from std@0.224.0
             const liffData = encodeBase64(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
-              .replace(/\+/g, '-')
-              .replace(/\//g, '_')
-              .replace(/=+$/, '');
+              .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
 
             await replyMessage(replyToken, [{
@@ -790,10 +1069,10 @@ ${JSON.stringify(expenses)}
                 footer: {
                   type: "box", layout: "vertical", spacing: "sm",
                   contents: [
-                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", exp: exp_short, p: photo_ids, n: nonce }) } },
+                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
                     { type: "box", layout: "horizontal", spacing: "sm", contents: [
                       { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
-                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", p: photo_ids, n: nonce }) } }
+                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
                     ]},
                     { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
                   ]
@@ -806,7 +1085,7 @@ ${JSON.stringify(expenses)}
               safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
             }
             await supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent })
-            await replyMessage(replyToken, [{ type: 'text', text: safeContent }], sourceId)
+            await replyMessage(replyToken, [{ type: 'text', text: safeContent, quickReply: getQuickReply(true) }], sourceId)
           }
         } catch (e) {
           console.error('[AI_ERROR]', e)
@@ -815,8 +1094,8 @@ ${JSON.stringify(expenses)}
         continue
       }
 
-      // 6. 其他，尚未綁定狀態下的聊天
-      await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程。' }], sourceId)
+      // 7. 其他，尚未綁定狀態下的聊天
+      await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程。', quickReply: getQuickReply(false) }], sourceId)
     }
     return new Response('OK', { status: 200 })
   } catch (err) {
