@@ -95,3 +95,7 @@ CREATE POLICY "Allow all on processed_actions" ON line_processed_actions FOR ALL
 ALTER TABLE line_user_states
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
+-- 新增群組回應模式開關（true=需要提及才觸發，false=全員回應模式）
+ALTER TABLE line_user_states
+    ADD COLUMN IF NOT EXISTS mention_required boolean NOT NULL DEFAULT true;
+
