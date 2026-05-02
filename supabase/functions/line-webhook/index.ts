@@ -222,7 +222,7 @@ async function analyzeReceiptPhoto(photoUrl: string, question: string): Promise<
   const analysisText = await askGemini([{
     role: "user",
     parts: [{ text: analyzePrompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }]
-  }])
+  }], false)
   const analysisRes = JSON.parse(extractJSON(analysisText))
   return analysisRes.content || '抱歉，無法分析此照片。'
 }
@@ -257,13 +257,14 @@ async function replyMessage(replyToken: string, messages: any[], to?: string) {
   }
 }
 
-async function askGemini(contents: any[]) {
+async function askGemini(contents: any[], useJsonMode = true) {
   console.log(`[AI] Calling Gemini 2.5 Flash...`)
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`
+  const generationConfig = useJsonMode ? { response_mime_type: "application/json" } : {}
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents, generationConfig: { response_mime_type: "application/json" } })
+    body: JSON.stringify({ contents, generationConfig })
   })
   if (!response.ok) {
     const errText = await response.text()
@@ -588,7 +589,7 @@ serve(async (req) => {
               { text: ocrPrompt },
               { inlineData: { mimeType: "image/jpeg", data: base64Image } }
             ]}
-          ])
+          ], false)
 
           const res = JSON.parse(extractJSON(aiResponse))
           if (res.type === 'expense') {
