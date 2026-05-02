@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
@@ -14,7 +15,7 @@ const LiffEdit: React.FC = () => {
   const [isSuccess, setIsSuccess] = useState(false);
   const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
 
-  // 儲存 init 完成後的 liff 實例，確保 closeWindow 使用已初始化的物件
+  // 儲存 init 完成後的 liff 實例
   const liffRef = useRef<any>(null);
 
   const closeLiffWindow = useCallback(() => {
@@ -22,14 +23,13 @@ const LiffEdit: React.FC = () => {
     try {
       if (liff?.closeWindow) {
         liff.closeWindow();
+        return;
       }
     } catch (e) {
       console.error('[LIFF] closeWindow error:', e);
     }
-    // 補底：若 liff.closeWindow() 無反應，300ms 後嘗試 window.close()
-    setTimeout(() => {
-      try { window.close(); } catch { /* ignore */ }
-    }, 300);
+    // 非 LIFF 環境（桌機瀏覽器）
+    window.close();
   }, []);
 
   const showToast = useCallback((msg: string, type?: string) => {
@@ -39,18 +39,30 @@ const LiffEdit: React.FC = () => {
 
   const handleSuccess = useCallback(() => {
     setIsSuccess(true);
-    // 顯示成功畫面後嘗試自動關閉；若不成功，使用者可按「返回 LINE」
     setTimeout(closeLiffWindow, 800);
   }, [closeLiffWindow]);
 
   useEffect(() => {
     const init = async () => {
       try {
-        // --- 0. 初始化 LIFF ---
+        // --- 0. 動態載入 LIFF SDK（若尚未注入）---
+        // LINE 只在以 liff.line.me URL 開啟時自動注入 SDK；
+        // 直接以 GitHub Pages 網址開啟時需手動載入才能使用 closeWindow()
+        if (!(window as any).liff) {
+          await new Promise<void>((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+            script.onload = () => resolve();
+            script.onerror = () => resolve(); // 載入失敗也繼續，後續以 window.close() 補底
+            document.head.appendChild(script);
+          });
+        }
+
+        // --- 1. 初始化 LIFF ---
         const liff = (window as any).liff;
         if (liff) {
           await liff.init({ liffId: import.meta.env.VITE_LIFF_ID || '' });
-          liffRef.current = liff; // 儲存已初始化的實例
+          liffRef.current = liff;
           if (!liff.isLoggedIn()) {
             liff.login();
             return;
@@ -59,38 +71,34 @@ const LiffEdit: React.FC = () => {
 
         const tripId = searchParams.get('tripId');
         const dataStr = searchParams.get('data');
-
         if (!tripId || !dataStr) throw new Error('缺少必要參數');
 
-        // 1. 解碼 (Base64 -> JSON)
+        // 2. 解碼 (Base64 -> JSON)
         let base64 = dataStr.replace(/-/g, '+').replace(/_/g, '/');
         while (base64.length % 4) base64 += '=';
-
         const binaryStr = atob(base64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         const decodedStr = new TextDecoder().decode(bytes);
         const decoded = JSON.parse(decodedStr);
 
-        // 2. 獲取旅程
+        // 3. 獲取旅程
         const { data: tripData, error: tripErr } = await supabase.from('trips').select('*').eq('id', tripId).single();
         if (tripErr) throw tripErr;
-
         if (!tripData.precision_config) tripData.precision_config = {};
         setTrip(tripData);
 
-        // 3. 處理照片（提取相對路徑）
+        // 4. 處理照片（提取相對路徑）
         const rawIds = decoded.pi || decoded.photo_ids || decoded.photo_urls || [];
         const photoPathIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).map((id: any) => {
           const idStr = String(id);
           if (idStr.includes('travel-images/')) {
-            const markerIdx = idStr.lastIndexOf('travel-images/');
-            return idStr.substring(markerIdx + 'travel-images/'.length);
+            return idStr.substring(idStr.lastIndexOf('travel-images/') + 'travel-images/'.length);
           }
           return idStr.includes('/') ? idStr : `expenses/${tripId}/${idStr}.jpg`;
         });
 
-        // 4. 準備 InitialData
+        // 5. 準備 InitialData
         const finalData: any = {
           id: decoded.id || '',
           trip_id: tripId,
@@ -121,6 +129,19 @@ const LiffEdit: React.FC = () => {
     init();
   }, [searchParams]);
 
+  // Toast 以 Portal 渲染到 body，完全脫離 modal 的 z-index / backdrop-blur 影響
+  const toastPortal = toast
+    ? createPortal(
+        <div
+          className={`fixed top-4 left-4 right-4 px-4 py-3 rounded-xl font-bold text-sm text-white shadow-xl ${toast.isError ? 'bg-rose-500' : 'bg-emerald-500'}`}
+          style={{ zIndex: 99999 }}
+        >
+          {toast.msg}
+        </div>,
+        document.body
+      )
+    : null;
+
   if (loading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-white">
       <Loader2 className="animate-spin text-blue-500 mb-4" size={40} />
@@ -149,11 +170,7 @@ const LiffEdit: React.FC = () => {
 
   return (
     <div className="liff-shell-container min-h-screen bg-white">
-      {toast && (
-        <div className={`fixed top-4 left-4 right-4 px-4 py-3 rounded-xl font-bold text-sm z-50 text-white shadow-lg ${toast.isError ? 'bg-rose-500' : 'bg-emerald-500'}`}>
-          {toast.msg}
-        </div>
-      )}
+      {toastPortal}
       {trip && initialData && (
         <ExpenseModal
           isOpen={true}
