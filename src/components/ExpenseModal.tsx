@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { 
-  X, 
-  Camera, 
-  Lock, 
-  Unlock, 
-  AlertCircle, 
-  Loader2, 
+import {
+  X,
+  Camera,
+  Lock,
+  Unlock,
+  AlertCircle,
+  Loader2,
   Coins,
   Receipt,
   Plus,
@@ -13,7 +13,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
-  Save
+  Save,
+  GripVertical
 } from 'lucide-react';
 import Modal from './Modal';
 import { supabase } from '../api/supabase';
@@ -54,10 +55,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [splitLocked, setSplitLocked] = useState<Set<string>>(new Set());
   const [adjustmentMember, setAdjustmentMember] = useState<string | null>(null);
   
-  // Photo State
-  const [photos, setPhotos] = useState<File[]>([]);
-  const [existingPhotos, setExistingPhotos] = useState<string[]>([]); // URLs from server
-  const [previews, setPreviews] = useState<string[]>([]);
+  // Photo State — unified ordered list for drag-to-reorder support
+  type PhotoEntry =
+    | { kind: 'existing'; key: string; url: string }
+    | { kind: 'new'; key: string; file: File; preview: string };
+  const [photoList, setPhotoList] = useState<PhotoEntry[]>([]);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | null>(null);
 
   const precision = trip.precision_config[currency] ?? (currency === 'TWD' ? 0 : 2);
   const numAmount = useMemo(() => parseFloat(amount) || 0, [amount]);
@@ -120,9 +124,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setDate(editData.date);
         setCategory(editData.category);
         setAdjustmentMember(editData.adjustment_member);
-        setExistingPhotos(editData.photo_urls || []);
-        setPhotos([]);
-        setPreviews([]);
+        setPhotoList((editData.photo_urls || []).map(url => ({ kind: 'existing' as const, key: url, url })));
+        setDragIndex(null);
+        setDropTarget(null);
 
         // Set Payers (only check if amount > 0)
         const activePayers = Object.entries(editData.payer_data)
@@ -148,9 +152,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setCurrency(trip.default_currency || trip.base_currency);
         setDate(new Date().toISOString().split('T')[0]);
         setCategory(trip.default_category || trip.categories[0] || '其他');
-        setExistingPhotos([]);
-        setPhotos([]);
-        setPreviews([]);
+        setPhotoList([]);
+        setDragIndex(null);
+        setDropTarget(null);
 
         const defaultPayers = (trip.default_payer ?? []).filter(m => trip.members.includes(m));
         const activePayers = defaultPayers.length > 0
@@ -225,18 +229,15 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setLoading(true);
-    const compressedFiles: File[] = [];
-    const newPreviews: string[] = [];
+    const newEntries: PhotoEntry[] = [];
     for (const file of files) {
       try {
         const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true };
         const compressed = await imageCompression(file, options);
-        compressedFiles.push(compressed);
-        newPreviews.push(URL.createObjectURL(compressed));
+        newEntries.push({ kind: 'new', key: `new-${crypto.randomUUID()}`, file: compressed, preview: URL.createObjectURL(compressed) });
       } catch (err) { console.error(err); }
     }
-    setPhotos(prev => [...prev, ...compressedFiles]);
-    setPreviews(prev => [...prev, ...newPreviews]);
+    setPhotoList(prev => [...newEntries, ...prev]);
     setLoading(false);
   };
 
@@ -269,17 +270,22 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         }
       }
 
-      // 1. Upload New Photos
-      const newPhotoUrls: string[] = [];
-      for (const file of photos) {
-        const ext = file.name.split('.').pop() || 'jpg';
-        const filePath = `expenses/${trip.id}/${crypto.randomUUID()}.${ext}`;
-        const { error: uErr } = await supabase.storage.from('travel-images').upload(filePath, file);
-        if (uErr) throw uErr;
-        newPhotoUrls.push(filePath);
+      // 1. Upload New Photos (in photoList order), build key→serverPath map
+      const newPhotoPathMap = new Map<string, string>();
+      for (const item of photoList) {
+        if (item.kind === 'new') {
+          const ext = item.file.name.split('.').pop() || 'jpg';
+          const filePath = `expenses/${trip.id}/${crypto.randomUUID()}.${ext}`;
+          const { error: uErr } = await supabase.storage.from('travel-images').upload(filePath, item.file);
+          if (uErr) throw uErr;
+          newPhotoPathMap.set(item.key, filePath);
+        }
       }
 
-      const finalPhotoUrls = [...existingPhotos, ...newPhotoUrls];
+      // Preserve drag-reordered sequence
+      const finalPhotoUrls = photoList.map(item =>
+        item.kind === 'existing' ? item.url : newPhotoPathMap.get(item.key)!
+      );
 
       // Ensure all amounts are numbers before saving and filter out zeros
       const finalPayerData: Record<string, number> = {};
@@ -517,22 +523,61 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
           {/* Photos */}
           <div className="space-y-3">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">收據照片</label>
+            <div className="flex items-center gap-2 ml-1">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">收據照片</label>
+              {photoList.length > 1 && (
+                <span className="flex items-center gap-1 text-[9px] text-slate-400 font-medium">
+                  <GripVertical size={10} />拖拉可調整順序
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-3">
-              {/* Existing Photos */}
-              {existingPhotos.map((url, idx) => (
-                <div key={`ex-${idx}`} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                  <img src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${url}`} className="w-full h-full object-cover" alt="existing" />
-                  <button type="button" onClick={() => setExistingPhotos(prev => prev.filter((_, i) => i !== idx))} className="absolute top-1 right-1 bg-rose-500 text-white p-1 rounded-full"><X size={10} /></button>
-                </div>
-              ))}
-              {/* New Previews */}
-              {previews.map((src, idx) => (
-                <div key={`new-${idx}`} className="relative w-20 h-20 rounded-xl overflow-hidden border border-blue-200">
-                  <img src={src} className="w-full h-full object-cover" alt="new" />
-                  <button type="button" onClick={() => { setPhotos(photos.filter((_, i) => i !== idx)); setPreviews(previews.filter((_, i) => i !== idx)); }} className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full"><X size={10} /></button>
-                </div>
-              ))}
+              {photoList.map((item, i) => {
+                const src = item.kind === 'existing'
+                  ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${item.url}`
+                  : item.preview;
+                const isDragging = dragIndex === i;
+                const isDropTarget = dropTarget === i && dragIndex !== null && dragIndex !== i;
+                return (
+                  <div
+                    key={item.key}
+                    draggable
+                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragIndex(i); }}
+                    onDragEnter={e => { e.preventDefault(); setDropTarget(i); }}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => {
+                      e.preventDefault();
+                      if (dragIndex !== null && dragIndex !== i) {
+                        setPhotoList(prev => {
+                          const next = [...prev];
+                          const [moved] = next.splice(dragIndex, 1);
+                          next.splice(i, 0, moved);
+                          return next;
+                        });
+                      }
+                      setDragIndex(null);
+                      setDropTarget(null);
+                    }}
+                    onDragEnd={() => { setDragIndex(null); setDropTarget(null); }}
+                    className={`relative w-20 h-20 rounded-xl overflow-hidden border cursor-move transition-all select-none
+                      ${isDragging ? 'opacity-40 scale-95' : ''}
+                      ${isDropTarget ? 'ring-2 ring-blue-500 border-blue-400 scale-105' : item.kind === 'new' ? 'border-blue-200' : 'border-slate-200 dark:border-slate-700'}
+                    `}
+                  >
+                    <img src={src} className="w-full h-full object-cover pointer-events-none" alt="photo" />
+                    <button
+                      type="button"
+                      onClick={() => setPhotoList(prev => prev.filter(p => p.key !== item.key))}
+                      className="absolute top-1 right-1 bg-rose-500 text-white p-1 rounded-full z-10"
+                    >
+                      <X size={10} />
+                    </button>
+                    <div className="absolute bottom-1 left-1 bg-black/30 rounded p-0.5 pointer-events-none">
+                      <GripVertical size={10} className="text-white/80" />
+                    </div>
+                  </div>
+                );
+              })}
               <label className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-slate-400 hover:border-blue-400 cursor-pointer">
                 <Camera size={20} /><span className="text-[8px] font-bold mt-1">添加</span><input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoChange} />
               </label>

@@ -162,12 +162,25 @@ const Dashboard: React.FC = () => {
       const { data, error } = await supabase.from('expenses').select('*').eq('trip_id', id).not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
       if (error) throw error;
       const now = new Date();
-      const validDeleted = (data || []).filter((exp: Expense) => {
-        if (!exp.deleted_at) return false;
-        const deletedTime = new Date(exp.deleted_at);
-        const hoursDiff = (now.getTime() - deletedTime.getTime()) / (1000 * 60 * 60);
-        return hoursDiff <= 24;
+      const validDeleted: Expense[] = [];
+      const expiredIds: string[] = [];
+      const expiredPhotoUrls: string[] = [];
+      (data || []).forEach((exp: Expense) => {
+        if (!exp.deleted_at) return;
+        const hoursDiff = (now.getTime() - new Date(exp.deleted_at).getTime()) / (1000 * 60 * 60);
+        if (hoursDiff <= 24) {
+          validDeleted.push(exp);
+        } else {
+          expiredIds.push(exp.id);
+          (exp.photo_urls || []).forEach(url => { if (url) expiredPhotoUrls.push(url); });
+        }
       });
+      if (expiredIds.length > 0) {
+        if (expiredPhotoUrls.length > 0) {
+          await supabase.storage.from('travel-images').remove(expiredPhotoUrls);
+        }
+        await supabase.from('expenses').delete().in('id', expiredIds);
+      }
       setDeletedExpenses(validDeleted);
     } catch (err) { console.error(err); }
   };

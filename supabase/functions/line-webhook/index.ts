@@ -478,8 +478,9 @@ serve(async (req) => {
           continue
         }
 
+        const tripId = userState.current_trip_id
+        const filePath = `expenses/${tripId}/${messageId}.jpg`
         try {
-          const tripId = userState.current_trip_id
           console.log(`[IMAGE] Downloading messageId: ${messageId}`)
           const [lineRes, { data: trip }] = await Promise.all([
             fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
@@ -490,7 +491,6 @@ serve(async (req) => {
           if (!lineRes.ok) throw new Error('Failed to download image from LINE')
           const imageBuffer = await lineRes.arrayBuffer()
 
-          const filePath = `expenses/${tripId}/${messageId}.jpg`
           console.log(`[STORAGE] Uploading to: ${filePath}`)
           const { error: uploadErr } = await supabase.storage.from('travel-images').upload(filePath, imageBuffer, {
             contentType: 'image/jpeg', upsert: true
@@ -642,6 +642,7 @@ serve(async (req) => {
           }
         } catch (e) {
           console.error('[OCR_ERROR]', e)
+          await supabase.storage.from('travel-images').remove([filePath])
           await replyMessage(replyToken, [{ type: 'text', text: '😵 處理圖片時發生錯誤，請稍後再試。' }], sourceId)
         }
         continue
