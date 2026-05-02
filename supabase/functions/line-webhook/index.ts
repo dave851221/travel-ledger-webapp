@@ -260,24 +260,36 @@ async function replyMessage(replyToken: string, messages: any[], to?: string) {
   }
 }
 
+const GEMINI_FALLBACK_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+]
+
 async function askGemini(contents: any[], useJsonMode = true) {
-  console.log(`[AI] Calling Gemini 2.5 Flash...`)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`
   const generationConfig = useJsonMode ? { response_mime_type: "application/json" } : {}
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents, generationConfig })
-  })
-  if (!response.ok) {
-    const errText = await response.text()
-    if (response.status === 429) throw new Error(`RATE_LIMIT: ${errText}`)
-    throw new Error(`Gemini API error ${response.status}: ${errText}`)
+  for (const model of GEMINI_FALLBACK_MODELS) {
+    console.log(`[AI] Calling Gemini model: ${model}`)
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents, generationConfig })
+    })
+    if (response.status === 429) {
+      console.warn(`[AI] Rate limited on ${model}, falling back to next model...`)
+      continue
+    }
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Gemini API error ${response.status}: ${errText}`)
+    }
+    const data = await response.json()
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!text) throw new Error(`Gemini returned empty response: ${JSON.stringify(data).substring(0, 500)}`)
+    return text
   }
-  const data = await response.json()
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text) throw new Error(`Gemini returned empty response: ${JSON.stringify(data).substring(0, 500)}`)
-  return text
+  throw new Error('RATE_LIMIT: All Gemini models are currently rate limited.')
 }
 
 async function getGroupMemberName(groupId: string, userId: string): Promise<string> {
