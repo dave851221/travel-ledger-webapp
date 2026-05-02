@@ -306,33 +306,34 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         photo_urls: finalPhotoUrls, is_settlement: false
       };
 
-      let savedExpenseId: string | null = null
       if (editData && editData.id) {
         // --- Update ---
         const { error: uErr } = await supabase.from('expenses').update(record).eq('id', editData.id);
         if (uErr) throw uErr;
-        savedExpenseId = editData.id
         showToast('已更新支出紀錄！');
       } else {
         // --- Insert ---
-        const { data: inserted, error: iErr } = await supabase.from('expenses').insert([record]).select('id').single();
+        const { error: iErr } = await supabase.from('expenses').insert([record]);
         if (iErr) throw iErr;
-        savedExpenseId = inserted?.id || null
         showToast('已新增支出紀錄！');
       }
 
-      // --- LIFF 通知：透過 liff-notify Edge Function 讓 bot 推播確認訊息 ---
+      // --- LIFF 通知：儲存成功後傳訊息回群組 ---
       if (liffMeta?.nonce && liffMeta?.line_user_id) {
-        supabase.functions.invoke('liff-notify', {
-          body: {
-            line_user_id: liffMeta.line_user_id,
-            expense_id: savedExpenseId,
-            description,
-            amount: numAmount,
-            currency,
-            nonce: liffMeta.nonce
+        const liff = (window as any).liff;
+        if (liff?.isInClient()) {
+          try {
+            const context = liff.getContext();
+            if (context?.type === 'group' || context?.type === 'room' || context?.type === 'utou') {
+              await liff.sendMessages([{
+                type: 'text',
+                text: `✅ 已透過網頁存入：${description}\n💰 金額：${numAmount} ${currency}`
+              }]);
+            }
+          } catch (err) {
+            console.error('[LIFF] sendMessages error:', err);
           }
-        }).catch(err => console.error('[LIFF] notify error:', err))
+        }
       }
 
       onSuccess();
