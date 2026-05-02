@@ -226,8 +226,13 @@ async function analyzeReceiptPhoto(photoUrl: string, question: string): Promise<
     role: "user",
     parts: [{ text: analyzePrompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }]
   }], false)
-  const analysisRes = JSON.parse(extractJSON(analysisText))
-  return analysisRes.content || '抱歉，無法分析此照片。'
+  try {
+    const analysisRes = JSON.parse(extractJSON(analysisText))
+    return analysisRes.content || analysisText
+  } catch {
+    // Gemini returned free-form text without JSON wrapper — use it directly
+    return analysisText.substring(0, 4900)
+  }
 }
 
 async function pushMessage(to: string, messages: any[]) {
@@ -605,9 +610,17 @@ serve(async (req) => {
               { text: ocrPrompt },
               { inlineData: { mimeType: "image/jpeg", data: base64Image } }
             ]}
-          ], false)
+          ])
 
-          const res = JSON.parse(extractJSON(aiResponse))
+          let res: any
+          try {
+            res = JSON.parse(extractJSON(aiResponse))
+          } catch {
+            console.error('[OCR] Non-JSON response:', aiResponse.substring(0, 200))
+            await supabase.storage.from('travel-images').remove([filePath])
+            await replyMessage(replyToken, [{ type: 'text', text: '😅 收據辨識格式異常，請重新傳送照片。' }], sourceId)
+            continue
+          }
           if (res.type === 'expense') {
             const expense = res.data
 
