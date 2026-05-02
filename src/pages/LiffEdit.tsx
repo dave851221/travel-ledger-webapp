@@ -19,6 +19,7 @@ const LiffEdit: React.FC = () => {
   const liffRef = useRef<any>(null);
 
   const closeLiffWindow = useCallback(() => {
+    // 嘗試 liff.closeWindow()（需有 LIFF ID 才有效）
     const liff = liffRef.current ?? (window as any).liff;
     try {
       if (liff?.closeWindow) {
@@ -28,7 +29,7 @@ const LiffEdit: React.FC = () => {
     } catch (e) {
       console.error('[LIFF] closeWindow error:', e);
     }
-    // 非 LIFF 環境（桌機瀏覽器）
+    // 桌機瀏覽器 fallback
     window.close();
   }, []);
 
