@@ -268,12 +268,22 @@ async function replyMessage(replyToken: string, messages: any[], to?: string) {
 const GEMINI_FALLBACK_MODELS = [
   'gemini-2.5-flash',
   'gemini-2.0-flash',
-  'gemini-1.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash-lite',
 ]
 
-async function askGemini(contents: any[], useJsonMode = true) {
+// For OCR (vision + JSON mode), gemini-2.0-flash is more reliable.
+// gemini-2.5-flash is a thinking model that tends to output minimal JSON ("not_receipt")
+// even for real receipts when JSON mode is active.
+const GEMINI_OCR_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash-lite',
+]
+
+async function askGemini(contents: any[], useJsonMode = true, models = GEMINI_FALLBACK_MODELS) {
   const generationConfig = useJsonMode ? { response_mime_type: "application/json" } : {}
-  for (const model of GEMINI_FALLBACK_MODELS) {
+  for (const model of models) {
     console.log(`[AI] Calling Gemini model: ${model}`)
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`
     const response = await fetch(url, {
@@ -282,7 +292,11 @@ async function askGemini(contents: any[], useJsonMode = true) {
       body: JSON.stringify({ contents, generationConfig })
     })
     if (response.status === 429) {
-      console.warn(`[AI] Rate limited on ${model}, falling back to next model...`)
+      console.warn(`[AI] Rate limited on ${model}, trying next model...`)
+      continue
+    }
+    if (response.status === 404) {
+      console.warn(`[AI] Model not found: ${model} (may have been deprecated), trying next model...`)
       continue
     }
     if (!response.ok) {
@@ -294,7 +308,7 @@ async function askGemini(contents: any[], useJsonMode = true) {
     if (!text) throw new Error(`Gemini returned empty response: ${JSON.stringify(data).substring(0, 500)}`)
     return text
   }
-  throw new Error('RATE_LIMIT: All Gemini models are currently rate limited.')
+  throw new Error('RATE_LIMIT: All Gemini models are currently rate limited or unavailable.')
 }
 
 async function getGroupMemberName(groupId: string, userId: string): Promise<string> {
@@ -610,7 +624,7 @@ serve(async (req) => {
               { text: ocrPrompt },
               { inlineData: { mimeType: "image/jpeg", data: base64Image } }
             ]}
-          ])
+          ], true, GEMINI_OCR_MODELS)
 
           let res: any
           try {
