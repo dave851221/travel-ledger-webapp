@@ -264,7 +264,6 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         });
         if (nonceErr) {
           showToast('此操作已處理過，請勿重複提交。', 'error');
-          onSuccess();
           onClose();
           return;
         }
@@ -322,21 +321,17 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       }
 
       // --- LIFF 通知：透過 Edge Function 讓機器人推送確認訊息 ---
-      if (liffMeta?.nonce && liffMeta?.line_user_id) {
-        try {
-          await supabase.functions.invoke('liff-notify', {
-            body: {
-              line_user_id: liffMeta.line_user_id,
-              expense_id: savedExpenseId,
-              description,
-              amount: numAmount,
-              currency,
-              nonce: liffMeta.nonce,
-            }
-          });
-        } catch (err) {
-          console.error('[LIFF] notify error:', err);
-        }
+      if (liffMeta?.line_user_id) {
+        const { error: invokeErr } = await supabase.functions.invoke('liff-notify', {
+          body: {
+            line_user_id: liffMeta.line_user_id,
+            expense_id: savedExpenseId,
+            description,
+            amount: numAmount,
+            currency,
+          }
+        });
+        if (invokeErr) console.error('[LIFF] notify error:', invokeErr);
       }
 
       onSuccess();

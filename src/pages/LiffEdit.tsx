@@ -6,9 +6,15 @@ import ExpenseModal from '../components/ExpenseModal';
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const closeLiffWindow = () => {
-  const liff = (window as any).liff;
-  if (liff?.isInClient?.()) {
-    liff.closeWindow();
+  try {
+    const liff = (window as any).liff;
+    if (liff?.closeWindow) {
+      liff.closeWindow();
+    } else {
+      window.close();
+    }
+  } catch {
+    window.close();
   }
 };
 

@@ -18,26 +18,11 @@ serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   try {
-    const { line_user_id, expense_id, description, amount, currency, nonce } = await req.json()
+    const { line_user_id, expense_id, description, amount, currency } = await req.json()
 
-    if (!line_user_id || !nonce) {
+    if (!line_user_id || !description) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), {
         status: 400, headers: { ...CORS, 'Content-Type': 'application/json' }
-      })
-    }
-
-    // 驗證 nonce（確認該筆支出確實已透過 LIFF 儲存）
-    const { data: action } = await supabase
-      .from('line_processed_actions')
-      .select('action_type')
-      .eq('nonce', nonce)
-      .eq('line_user_id', line_user_id)
-      .eq('action_type', 'save')
-      .maybeSingle()
-
-    if (!action) {
-      return new Response(JSON.stringify({ error: 'Invalid nonce' }), {
-        status: 403, headers: { ...CORS, 'Content-Type': 'application/json' }
       })
     }
 
@@ -79,6 +64,9 @@ serve(async (req) => {
     if (!pushRes.ok) {
       const errText = await pushRes.text()
       console.error('[LIFF_NOTIFY] LINE push error:', errText)
+      return new Response(JSON.stringify({ error: 'LINE push failed', detail: errText }), {
+        status: 502, headers: { ...CORS, 'Content-Type': 'application/json' }
+      })
     }
 
     return new Response(JSON.stringify({ ok: true }), {
