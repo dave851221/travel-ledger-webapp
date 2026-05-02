@@ -60,8 +60,9 @@ const LiffEdit: React.FC = () => {
 
         // --- 1. 初始化 LIFF ---
         const liff = (window as any).liff;
-        if (liff) {
-          await liff.init({ liffId: import.meta.env.VITE_LIFF_ID || '' });
+        const liffId = import.meta.env.VITE_LIFF_ID;
+        if (liff && liffId) {
+          await liff.init({ liffId });
           liffRef.current = liff;
           if (!liff.isLoggedIn()) {
             liff.login();
