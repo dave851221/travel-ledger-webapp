@@ -211,6 +211,32 @@ async function verifySignature(body: string, signature: string | null): Promise<
   return await crypto.subtle.verify('HMAC', key, decodeBase64(signature), encoder.encode(body))
 }
 
+async function analyzeReceiptPhoto(photoUrl: string, question: string): Promise<string> {
+  const imgRes = await fetch(photoUrl)
+  if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.status}`)
+  const imgBuffer = await imgRes.arrayBuffer()
+  const base64Image = encodeBase64(new Uint8Array(imgBuffer))
+  const analyzePrompt = `請詳細分析這張收據照片，並以繁體中文回答問題。若收據為外文（日文、韓文等），請逐項翻譯。
+使用者的問題：${question}
+回傳 JSON: {"type":"chat","content":"詳細的繁體中文回答，條列式呈現品項"}`
+  const analysisText = await askGemini([{
+    role: "user",
+    parts: [{ text: analyzePrompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }]
+  }])
+  const analysisRes = JSON.parse(extractJSON(analysisText))
+  return analysisRes.content || '抱歉，無法分析此照片。'
+}
+
+async function pushMessage(to: string, messages: any[]) {
+  console.log(`[LINE] Pushing to ${to}...`)
+  const res = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+    body: JSON.stringify({ to, messages }),
+  })
+  if (!res.ok) console.error(`[LINE] Push Error: ${await res.text()}`)
+}
+
 async function replyMessage(replyToken: string, messages: any[], to?: string) {
   console.log(`[LINE] Replying to ${replyToken}...`)
   const res = await fetch('https://api.line.me/v2/bot/message/reply', {
@@ -552,7 +578,7 @@ serve(async (req) => {
     "split_details": { "成員": 金額 }
   }
 }
-7. 如果這看起來完全不像收據，請回傳：{"type": "chat", "content": "盡量說讚美的話，給予情緒價值，但字不要太多，一兩句話就足夠。"}
+7. 如果這看起來完全不像收據（例如：人物照、風景照、截圖等），請直接回傳：{"type": "not_receipt"}，無需任何說明或讚美，系統會自動清除照片。
 8. **重要限制**：若封存狀態為「已封存」，嚴禁回傳 type: "expense"，請告知使用者旅程已封存無法記帳，但可以繼續分析或聊天。
 `
 
@@ -635,8 +661,11 @@ serve(async (req) => {
                 }
               }
             }], sourceId)
+          } else if (res.type === 'not_receipt') {
+            console.log(`[PHOTO] Not a receipt, silently deleting: ${filePath}`)
+            await supabase.storage.from('travel-images').remove([filePath])
           } else {
-            console.log(`[PHOTO] Not a receipt or unrecognized, deleting: ${filePath}`)
+            console.log(`[PHOTO] Non-expense photo response, deleting: ${filePath}`)
             await supabase.storage.from('travel-images').remove([filePath])
             await replyMessage(replyToken, [{ type: 'text', text: res.content || '抱歉，這張照片我辨識不出來。' }], sourceId)
           }
@@ -928,7 +957,7 @@ serve(async (req) => {
         const [{ data: trip }, { data: expenses }, { data: history }] = await Promise.all([
           supabase.from('trips').select('*').eq('id', tripId).single(),
           supabase.from('expenses')
-            .select('description, amount, currency, category, date')
+            .select('description, amount, currency, category, date, photo_urls')
             .eq('trip_id', tripId)
             .is('deleted_at', null)
             .not('is_settlement', 'is', true)
@@ -951,9 +980,14 @@ serve(async (req) => {
 
         const today = getTodayString(getTripTimezone(trip))
 
-        const expensesSummary = (expenses ?? []).map((e: any) =>
-          `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}]`
-        ).join('\n')
+        const expensesSummary = (expenses ?? []).map((e: any) => {
+          const base = `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}]`
+          if (e.photo_urls?.length > 0) {
+            const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(e.photo_urls[0])
+            return `${base} [收據照片: ${publicUrl}]`
+          }
+          return base
+        }).join('\n')
 
         const promptInstruction = `你是旅遊記帳小幫手「耀西」（瑪利歐系列角色），偶爾穿插「Yoshi!」叫聲。若使用者打招呼或問自我介紹，親切介紹自己可以記帳、查詢支出、分析收據等功能。
 
@@ -971,6 +1005,7 @@ serve(async (req) => {
 - 成員名稱只能從「成員清單」中選取；金額盡量無小數，但總和必須完全相等。
 - 幣別優先順序：使用者說明 > 使用者設定 > 旅程預設幣別。
 - 歷史支出僅供查詢，勿重複記錄。
+- 若使用者詢問某筆含收據照片的支出細節（品項、翻譯等），回傳 analyze_photo JSON，讓系統重新分析照片作答。
 
 【近期對話】
 ${(history ?? []).map(h => `${h.role === 'user' ? 'U' : 'Y'}: ${h.content}`).join('\n')}
@@ -985,9 +1020,11 @@ ${expensesSummary}
 A. 若歷史含「記帳建議」且使用者想修正 → 回傳修正後的 expense JSON，保留原 photo_ids。
 B. 若使用者想記錄新支出 → 回傳 expense JSON（無 photo_ids）。
 C. 其他聊天/查詢 → 回傳 chat JSON，查詢用條列式換行呈現。
+D. 若使用者詢問某筆有收據照片支出的詳細內容（如品項明細、外文翻譯等）→ 回傳 analyze_photo JSON，url 填入近期支出中對應的收據照片網址，question 填入使用者問題。
 
 JSON schema（expense）: {"type":"expense","data":{"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","category":"","payer_data":{},"split_details":{},"photo_ids":[]}}
 JSON schema（chat）: {"type":"chat","content":""}
+JSON schema（analyze_photo）: {"type":"analyze_photo","url":"完整收據照片網址（若近期10筆中找不到符合的支出，url 填空字串，系統會自動全庫搜尋）","question":"使用者的具體問題"}
 `
 
         try {
@@ -1074,6 +1111,73 @@ JSON schema（chat）: {"type":"chat","content":""}
                 }
               }], sourceId)
             ])
+          } else if (res.type === 'analyze_photo') {
+            const photoUrl = res.url as string | undefined
+            const question = res.question || '請詳細描述此收據的所有品項與金額'
+
+            if (photoUrl) {
+              // URL 已在近期10筆中，直接分析
+              await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在重新分析收據照片，請稍候...' }], sourceId)
+              try {
+                const content = await analyzeReceiptPhoto(photoUrl, question)
+                supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }).then(() => {})
+                await pushMessage(sourceId, [{ type: 'text', text: content, quickReply: boundQR }])
+              } catch (photoErr) {
+                console.error('[ANALYZE_PHOTO_ERROR]', photoErr)
+                await pushMessage(sourceId, [{ type: 'text', text: '😵 無法重新分析照片，請稍後再試。', quickReply: boundQR }])
+              }
+            } else {
+              // URL 不在近期10筆中，全庫搜尋有照片的支出
+              await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在查詢符合描述的支出紀錄...' }], sourceId)
+              try {
+                const { data: allExpenses } = await supabase.from('expenses')
+                  .select('description, amount, currency, category, date, photo_urls')
+                  .eq('trip_id', tripId)
+                  .is('deleted_at', null)
+                  .not('is_settlement', 'is', true)
+                  .order('date', { ascending: false })
+
+                const withPhotos = (allExpenses ?? []).filter((e: any) => e.photo_urls?.length > 0)
+
+                if (withPhotos.length === 0) {
+                  await pushMessage(sourceId, [{ type: 'text', text: '😅 此旅程中找不到任何帶有收據照片的支出紀錄。', quickReply: boundQR }])
+                } else {
+                  const expenseList = withPhotos.map((e: any) => {
+                    const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(e.photo_urls[0])
+                    return `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}] [照片: ${publicUrl}]`
+                  }).join('\n')
+
+                  const selectPrompt = `以下是旅程中所有附有收據照片的支出記錄：
+${expenseList}
+
+使用者問題：${question}
+
+請找出最符合使用者描述的那一筆，回傳 JSON：
+若找到 → {"found": true, "url": "完整照片網址", "description": "支出描述"}
+若找不到 → {"found": false}`
+
+                  const selectText = await askGemini([{ role: "user", parts: [{ text: selectPrompt }] }])
+                  const selectRes = JSON.parse(extractJSON(selectText))
+
+                  if (!selectRes.found) {
+                    await pushMessage(sourceId, [{ type: 'text', text: '😅 找不到符合描述的收據照片，請試著描述得更詳細一點，例如加上日期、店名或金額。', quickReply: boundQR }])
+                  } else {
+                    await pushMessage(sourceId, [{ type: 'text', text: `✅ 找到了！正在分析「${selectRes.description}」的收據照片...` }])
+                    try {
+                      const content = await analyzeReceiptPhoto(selectRes.url, question)
+                      supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }).then(() => {})
+                      await pushMessage(sourceId, [{ type: 'text', text: content, quickReply: boundQR }])
+                    } catch (analyzeErr) {
+                      console.error('[ANALYZE_PHOTO_AFTER_SEARCH_ERROR]', analyzeErr)
+                      await pushMessage(sourceId, [{ type: 'text', text: '😵 照片分析失敗，請稍後再試。', quickReply: boundQR }])
+                    }
+                  }
+                }
+              } catch (searchErr) {
+                console.error('[SEARCH_PHOTO_ERROR]', searchErr)
+                await pushMessage(sourceId, [{ type: 'text', text: '😵 查詢過程發生錯誤，請稍後再試。', quickReply: boundQR }])
+              }
+            }
           } else {
             let safeContent = res.content || ""
             if (safeContent.length > 4900) safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
