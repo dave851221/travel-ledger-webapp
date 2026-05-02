@@ -553,6 +553,12 @@ serve(async (req) => {
             supabase.from('trips').select('*').eq('id', tripId).single()
           ])
           if (!lineRes.ok) throw new Error('Failed to download image from LINE')
+
+          if (trip?.is_archived) {
+            console.log(`[PHOTO] Trip ${tripId} is archived, ignoring photo from ${sourceId}`)
+            continue
+          }
+
           const imageBuffer = await lineRes.arrayBuffer()
 
           console.log(`[STORAGE] Uploading to: ${filePath}`)
