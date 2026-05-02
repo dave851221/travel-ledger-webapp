@@ -1,22 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
-
-const closeLiffWindow = () => {
-  try {
-    const liff = (window as any).liff;
-    if (liff?.closeWindow) {
-      liff.closeWindow();
-    } else {
-      window.close();
-    }
-  } catch {
-    window.close();
-  }
-};
 
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -25,6 +12,36 @@ const LiffEdit: React.FC = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [initialData, setInitialData] = useState<Expense | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
+
+  // 儲存 init 完成後的 liff 實例，確保 closeWindow 使用已初始化的物件
+  const liffRef = useRef<any>(null);
+
+  const closeLiffWindow = useCallback(() => {
+    const liff = liffRef.current ?? (window as any).liff;
+    try {
+      if (liff?.closeWindow) {
+        liff.closeWindow();
+      }
+    } catch (e) {
+      console.error('[LIFF] closeWindow error:', e);
+    }
+    // 補底：若 liff.closeWindow() 無反應，300ms 後嘗試 window.close()
+    setTimeout(() => {
+      try { window.close(); } catch { /* ignore */ }
+    }, 300);
+  }, []);
+
+  const showToast = useCallback((msg: string, type?: string) => {
+    setToast({ msg, isError: type === 'error' });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  const handleSuccess = useCallback(() => {
+    setIsSuccess(true);
+    // 顯示成功畫面後嘗試自動關閉；若不成功，使用者可按「返回 LINE」
+    setTimeout(closeLiffWindow, 800);
+  }, [closeLiffWindow]);
 
   useEffect(() => {
     const init = async () => {
@@ -33,6 +50,7 @@ const LiffEdit: React.FC = () => {
         const liff = (window as any).liff;
         if (liff) {
           await liff.init({ liffId: import.meta.env.VITE_LIFF_ID || '' });
+          liffRef.current = liff; // 儲存已初始化的實例
           if (!liff.isLoggedIn()) {
             liff.login();
             return;
@@ -45,39 +63,34 @@ const LiffEdit: React.FC = () => {
         if (!tripId || !dataStr) throw new Error('缺少必要參數');
 
         // 1. 解碼 (Base64 -> JSON)
-        // 容錯處理：將 URL 安全的 Base64 轉回標準格式，並補齊填充符
         let base64 = dataStr.replace(/-/g, '+').replace(/_/g, '/');
         while (base64.length % 4) base64 += '=';
-        
+
         const binaryStr = atob(base64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        
-        // 使用 TextDecoder 處理 UTF-8 字串
         const decodedStr = new TextDecoder().decode(bytes);
         const decoded = JSON.parse(decodedStr);
 
         // 2. 獲取旅程
         const { data: tripData, error: tripErr } = await supabase.from('trips').select('*').eq('id', tripId).single();
         if (tripErr) throw tripErr;
-        
-        // 確保 precision_config 存在，避免 ExpenseModal 崩潰
+
         if (!tripData.precision_config) tripData.precision_config = {};
         setTrip(tripData);
 
-        // 3. 處理照片 (關鍵修復：提取相對路徑)
+        // 3. 處理照片（提取相對路徑）
         const rawIds = decoded.pi || decoded.photo_ids || decoded.photo_urls || [];
-        const photoPathIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => {
-            const idStr = String(id);
-            // 如果傳進來的是完整的 URL，我們必須截斷它，只保留 travel-images/ 之後的部分
-            if (idStr.includes('travel-images/')) {
-                const markerIdx = idStr.lastIndexOf('travel-images/');
-                return idStr.substring(markerIdx + 'travel-images/'.length);
-            }
-            // 否則補上路徑字串
-            return idStr.includes('/') ? idStr : `expenses/${tripId}/${idStr}.jpg`;
+        const photoPathIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).map((id: any) => {
+          const idStr = String(id);
+          if (idStr.includes('travel-images/')) {
+            const markerIdx = idStr.lastIndexOf('travel-images/');
+            return idStr.substring(markerIdx + 'travel-images/'.length);
+          }
+          return idStr.includes('/') ? idStr : `expenses/${tripId}/${idStr}.jpg`;
         });
-        // 4. 準備 InitialData (強型別轉換，對接 split_data)
+
+        // 4. 準備 InitialData
         const finalData: any = {
           id: decoded.id || '',
           trip_id: tripId,
@@ -89,7 +102,7 @@ const LiffEdit: React.FC = () => {
           payer_data: decoded.p || decoded.payer_data || {},
           split_data: decoded.s || decoded.split_data || decoded.split_details || {},
           adjustment_member: decoded.adjustment_member || Object.keys(decoded.s || decoded.split_details || {})[0] || tripData.members[0],
-          photo_urls: photoPathIds, // 相對路徑
+          photo_urls: photoPathIds,
           is_settlement: !!(decoded.is_settlement),
           deleted_at: null,
           nonce: decoded.n || decoded.nonce,
@@ -130,21 +143,25 @@ const LiffEdit: React.FC = () => {
         <CheckCircle2 size={40} />
       </div>
       <h2 className="text-2xl font-black text-slate-900">記帳成功！</h2>
-      <button onClick={() => closeLiffWindow()} className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full">返回 LINE</button>
+      <button onClick={closeLiffWindow} className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full">返回 LINE</button>
     </div>
   );
 
   return (
     <div className="liff-shell-container min-h-screen bg-white">
-      {/* 這裡不再放置任何 UI，完全交給 ExpenseModal 渲染，避免 z-index 衝突 */}
+      {toast && (
+        <div className={`fixed top-4 left-4 right-4 px-4 py-3 rounded-xl font-bold text-sm z-50 text-white shadow-lg ${toast.isError ? 'bg-rose-500' : 'bg-emerald-500'}`}>
+          {toast.msg}
+        </div>
+      )}
       {trip && initialData && (
-        <ExpenseModal 
+        <ExpenseModal
           isOpen={true}
-          onClose={() => closeLiffWindow()} 
+          onClose={closeLiffWindow}
           trip={trip}
-          currentUser={trip.members[0]} 
-          onSuccess={() => setIsSuccess(true)}
-          showToast={(m) => console.log('[Toast]', m)}
+          currentUser={trip.members[0]}
+          onSuccess={handleSuccess}
+          showToast={showToast}
           editData={initialData}
         />
       )}
