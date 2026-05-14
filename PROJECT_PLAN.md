@@ -90,13 +90,10 @@
 1. **[安全性] 前端身分驗證薄弱 (Auth Bypass)**
    - **問題**: `TripPortal.tsx` 僅將密碼驗證結果存在 `localStorage.getItem('auth_{id}')`。由於資料庫 RLS 設定為 `FOR ALL USING (true)`，任何知道 Trip ID 的人只要在瀏覽器開發者工具手動設定 localStorage，即可繞過密碼並具備讀寫權限。
    - **建議**: 應考慮導入 Supabase JWT 或將存取碼驗證移至後端/Edge Function，配合 RLS 策略確保資料安全。
-2. **[穩定性] LINE Bot 依賴的 Gemini 模型版本**
-   - **問題**: `line-webhook/index.ts` 中固定呼叫 `gemini-3.1-flash-lite-preview`。該預覽版模型可能隨時被 Google 下架或更改名稱，導致 LINE Bot 突然失效。
-   - **建議**: 更改為穩定版模型 (如 `gemini-1.5-flash`) 或將模型名稱抽離為環境變數。
-3. **[邏輯] 垃圾桶 24 小時判斷依賴客戶端時間**
+2. **[邏輯] 垃圾桶 24 小時判斷依賴客戶端時間**
    - **問題**: `Dashboard.tsx` 在過濾 `deleted_at` 時，使用 `new Date()` (客戶端時間) 與資料庫時間做相減。若使用者設備時間不準，可能導致提早清空或一直保留。
    - **建議**: 考慮在 Supabase 建立一個 View 或在查詢時直接交由資料庫過濾 `deleted_at > NOW() - INTERVAL '24 HOURS'`。
-4. **[UX/體驗] 登出與身分快取**
+3. **[UX/體驗] 登出與身分快取**
    - **問題**: 使用者身分 `currentUser` 存在 `localStorage`。如果清空快取，使用者將會失去其身分設定，需重新選擇。目前沒有大問題，但可考慮是否有更好的作法。
 
 ---

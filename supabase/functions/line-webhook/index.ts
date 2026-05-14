@@ -276,7 +276,7 @@ async function replyMessage(replyToken: string, messages: any[], to?: string) {
 
 // For text tasks: start with the thinking model (better reasoning)
 const GEMINI_FALLBACK_MODELS = [
-  'gemini-3.1-flash-lite-preview', // 500 RPD free tier
+  'gemini-3.1-flash-lite', // 500 RPD free tier
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.5-flash-lite',
@@ -287,7 +287,7 @@ const GEMINI_FALLBACK_MODELS = [
 // Thinking models (gemini-2.5-flash) tend to output minimal valid JSON ("not_receipt")
 // even for real receipts when JSON mode is enforced.
 const GEMINI_OCR_MODELS = [
-  'gemini-3.1-flash-lite-preview', // 500 RPD free tier
+  'gemini-3.1-flash-lite', // 500 RPD free tier
   'gemini-2.0-flash',
   'gemini-2.5-flash',
   'gemini-2.0-flash-lite',
