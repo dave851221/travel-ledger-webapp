@@ -990,14 +990,14 @@ serve(async (req) => {
         if (cleanText === '結算') {
           const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates').eq('id', tripId).single()
           const { data: allExp } = await supabase.from('expenses')
-            .select('amount, currency, payer_data, split_data, is_settlement')
+            .select('amount, currency, payer_data, split_data')
             .eq('trip_id', tripId).is('deleted_at', null)
           const rates = trip.rates || {}
           const baseCurrency = trip.base_currency
           const grandTotal: Record<string, Decimal> = {}
           trip.members.forEach((m: string) => { grandTotal[m] = new Decimal(0) })
+          // 所有紀錄（含結清）都要計入餘額，用來計算誰該給誰多少錢
           ;(allExp || []).forEach((e: any) => {
-            if (e.is_settlement) return
             const rate = e.currency === baseCurrency ? 1 : (rates[e.currency] || 1)
             trip.members.forEach((m: string) => {
               const net = new Decimal(e.payer_data?.[m] || 0).minus(new Decimal(e.split_data?.[m] || 0))
@@ -1011,7 +1011,7 @@ serve(async (req) => {
             await replyMessage(replyToken, [{ type: 'text', text: '✅ 目前一切已結清，無需轉帳！', quickReply: boundQR }], sourceId)
           } else {
             const lines = settlements.map(s => `${s.from} → ${s.to}  ${Math.round(s.amount)} ${baseCurrency}`)
-            await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算（折合 ${baseCurrency}）\n\n${lines.join('\n')}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
+            await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算建議（折合 ${baseCurrency}）\n\n${lines.join('\n')}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
           }
           continue
         }
