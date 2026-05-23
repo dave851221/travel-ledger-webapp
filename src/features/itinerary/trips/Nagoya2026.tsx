@@ -1,17 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-// Declaration for Leaflet which is loaded via CDN in index.html
-declare global {
-  interface Window {
-    L: any;
-  }
-}
-
 const Nagoya2026: React.FC = () => {
   const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMap = useRef<any>(null);
-  const carMarker = useRef<any>(null);
-  const currentPolyline = useRef<any>(null);
+  const leafletMap = useRef<LeafletMap | null>(null);
+  const carMarker = useRef<LeafletMarker | null>(null);
+  const currentPolyline = useRef<LeafletPolyline | null>(null);
   const [activeDay, setActiveTab] = useState('day1');
 
   const routes: Record<string, [number, number][]> = {

@@ -255,7 +255,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
       // --- LIFF 防重複：在所有操作前先佔用 nonce ---
       // 若 nonce 已被 LINE 的「確認存入」或「取消」使用，則中止，避免重複寫入
-      const liffMeta = editData as any;
+      const liffMeta = editData as (Expense & { nonce?: string; line_user_id?: string }) | null;
       if (liffMeta?.nonce && liffMeta?.line_user_id) {
         const { error: nonceErr } = await supabase.from('line_processed_actions').insert({
           nonce: liffMeta.nonce,
@@ -336,7 +336,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
       onSuccess();
       onClose();
-    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); } finally { setLoading(false); }
   };
 
   const ValidationBadge = ({ isValid, current, target }: { isValid: boolean, current: number, target: number }) => (

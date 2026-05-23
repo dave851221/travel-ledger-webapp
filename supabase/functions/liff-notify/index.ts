@@ -34,7 +34,13 @@ serve(async (req) => {
     })
 
     // 建立快速回覆（含撤銷按鈕）
-    const quickReplyItems: any[] = []
+    type QuickReplyItem = {
+      type: 'action'
+      action:
+        | { type: 'postback'; label: string; data: string }
+        | { type: 'message'; label: string; text: string }
+    }
+    const quickReplyItems: QuickReplyItem[] = []
     if (expense_id) {
       quickReplyItems.push({
         type: "action",

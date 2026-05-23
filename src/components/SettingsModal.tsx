@@ -45,6 +45,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [isArchived, setIsArchived] = useState(trip.is_archived);
   const [members, setMembers] = useState<string[]>([...trip.members]);
   const [categories, setCategories] = useState<string[]>([...trip.categories]);
+  const [tripCategory, setTripCategory] = useState<string>(trip.category || '');
+  const [knownTripCategories, setKnownTripCategories] = useState<string[]>([]);
   const [lineBotId, setLineBotId] = useState<string>('');
   const [copied, setCopied] = useState(false);
   
@@ -70,6 +72,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setIsArchived(trip.is_archived);
       setMembers([...trip.members]);
       setCategories([...trip.categories]);
+      setTripCategory(trip.category || '');
       setBaseCurrency(trip.base_currency);
       setDefaultCurrency(trip.default_currency || trip.base_currency);
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
@@ -93,12 +96,30 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           .select('linebot_id')
           .eq('trip_id', trip.id)
           .single();
-        
+
         if (!fetchErr && data) {
           setLineBotId(data.linebot_id);
         }
       };
       fetchLineBotId();
+
+      // Fetch existing distinct categories for datalist suggestions.
+      const fetchKnownCategories = async () => {
+        if (!supabase) return;
+        const { data, error: fetchErr } = await supabase
+          .from('trips')
+          .select('category')
+          .not('category', 'is', null);
+        if (!fetchErr && data) {
+          const set = new Set<string>();
+          data.forEach((row: { category: string | null }) => {
+            const c = (row.category || '').trim();
+            if (c) set.add(c);
+          });
+          setKnownTripCategories(Array.from(set).sort());
+        }
+      };
+      fetchKnownCategories();
     }
   }, [isOpen, trip]);
 
@@ -182,6 +203,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           is_archived: isArchived,
           members,
           categories,
+          category: tripCategory.trim() || null,
           rates: finalRates,
           precision_config: finalPrecision,
           base_currency: baseCurrency,
@@ -248,8 +270,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       
       onSuccess();
       onClose();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -318,6 +340,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
                   <input type="text" maxLength={6} className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={accessCode} onChange={e => setAccessCode(e.target.value)} />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">
+                  旅程分類 <span className="text-[9px] font-normal opacity-60 ml-2">(選填，可自由輸入)</span>
+                </label>
+                <div className="relative">
+                  <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
+                  <input
+                    type="text"
+                    list="settings-trip-categories"
+                    placeholder="例如：家族、朋友、情侶、出差"
+                    className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base"
+                    value={tripCategory}
+                    onChange={e => setTripCategory(e.target.value)}
+                  />
+                  <datalist id="settings-trip-categories">
+                    {knownTripCategories.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
+                <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">同名分類的旅程會在首頁分組顯示，方便按家族／朋友／出差等情境分類管理。</p>
               </div>
 
               {/* LineBot Binding Section */}

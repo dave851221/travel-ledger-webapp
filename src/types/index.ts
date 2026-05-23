@@ -4,6 +4,7 @@ export interface Trip {
   access_code: string;
   members: string[];
   categories: string[];
+  category?: string | null;
   base_currency: string;
   default_currency?: string;
   default_category?: string;

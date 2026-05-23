@@ -42,8 +42,9 @@ const TripPortal: React.FC = () => {
       } else {
         setError('密碼錯誤，請再試一次。');
       }
-    } catch (err: any) {
-      setError('驗證時發生錯誤: ' + err.message);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('驗證時發生錯誤: ' + msg);
     } finally {
       setLoading(false);
     }

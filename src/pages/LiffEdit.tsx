@@ -16,11 +16,11 @@ const LiffEdit: React.FC = () => {
   const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
 
   // 儲存 init 完成後的 liff 實例
-  const liffRef = useRef<any>(null);
+  const liffRef = useRef<LiffSDK | null>(null);
 
   const closeLiffWindow = useCallback(() => {
     // 嘗試 liff.closeWindow()（需有 LIFF ID 才有效）
-    const liff = liffRef.current ?? (window as any).liff;
+    const liff = liffRef.current ?? window.liff;
     try {
       if (liff?.closeWindow) {
         liff.closeWindow();
@@ -49,7 +49,7 @@ const LiffEdit: React.FC = () => {
         // --- 0. 動態載入 LIFF SDK（若尚未注入）---
         // LINE 只在以 liff.line.me URL 開啟時自動注入 SDK；
         // 直接以 GitHub Pages 網址開啟時需手動載入才能使用 closeWindow()
-        if (!(window as any).liff) {
+        if (!window.liff) {
           await new Promise<void>((resolve) => {
             const script = document.createElement('script');
             script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
@@ -60,7 +60,7 @@ const LiffEdit: React.FC = () => {
         }
 
         // --- 1. 初始化 LIFF ---
-        const liff = (window as any).liff;
+        const liff = window.liff;
         const liffId = import.meta.env.VITE_LIFF_ID;
         if (liff && liffId) {
           await liff.init({ liffId });
@@ -92,7 +92,7 @@ const LiffEdit: React.FC = () => {
 
         // 4. 處理照片（提取相對路徑）
         const rawIds = decoded.pi || decoded.photo_ids || decoded.photo_urls || [];
-        const photoPathIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).map((id: any) => {
+        const photoPathIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).map((id: unknown) => {
           const idStr = String(id);
           if (idStr.includes('travel-images/')) {
             return idStr.substring(idStr.lastIndexOf('travel-images/') + 'travel-images/'.length);
@@ -100,8 +100,9 @@ const LiffEdit: React.FC = () => {
           return idStr.includes('/') ? idStr : `expenses/${tripId}/${idStr}.jpg`;
         });
 
-        // 5. 準備 InitialData
-        const finalData: any = {
+        // 5. 準備 InitialData (草稿資料；created_at 由 DB 寫入時補上)
+        const finalData: Expense & { nonce?: string; line_user_id?: string } = {
+          created_at: '',
           id: decoded.id || '',
           trip_id: tripId,
           description: String(decoded.d || decoded.description || ''),
@@ -122,9 +123,9 @@ const LiffEdit: React.FC = () => {
         setInitialData(finalData);
         setLoading(false);
 
-      } catch (err: any) {
+      } catch (err) {
         console.error('[LIFF] Error:', err);
-        setError(err.message);
+        setError(err instanceof Error ? err.message : String(err));
         setLoading(false);
       }
     };

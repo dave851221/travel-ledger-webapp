@@ -24,7 +24,9 @@ import {
   BarChart3,
   Scale,
   User,
-  Check
+  Check,
+  Tag,
+  Compass
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, 
@@ -43,7 +45,7 @@ import { formatAmount } from '../utils/finance';
 import { getCategoryColor } from '../utils/category';
 import Decimal from 'decimal.js';
 
-type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'recycle';
+type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'recycle' | 'siblings';
 
 const fmt = (val: number, cur: string = '', prec: Record<string, number> = {}) => {
   const formatted = formatAmount(val, cur, prec);
@@ -57,6 +59,7 @@ const Dashboard: React.FC = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
+  const [siblingTrips, setSiblingTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>(() => hasItinerary(id || '') ? 'itinerary' : 'ledger');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -138,7 +141,28 @@ const Dashboard: React.FC = () => {
       const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
       if (error) throw error;
       setTrip(data);
+      fetchSiblingTrips(data?.category, id);
     } catch (err) { console.error(err); navigate('/'); }
+  };
+
+  // Other trips that share this trip's category. Includes archived per design.
+  const fetchSiblingTrips = async (category: string | null | undefined, currentId: string) => {
+    if (!supabase) { setSiblingTrips([]); return; }
+    const trimmed = (category || '').trim();
+    if (!trimmed) { setSiblingTrips([]); return; }
+    try {
+      const { data, error } = await supabase
+        .from('trips')
+        .select('*')
+        .eq('category', trimmed)
+        .neq('id', currentId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setSiblingTrips(data || []);
+    } catch (err) {
+      console.error(err);
+      setSiblingTrips([]);
+    }
   };
 
   const fetchExpenses = async () => {
@@ -192,7 +216,7 @@ const Dashboard: React.FC = () => {
       if (error) throw error;
       showToast('紀錄已移至垃圾桶');
       setDeleteConfirmId(null);
-    } catch (err: any) { showToast('刪除失敗: ' + err.message, 'error'); }
+    } catch (err) { showToast('刪除失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
   const handleRestoreExpense = async (expenseId: string) => {
@@ -201,7 +225,7 @@ const Dashboard: React.FC = () => {
       const { error } = await supabase.from('expenses').update({ deleted_at: null }).eq('id', expenseId);
       if (error) throw error;
       showToast('紀錄已還原');
-    } catch (err: any) { showToast('還原失敗: ' + err.message, 'error'); }
+    } catch (err) { showToast('還原失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
   const handlePermanentlyDeleteExpense = async () => {
@@ -231,7 +255,7 @@ const Dashboard: React.FC = () => {
       showToast('紀錄已永久刪除');
       setPermDeleteConfirmId(null);
       fetchDeletedExpenses();
-    } catch (err: any) { showToast('刪除失敗: ' + err.message, 'error'); }
+    } catch (err) { showToast('刪除失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
   const handleEmptyTrash = async () => {
@@ -266,7 +290,7 @@ const Dashboard: React.FC = () => {
       showToast('垃圾桶已完全清空');
       setIsEmptyTrashConfirmOpen(false);
       fetchDeletedExpenses();
-    } catch (err: any) { showToast('清空失敗: ' + err.message, 'error'); }
+    } catch (err) { showToast('清空失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
   const handleEditExpense = (exp: Expense) => {
@@ -469,7 +493,7 @@ const Dashboard: React.FC = () => {
       }]);
       if (error) throw error;
       setSettleConfirm(null); fetchExpenses();
-    } catch (err: any) { showToast('結清失敗: ' + err.message, 'error'); }
+    } catch (err) { showToast('結清失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
   if (loading) {
@@ -506,8 +530,17 @@ const Dashboard: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-24 flex items-center justify-between gap-4">
           <div className="flex-1 flex flex-col min-w-0">
             <h1 className={`${getTitleFontSize(trip?.name)} font-black text-slate-900 dark:text-white truncate`}>{trip?.name}</h1>
-            <div className="flex items-center gap-2 mt-1 sm:mt-2">
+            <div className="flex items-center gap-2 mt-1 sm:mt-2 flex-wrap">
               <span className="text-[10px] sm:text-xs text-blue-600 font-bold uppercase tracking-[0.2em] leading-none">Travel Dashboard</span>
+              {trip?.category && (
+                <button
+                  onClick={() => navigate(`/#cat-${encodeURIComponent(trip.category!)}`)}
+                  className="text-[10px] sm:text-xs text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 px-2 py-0.5 rounded flex items-center gap-1 font-black transition-colors"
+                  title="查看所有同類旅程"
+                >
+                  <Tag size={10} /> {trip.category}
+                </button>
+              )}
               {trip?.is_archived && <span className="text-[10px] sm:text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded flex items-center gap-1 font-black"><Lock size={10} /> READ ONLY</span>}
             </div>
           </div>
@@ -534,6 +567,7 @@ const Dashboard: React.FC = () => {
             <button onClick={() => setActiveTab('ledger')} className={`py-6 text-xs lg:text-sm font-black uppercase tracking-[0.2em] border-b-4 transition-all ${activeTab === 'ledger' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>支出紀錄</button>
             <button onClick={() => setActiveTab('stats')} className={`py-6 text-xs lg:text-sm font-black uppercase tracking-[0.2em] border-b-4 transition-all ${activeTab === 'stats' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>統計分析</button>
             <button onClick={() => setActiveTab('settlement')} className={`py-6 text-xs lg:text-sm font-black uppercase tracking-[0.2em] border-b-4 transition-all ${activeTab === 'settlement' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>結清指南</button>
+            <button onClick={() => setActiveTab('siblings')} className={`py-6 text-xs lg:text-sm font-black uppercase tracking-[0.2em] border-b-4 transition-all ${activeTab === 'siblings' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>其他旅程</button>
             {deletedExpenses.length > 0 && <button onClick={() => setActiveTab('recycle')} className={`py-6 text-xs lg:text-sm font-black uppercase tracking-[0.2em] border-b-4 transition-all ${activeTab === 'recycle' ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-500 hover:text-rose-600'}`}>垃圾桶 ({deletedExpenses.length})</button>}
           </div>
         </div>
@@ -664,7 +698,7 @@ const Dashboard: React.FC = () => {
                     <div className={`grid grid-cols-1 gap-2 overflow-hidden transition-all duration-300 ${expandedDates[date] === false ? 'max-h-0 opacity-0' : 'max-h-[5000px] opacity-100'}`}>
                       {dayExpenses.map(exp => (
                         <div key={exp.id} onClick={() => setDetailExpense(exp)} className={`group p-3 sm:p-5 rounded-2xl border transition-all flex items-center gap-4 sm:gap-6 relative overflow-hidden cursor-pointer ${exp.is_settlement ? 'bg-emerald-50/20 dark:bg-emerald-900/5 border-dashed border-emerald-200 hover:bg-emerald-50/40' : 'bg-white dark:bg-slate-900 border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50'}`}>
-                          <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={e => { e.stopPropagation(); exp.photo_urls?.length && openAlbum(exp.photo_urls); }}>
+                          <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={e => { e.stopPropagation(); if (exp.photo_urls?.length) openAlbum(exp.photo_urls); }}>
                             {exp.photo_urls && exp.photo_urls.length > 0 ? (
                               <><img src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${exp.photo_urls[0]}`} className="w-full h-full object-cover" alt="receipt" />{exp.photo_urls.length > 1 && <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-[8px] font-black text-white">+{exp.photo_urls.length}</div>}</>
                             ) : (
@@ -801,9 +835,9 @@ const Dashboard: React.FC = () => {
                           <PieChart>
                             <Pie data={stats.categoryData} cx="50%" cy="50%" innerRadius="38%" outerRadius="56%" paddingAngle={4} dataKey="value" stroke="none">
                               {stats.categoryData.map((_, idx) => (<Cell key={`c-${idx}`} fill={COLORS[idx % COLORS.length]} />))}
-                              <LabelList dataKey="value" position="outside" offset={10} formatter={(v: any) => typeof v === 'number' ? fmt(v, '', trip?.precision_config) : ''} style={{ fontSize: '10px', fontWeight: '900', fill: '#1e293b' }} />
+                              <LabelList dataKey="value" position="outside" offset={10} formatter={(v: unknown) => typeof v === 'number' ? fmt(v, '', trip?.precision_config) : ''} style={{ fontSize: '10px', fontWeight: '900', fill: '#1e293b' }} />
                             </Pie>
-                            <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} formatter={(v: any) => [fmt(Number(v), trip?.base_currency, trip?.precision_config), '金額']} />
+                            <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} formatter={(v: unknown) => [fmt(Number(v), trip?.base_currency, trip?.precision_config), '金額']} />
                           </PieChart>
                         </ResponsiveContainer>
                       ) : (
@@ -839,7 +873,7 @@ const Dashboard: React.FC = () => {
                               <button
                                 onClick={() => setExpandedCatStats(prev => {
                                   const next = new Set(prev);
-                                  next.has(cat.name) ? next.delete(cat.name) : next.add(cat.name);
+                                  if (next.has(cat.name)) next.delete(cat.name); else next.add(cat.name);
                                   return next;
                                 })}
                                 className="flex items-center justify-between py-1.5 px-2 w-full hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-lg transition-all"
@@ -903,7 +937,7 @@ const Dashboard: React.FC = () => {
                                 <button
                                   onClick={() => setExpandedMemberCatStats(prev => {
                                     const next = new Set(prev);
-                                    next.has(key) ? next.delete(key) : next.add(key);
+                                    if (next.has(key)) next.delete(key); else next.add(key);
                                     return next;
                                   })}
                                   className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 py-1 px-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors w-full"
@@ -1061,6 +1095,89 @@ const Dashboard: React.FC = () => {
           )}
 
           {activeTab === 'itinerary' && (<div className="animate-in fade-in duration-500">{ItineraryComponent ? <ItineraryComponent /> : <div className="text-center p-20"><p className="text-slate-400 font-bold text-sm sm:text-lg">行程網頁尚未就緒</p></div>}</div>)}
+
+          {activeTab === 'siblings' && (
+            <div className="animate-in fade-in duration-500 pb-24 md:pb-0">
+              <div className="flex items-center justify-between mb-6 sm:mb-8 gap-3 flex-wrap">
+                <h2 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-3 sm:gap-4">
+                  <Compass className="text-indigo-600 w-6 h-6 sm:w-8 sm:h-8" />
+                  其他旅程
+                </h2>
+                {trip?.category && (
+                  <button
+                    onClick={() => navigate(`/#cat-${encodeURIComponent(trip.category!)}`)}
+                    className="text-[10px] sm:text-xs font-black text-indigo-600 hover:text-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 px-3 py-2 rounded-full transition-colors flex items-center gap-1"
+                  >
+                    回首頁查看全部 <ChevronRight size={12} />
+                  </button>
+                )}
+              </div>
+
+              {!trip?.category ? (
+                <div className="bg-white dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-10 sm:p-16 text-center">
+                  <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                    <Tag size={28} />
+                  </div>
+                  <p className="text-base sm:text-lg font-black text-slate-700 dark:text-slate-200 mb-2">尚未設定旅程分類</p>
+                  <p className="text-xs sm:text-sm text-slate-400 font-medium mb-6 max-w-sm mx-auto">
+                    幫旅程加上分類（例如：家族、朋友、出差），就能在這裡看到所有同類旅程。
+                  </p>
+                  <button
+                    onClick={() => setIsSettingsModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-indigo-500/20 transition-all active:scale-95"
+                  >
+                    <Settings size={16} /> 前往設定分類
+                  </button>
+                </div>
+              ) : siblingTrips.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-10 sm:p-16 text-center">
+                  <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-500">
+                    <Compass size={28} />
+                  </div>
+                  <p className="text-base sm:text-lg font-black text-slate-700 dark:text-slate-200 mb-2">「{trip.category}」目前只有這個旅程</p>
+                  <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-sm mx-auto">
+                    當你有其他「{trip.category}」分類的旅程時，會自動出現在這裡。
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-[11px] sm:text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">
+                    分類「{trip.category}」 · 共 {siblingTrips.length} 個其他旅程
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {siblingTrips.map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => navigate(`/trip/${s.id}`)}
+                        className="group text-left bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all border border-slate-100 dark:border-slate-800 flex flex-col h-full"
+                      >
+                        <div className="flex justify-between items-center mb-4">
+                          <span className="inline-block text-[9px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded uppercase">
+                            {Object.keys(s.rates || {}).join(' / ')}
+                          </span>
+                          {s.is_archived && (
+                            <span className="flex items-center gap-1 text-[9px] font-bold text-slate-400 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 rounded">
+                              <Lock size={10} /> 封存
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-base sm:text-lg font-bold text-slate-800 dark:text-white leading-tight group-hover:text-indigo-600 transition-colors mb-6 flex-grow">
+                          {s.name}
+                        </h3>
+                        <div className="pt-4 border-t border-slate-50 dark:border-slate-800/50 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
+                          <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1"><Users size={12} /> {s.members.length} 人</span>
+                            <span>{new Date(s.created_at).toLocaleDateString()}</span>
+                          </div>
+                          <ChevronRight size={14} className="text-slate-300 group-hover:text-indigo-600" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -1172,6 +1289,11 @@ const Dashboard: React.FC = () => {
           <button onClick={() => setActiveTab('settlement')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'settlement' ? 'text-blue-400' : 'text-slate-500'}`}>
             <HandCoins size={20} strokeWidth={activeTab === 'settlement' ? 3 : 2} />
             <span className="text-[9px] font-black mt-1 uppercase tracking-wider">結清</span>
+          </button>
+
+          <button onClick={() => setActiveTab('siblings')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'siblings' ? 'text-indigo-400' : 'text-slate-500'}`}>
+            <Compass size={20} strokeWidth={activeTab === 'siblings' ? 3 : 2} />
+            <span className="text-[9px] font-black mt-1 uppercase tracking-wider">其他</span>
           </button>
         </div>
       </div>
