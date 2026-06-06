@@ -141,17 +141,6 @@ const Jiuzhaigou2026: React.FC = () => {
         ))}
       </div>
 
-      {/* Tour Highlights Section (always visible) */}
-      <div className="bg-gradient-to-br from-teal-50 to-emerald-50 dark:from-teal-900/20 dark:to-emerald-900/20 rounded-2xl p-4 sm:p-6 border border-teal-100 dark:border-teal-900/30">
-        <h3 className="text-sm sm:text-base font-black text-teal-700 dark:text-teal-300 mb-3">🎁 參團好禮與行程說明</h3>
-        <ul className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 space-y-1.5 list-disc pl-5">
-          <li>2 好禮：行李束帶 + 上網網卡（每日 1G 流量，依手機支援度）</li>
-          <li>VIP 三排座椅旅遊巴士（無法提供時改豪華 45 座巴士）</li>
-          <li>全程無購物、無自費（導遊僅車上講解與車購推薦）</li>
-          <li className="text-rose-600 font-bold">行動電源須有清晰「3C 標誌」，否則安檢沒收</li>
-        </ul>
-      </div>
-
       {/* Content Container */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm p-3 sm:p-8">
         {activeDay === 'day1' && <Day1Content />}
@@ -187,7 +176,7 @@ const Day1Content = () => (
       2026/06/12 (五) - 桃園 ✈️ 成都
     </div>
     <ItineraryCard icon="🚐">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">11:00 機場接機（共 4 人）</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">10:30 機場接機（共 4 人）</h6>
       <p className="text-slate-500 text-xs sm:text-xs">前往桃園國際機場集合</p>
     </ItineraryCard>
     <ItineraryCard icon="✈️">
