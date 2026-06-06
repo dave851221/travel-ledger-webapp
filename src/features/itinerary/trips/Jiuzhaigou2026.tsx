@@ -190,7 +190,8 @@ const Day1Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 成都風味（人民幣 50 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：品牌準 5★ 成都保利皇冠假日酒店 / 成都怡心湖日航酒店 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：成都保利公園皇冠假日酒店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">Crowne Plaza Chengdu Panda Garden · TEL 86-28-6179-8888</p>
     </ItineraryCard>
   </div>
 );
@@ -221,7 +222,8 @@ const Day2Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 九寨風味（人民幣 60 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：國際品牌準 5★ 九寨綠髮希爾頓花園酒店 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：九寨綠發希爾頓花園酒店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">Hilton Garden Inn · TEL 86-837-7719777</p>
     </ItineraryCard>
   </div>
 );
@@ -249,7 +251,8 @@ const Day3Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 藏式土火鍋風味（人民幣 60 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：國際品牌準 5★ 九寨綠髮希爾頓花園酒店 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：九寨綠發希爾頓花園酒店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">Hilton Garden Inn · TEL 86-837-7719777</p>
     </ItineraryCard>
   </div>
 );
@@ -283,7 +286,8 @@ const Day4Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 羌族風味（人民幣 60 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：準 4★ 茂縣國際大酒店 / 維也納酒店 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：茂縣國際飯店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">Maoxian International Hotel · TEL 86-837-7427777</p>
     </ItineraryCard>
   </div>
 );
@@ -317,7 +321,8 @@ const Day5Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 柴火雞風味（人民幣 50 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：準 5★ 恆邁酒店 / 世紀陽光 5 星樓 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：峨眉山天境度假酒店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">TEL 86-833-5365600</p>
     </ItineraryCard>
   </div>
 );
@@ -354,7 +359,8 @@ const Day6Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 酒店風味（人民幣 50 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：準 5★ 恆邁酒店 / 世紀陽光 5 星樓 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：峨眉山天境度假酒店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">TEL 86-833-5365600</p>
     </ItineraryCard>
   </div>
 );
@@ -388,7 +394,8 @@ const Day7Content = () => (
       <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">晚餐 - 四川鴛鴦火鍋風味（人民幣 80 元）</h6>
     </ItineraryCard>
     <ItineraryCard icon="🏨">
-      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：品牌準 5★ 成都保利皇冠假日酒店 / 成都怡心湖日航酒店 或同級</h6>
+      <h6 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base mb-1">住宿：成都保利公園皇冠假日酒店</h6>
+      <p className="text-slate-500 text-xs sm:text-xs">Crowne Plaza Chengdu Panda Garden · TEL 86-28-6179-8888</p>
     </ItineraryCard>
   </div>
 );
