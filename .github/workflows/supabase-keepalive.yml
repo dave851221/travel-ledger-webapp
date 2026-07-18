@@ -1,0 +1,24 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # Every 2 days at 03:17 UTC (odd minute to avoid GitHub's peak-hour queueing)
+    - cron: "17 3 */2 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query trips table
+        run: |
+          status=$(curl -s -o /tmp/body.txt -w "%{http_code}" \
+            "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/trips?select=id&limit=1" \
+            -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" != "200" ]; then
+            echo "::error::Supabase keep-alive failed with HTTP $status"
+            exit 1
+          fi
