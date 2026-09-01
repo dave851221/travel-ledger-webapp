@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { PlusCircle, Plane, Calendar, Users, Lock, Loader2, AlertCircle, ChevronRight, Tag, FolderOpen } from 'lucide-react';
+import { PlusCircle, Plane, Calendar, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, Tag, FolderOpen } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -98,7 +98,8 @@ const Home: React.FC = () => {
 
   const handleCreateTrip = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTrip.name || !newTrip.members || !newTrip.access_code || !supabase) return;
+    // access_code 為選填：留空代表此旅程不需要密碼
+    if (!newTrip.name || !newTrip.members || !supabase) return;
 
     try {
       setSubmitting(true);
@@ -109,7 +110,7 @@ const Home: React.FC = () => {
         .insert([{
           name: newTrip.name,
           members: membersArray,
-          access_code: newTrip.access_code,
+          access_code: newTrip.access_code.trim() || null,
           base_currency: newTrip.base_currency,
           category: newTrip.category.trim() || null,
           categories: ['餐飲', '交通', '住宿', '購物', '景點', '其他'],
@@ -347,15 +348,16 @@ const Home: React.FC = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                訪問密碼
+                訪問密碼 <span className="text-[9px] font-normal opacity-60 ml-2">(選填)</span>
               </label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                {newTrip.access_code.trim()
+                  ? <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                  : <Unlock className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={14} />}
                 <input
-                  required
                   type="password"
                   maxLength={6}
-                  placeholder="4-6 位數字"
+                  placeholder="留空 = 免密碼"
                   className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 dark:text-white outline-none transition-all font-bold text-sm shadow-sm"
                   value={newTrip.access_code}
                   onChange={e => setNewTrip({ ...newTrip, access_code: e.target.value })}
@@ -363,6 +365,11 @@ const Home: React.FC = () => {
               </div>
             </div>
           </div>
+          <p className="text-[10px] text-slate-400 font-medium px-1 -mt-2">
+            {newTrip.access_code.trim()
+              ? '進入此旅程時需要輸入密碼。'
+              : '未設定密碼：任何拿到連結的人都可以直接進入此旅程，LINE Bot 綁定時也免驗證。'}
+          </p>
           <button
             disabled={submitting}
             type="submit"

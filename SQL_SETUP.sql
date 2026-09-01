@@ -8,7 +8,7 @@
 CREATE TABLE IF NOT EXISTS trips (
     id                    UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                  TEXT        NOT NULL,
-    access_code           TEXT        NOT NULL,
+    access_code           TEXT,                   -- NULL 或空白 = 該旅程免密碼
     members               TEXT[]      NOT NULL,
     categories            TEXT[]      NOT NULL,
     base_currency         TEXT        NOT NULL,
@@ -64,3 +64,55 @@ ALTER TABLE trips
 
 ALTER TABLE expenses
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+-- 旅程分類（首頁分組用）
+ALTER TABLE trips
+    ADD COLUMN IF NOT EXISTS category TEXT;
+
+-- ============================================================
+-- 密碼驗證函式
+-- access_code 為 NULL 或全空白時代表免密碼，驗證一律通過。
+-- 詳見 supabase/migrations/20260902_optional_access_code.sql
+-- ============================================================
+
+ALTER TABLE trips ALTER COLUMN access_code DROP NOT NULL;
+
+DROP FUNCTION IF EXISTS public.verify_trip_code(UUID, TEXT);
+
+CREATE FUNCTION public.verify_trip_code(p_trip_id UUID, p_code TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_code TEXT;
+BEGIN
+    SELECT access_code INTO v_code FROM public.trips WHERE id = p_trip_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    IF btrim(coalesce(v_code, '')) = '' THEN
+        RETURN TRUE;
+    END IF;
+    RETURN v_code = coalesce(p_code, '');
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.trip_requires_code(UUID);
+
+CREATE FUNCTION public.trip_requires_code(p_trip_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT coalesce(
+        (SELECT btrim(coalesce(access_code, '')) <> '' FROM public.trips WHERE id = p_trip_id),
+        TRUE
+    );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.verify_trip_code(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.trip_requires_code(UUID)     TO anon, authenticated;

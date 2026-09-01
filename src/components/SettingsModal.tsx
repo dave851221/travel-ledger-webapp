@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Save, 
@@ -8,7 +8,8 @@ import {
   Globe, 
   Tag, 
   Settings as SettingsIcon, 
-  Lock, 
+  Lock,
+  Unlock, 
   AlertCircle,
   Loader2,
   ChevronRight,
@@ -41,7 +42,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
   // Form States
   const [name, setName] = useState(trip.name);
-  const [accessCode, setAccessCode] = useState(trip.access_code);
+  const [accessCode, setAccessCode] = useState(trip.access_code || '');
   const [isArchived, setIsArchived] = useState(trip.is_archived);
   const [members, setMembers] = useState<string[]>([...trip.members]);
   const [categories, setCategories] = useState<string[]>([...trip.categories]);
@@ -65,10 +66,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [newCategory, setNewCategory] = useState('');
   const [newCurrency, setNewCurrency] = useState('');
 
+  // 只在「關閉 → 開啟」的瞬間灌入表單初始值。trips 現在有 realtime 訂閱，
+  // 若隨著 trip 物件變動就重設，別人存檔時會把使用者正在編輯的內容清掉。
+  const wasOpen = useRef(false);
+
   useEffect(() => {
-    if (isOpen) {
+    const justOpened = isOpen && !wasOpen.current;
+    wasOpen.current = isOpen;
+
+    if (justOpened) {
       setName(trip.name);
-      setAccessCode(trip.access_code);
+      setAccessCode(trip.access_code || '');
       setIsArchived(trip.is_archived);
       setMembers([...trip.members]);
       setCategories([...trip.categories]);
@@ -199,7 +207,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         .from('trips')
         .update({
           name,
-          access_code: accessCode,
+          // 留空即代表移除密碼；統一存成 NULL，避免出現兩種「無密碼」表示法
+          access_code: accessCode.trim() || null,
           is_archived: isArchived,
           members,
           categories,
@@ -308,11 +317,31 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     }
   };
 
-  const removeCurrency = (code: string) => {
+  // 刪除仍有支出使用的幣別會讓匯率消失，統計與結清會把該幣別當成 1:1 換算（金額全錯），
+  // 因此刪除前先確認沒有任何紀錄使用它（含垃圾桶內、可能被還原的紀錄）。
+  const removeCurrency = async (code: string) => {
+    setError(null);
     if (code === baseCurrency) {
       setError('不能刪除主幣別');
       return;
     }
+    if (!supabase) return;
+
+    const { count, error: countErr } = await supabase
+      .from('expenses')
+      .select('id', { count: 'exact', head: true })
+      .eq('trip_id', trip.id)
+      .eq('currency', code);
+
+    if (countErr) {
+      setError('檢查幣別使用狀況失敗：' + countErr.message);
+      return;
+    }
+    if (count && count > 0) {
+      setError(`已有 ${count} 筆紀錄使用 ${code}，請先改掉這些紀錄的幣別才能刪除`);
+      return;
+    }
+
     setRatesStr(Object.fromEntries(Object.entries(ratesStr).filter(([k]) => k !== code)));
     setPrecisionStr(Object.fromEntries(Object.entries(precisionStr).filter(([k]) => k !== code)));
   };
@@ -335,11 +364,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <input type="text" className="w-full px-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={name} onChange={e => setName(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">訪問密碼</label>
+                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">
+                  訪問密碼 <span className="text-[9px] font-normal opacity-60 ml-2">(選填)</span>
+                </label>
                 <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
-                  <input type="text" maxLength={6} className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={accessCode} onChange={e => setAccessCode(e.target.value)} />
+                  {accessCode.trim()
+                    ? <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
+                    : <Unlock className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 w-4 h-4 sm:w-5 sm:h-5" />}
+                  <input type="text" maxLength={6} placeholder="留空 = 不需要密碼" className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={accessCode} onChange={e => setAccessCode(e.target.value)} />
                 </div>
+                <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">
+                  {accessCode.trim()
+                    ? '儲存後，未驗證過的人進入此旅程時需要輸入密碼。清空此欄位即可取消密碼。'
+                    : '目前為免密碼旅程：任何拿到連結的人都可以直接進入，LINE Bot 綁定時也免驗證。'}
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">

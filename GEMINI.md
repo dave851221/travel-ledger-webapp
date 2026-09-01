@@ -40,7 +40,7 @@
 - **誤刪恢復**: 使用 `deleted_at` 欄位實現 24 小時軟刪除機制。垃圾桶功能實作於 `Dashboard.tsx`。
 - **最佳結算演算法**: 實作於 `Dashboard.tsx` (`calculateSettlements`)，能計算出團隊成員間最小轉帳次數的結清路徑。
 - **即時同步**: 透過 Supabase Real-time channel 監聽 `expenses` 表的更動，並重新拉取資料更新畫面。
-- **LINE 雙重驗證與防呆**: 綁定流程結合 6 位數 `linebot_id` 與旅程 `access_code`。Webhook 實作了基於 `nonce` 的 `line_processed_actions` 表，防止使用者重複點擊按鈕寫入多筆相同帳務。
+- **LINE 雙重驗證與防呆**: 綁定流程結合 6 位數 `linebot_id` 與旅程 `access_code`（若該旅程未設定密碼則略過驗證步驟，直接綁定）。Webhook 實作了基於 `nonce` 的 `line_processed_actions` 表，防止使用者重複點擊按鈕寫入多筆相同帳務。
 - **PWA 支援**: 實作了離線橫幅警告與發現新版本自動提醒的邏輯。
 
 ---

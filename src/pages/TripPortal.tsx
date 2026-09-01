@@ -10,20 +10,45 @@ const TripPortal: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tripName, setTripName] = useState('');
+  // 進入畫面前需先確認此旅程是否設有密碼，確認完成前不顯示密碼表單
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // 檢查是否已經驗證過
-    const authed = localStorage.getItem(`auth_${id}`);
-    if (authed) {
-      navigate(`/trip/${id}/dashboard`);
-    }
-    fetchTripName();
-  }, [id, navigate]);
+    let cancelled = false;
 
-  const fetchTripName = async () => {
-    const { data } = await supabase.from('trips').select('name').eq('id', id).single();
-    if (data) setTripName(data.name);
-  };
+    const enterDashboard = () => {
+      localStorage.setItem(`auth_${id}`, 'true');
+      navigate(`/trip/${id}/dashboard`, { replace: true });
+    };
+
+    const bootstrap = async () => {
+      // 1. 已驗證過就直接進入
+      if (localStorage.getItem(`auth_${id}`)) {
+        navigate(`/trip/${id}/dashboard`, { replace: true });
+        return;
+      }
+
+      if (!supabase || !id) { setChecking(false); return; }
+
+      const { data } = await supabase.from('trips').select('name').eq('id', id).single();
+      if (cancelled) return;
+      if (data) setTripName(data.name);
+
+      // 2. 免密碼旅程直接放行；RPC 失敗時保守地要求輸入密碼
+      const { data: needsCode, error: rpcError } = await supabase
+        .rpc('trip_requires_code', { p_trip_id: id });
+      if (cancelled) return;
+
+      if (!rpcError && needsCode === false) {
+        enterDashboard();
+        return;
+      }
+      setChecking(false);
+    };
+
+    bootstrap();
+    return () => { cancelled = true; };
+  }, [id, navigate]);
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +63,7 @@ const TripPortal: React.FC = () => {
 
       if (isValid) {
         localStorage.setItem(`auth_${id}`, 'true');
-        navigate(`/trip/${id}/dashboard`);
+        navigate(`/trip/${id}/dashboard`, { replace: true });
       } else {
         setError('密碼錯誤，請再試一次。');
       }
@@ -49,6 +74,15 @@ const TripPortal: React.FC = () => {
       setLoading(false);
     }
   };
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
+        <Loader2 className="animate-spin text-blue-600 mb-4" size={32} />
+        <p className="text-gray-500 dark:text-gray-400 text-sm font-bold animate-pulse">正在確認旅程權限...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">

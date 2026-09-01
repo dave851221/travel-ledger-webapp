@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   PieChart as PieChartIcon, 
@@ -42,6 +42,7 @@ import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import SettingsModal from '../components/SettingsModal';
 import Modal from '../components/Modal';
 import { formatAmount } from '../utils/finance';
+import { getLocalDateString } from '../utils/date';
 import { getCategoryColor } from '../utils/category';
 import Decimal from 'decimal.js';
 
@@ -97,6 +98,9 @@ const Dashboard: React.FC = () => {
   // Settlement Confirmation State
   const [settleConfirm, setSettleConfirm] = useState<{ from: string, to: string, amount: number, cur: string } | null>(null);
 
+  // 逾期垃圾桶紀錄的清理，每次載入頁面只執行一次
+  const purgeDoneRef = useRef(false);
+
   useEffect(() => {
     const checkAuth = () => {
       const authed = localStorage.getItem(`auth_${id}`);
@@ -110,10 +114,14 @@ const Dashboard: React.FC = () => {
     if (checkAuth()) {
       initDashboard();
       if (!supabase || !id) return;
-      const channel = supabase.channel(`expenses_changes_${id}`)
+      const channel = supabase.channel(`trip_changes_${id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `trip_id=eq.${id}` }, () => {
           fetchExpenses();
           fetchDeletedExpenses();
+        })
+        // 旅程設定（成員、匯率、分類…）也要即時同步，否則別人改完這邊要重新整理才看得到
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${id}` }, () => {
+          fetchTripData();
         }).subscribe();
       return () => { supabase.removeChannel(channel); };
     }
@@ -199,7 +207,11 @@ const Dashboard: React.FC = () => {
           (exp.photo_urls || []).forEach(url => { if (url) expiredPhotoUrls.push(url); });
         }
       });
-      if (expiredIds.length > 0) {
+      // 逾期紀錄的永久刪除每次載入頁面只做一次。
+      // 這個函式也會被 realtime 事件呼叫，若每次都清理，多個裝置同時開著會重複
+      // 對同一批 id 與照片下刪除指令。
+      if (expiredIds.length > 0 && !purgeDoneRef.current) {
+        purgeDoneRef.current = true;
         if (expiredPhotoUrls.length > 0) {
           await supabase.storage.from('travel-images').remove(expiredPhotoUrls);
         }
@@ -321,10 +333,19 @@ const Dashboard: React.FC = () => {
 
   const submitManualSettle = () => {
     if (!manualSettleFrom || !manualSettleTo || !manualSettleAmount) return;
+    if (manualSettleFrom === manualSettleTo) {
+      showToast('付款人與收款人不能是同一位成員', 'error');
+      return;
+    }
+    const parsedAmount = parseFloat(manualSettleAmount);
+    if (!isFinite(parsedAmount) || parsedAmount <= 0) {
+      showToast('請輸入大於 0 的結清金額', 'error');
+      return;
+    }
     setSettleConfirm({
       from: manualSettleFrom,
       to: manualSettleTo,
-      amount: parseFloat(manualSettleAmount),
+      amount: parsedAmount,
       cur: manualSettleCurrency
     });
     setIsManualSettleOpen(false);
@@ -350,12 +371,15 @@ const Dashboard: React.FC = () => {
     const categoryMap: Record<string, number> = {};
     const memberDetails: Record<string, { totalOwed: number, categories: Record<string, number> }> = {};
     const balances: Record<string, Record<string, number>> = { 'GRAND_TOTAL': {} };
-    if (!trip) return { byCurrency, grandBase, categoryData: [], memberDetails: {}, balances };
+    // 有支出使用了旅程未設定匯率的幣別 → 下方會以 1:1 換算，金額會失真，需提醒使用者
+    const missingRateCurrencies = new Set<string>();
+    if (!trip) return { byCurrency, grandBase, categoryData: [], memberDetails: {}, balances, missingRateCurrencies: [] as string[] };
     trip.members.forEach(m => {
       memberDetails[m] = { totalOwed: 0, categories: {} };
       balances['GRAND_TOTAL'][m] = 0;
     });
     expenses.forEach(e => {
+      if (trip.rates[e.currency] === undefined) missingRateCurrencies.add(e.currency);
       const rate = trip.rates[e.currency] || 1;
       const amountInBase = e.amount * rate;
       if (!byCurrency[e.currency]) {
@@ -394,7 +418,7 @@ const Dashboard: React.FC = () => {
     const categoryData = Object.entries(categoryMap)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-    return { byCurrency, grandBase, categoryData, memberDetails, balances };
+    return { byCurrency, grandBase, categoryData, memberDetails, balances, missingRateCurrencies: Array.from(missingRateCurrencies) };
   }, [expenses, trip, currentUser]);
 
   const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
@@ -487,7 +511,7 @@ const Dashboard: React.FC = () => {
     const actualCur = cur === 'GRAND_TOTAL' ? trip.base_currency : cur;
     try {
       const { error } = await supabase.from('expenses').insert([{
-        trip_id: trip.id, date: new Date().toISOString().split('T')[0], category: '結清',
+        trip_id: trip.id, date: getLocalDateString(), category: '結清',
         description: `結清：${from} ➡️ ${to}`, amount: amount, currency: actualCur,
         payer_data: { [from]: amount }, split_data: { [to]: amount }, is_settlement: true
       }]);
@@ -506,6 +530,17 @@ const Dashboard: React.FC = () => {
 
   const ItineraryComponent = id ? getItineraryComponent(id) : null;
   const showItineraryTab = id ? hasItinerary(id) : false;
+
+  // 手機底部導覽列的「新增支出」按鈕固定放在第 3 個位置，讓它視覺上置中：
+  // 有行程頁時 → 行程 / 支出 / ＋ / 統計 / 結清 / 其他
+  // 沒有行程頁時 → 支出 / 統計 / ＋ / 結清 / 其他
+  const addExpenseButton = !trip?.is_archived ? (
+    <button onClick={() => setIsExpenseModalOpen(true)} className="flex flex-col items-center px-1 flex-1">
+      <div className="bg-blue-600 w-12 h-12 rounded-2xl shadow-lg shadow-blue-600/40 flex items-center justify-center active:scale-90 transition-transform">
+        <Plus size={28} strokeWidth={3} className="text-white" />
+      </div>
+    </button>
+  ) : null;
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-950 pb-24 md:pb-8 transition-colors duration-500 text-slate-900 dark:text-slate-100">
@@ -574,6 +609,18 @@ const Dashboard: React.FC = () => {
       </nav>
 
       <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-12 md:px-16 lg:px-24 py-4 md:py-8">
+        {/* 缺少匯率警告：避免統計數字默默算錯 */}
+        {stats.missingRateCurrencies.length > 0 && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 flex items-start gap-3">
+            <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-[11px] sm:text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
+              有支出使用了未設定匯率的幣別（{stats.missingRateCurrencies.join('、')}），
+              目前暫時以 1:1 換算成 {trip?.base_currency}，總支出與結清金額並不正確。
+              請到「設定 → 匯率精度」補上這些幣別的匯率。
+            </div>
+          </div>
+        )}
+
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-8 mb-6 md:mb-10">
           {/* Card 1: Total Expense */}
@@ -1252,9 +1299,20 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
             </div>
+            {manualSettleFrom === manualSettleTo && (
+              <p className="flex items-center gap-1.5 text-[11px] font-black text-rose-500 px-1">
+                <AlertTriangle size={14} className="shrink-0" /> 付款人與收款人不能是同一位成員
+              </p>
+            )}
             <div className="flex gap-4 pt-4">
               <button onClick={() => setIsManualSettleOpen(false)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
-              <button onClick={submitManualSettle} className="flex-1 px-6 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all">下一步</button>
+              <button
+                onClick={submitManualSettle}
+                disabled={manualSettleFrom === manualSettleTo}
+                className="flex-1 px-6 py-4 rounded-2xl bg-blue-600 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:shadow-none text-white font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all"
+              >
+                下一步
+              </button>
             </div>
           </div>
         </Modal>
@@ -1273,19 +1331,15 @@ const Dashboard: React.FC = () => {
             <span className="text-[9px] font-black mt-1 uppercase tracking-wider">支出</span>
           </button>
           
-          {!trip?.is_archived && (
-            <button onClick={() => setIsExpenseModalOpen(true)} className="flex flex-col items-center px-1 flex-1">
-              <div className="bg-blue-600 w-12 h-12 rounded-2xl shadow-lg shadow-blue-600/40 flex items-center justify-center active:scale-90 transition-transform">
-                <Plus size={28} strokeWidth={3} className="text-white" />
-              </div>
-            </button>
-          )}
-          
+          {showItineraryTab && addExpenseButton}
+
           <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'stats' ? 'text-blue-400' : 'text-slate-500'}`}>
             <PieChartIcon size={20} strokeWidth={activeTab === 'stats' ? 3 : 2} />
             <span className="text-[9px] font-black mt-1 uppercase tracking-wider">統計</span>
           </button>
-          
+
+          {!showItineraryTab && addExpenseButton}
+
           <button onClick={() => setActiveTab('settlement')} className={`flex flex-col items-center py-2 flex-1 transition-all ${activeTab === 'settlement' ? 'text-blue-400' : 'text-slate-500'}`}>
             <HandCoins size={20} strokeWidth={activeTab === 'settlement' ? 3 : 2} />
             <span className="text-[9px] font-black mt-1 uppercase tracking-wider">結清</span>

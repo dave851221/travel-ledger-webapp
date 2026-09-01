@@ -139,6 +139,15 @@ function getTodayString(timezone = 'Asia/Taipei'): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date())
 }
 
+// 旅程密碼為選填：access_code 為 NULL 或全空白時代表免密碼，綁定不需驗證
+function requiresAccessCode(code: string | null | undefined): boolean {
+  return !!(code && code.trim())
+}
+
+function buildBindSuccessText(tripName: string, members: string[], tripId: string): string {
+  return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！`
+}
+
 function calculateDistribution(
   total: number,
   activeMembers: string[],
@@ -817,11 +826,22 @@ serve(async (req) => {
           if (userState?.current_trip_id === mapping.trip_id) {
             await replyMessage(replyToken, [{ type: 'text', text: '✅ 您已綁定此旅程，無需重複綁定。' }], sourceId)
           } else {
-            const msg = userState?.current_trip_id
-              ? '🔄 已找到旅程！請輸入新旅程密碼（原旅程連結將解除）。'
-              : '🔍 已找到旅程！請輸入密碼驗證。'
-            await supabase.from('line_user_states').update({ pending_trip_id: mapping.trip_id, current_trip_id: null }).eq('line_user_id', sourceId)
-            await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
+            const { data: targetTrip } = await supabase.from('trips').select('access_code, name, members').eq('id', mapping.trip_id).maybeSingle()
+            if (targetTrip && !requiresAccessCode(targetTrip.access_code)) {
+              // 免密碼旅程：略過驗證步驟，直接完成綁定
+              await supabase.from('line_user_states').update({ current_trip_id: mapping.trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
+              await replyMessage(replyToken, [{
+                type: 'text',
+                text: buildBindSuccessText(targetTrip.name, targetTrip.members, mapping.trip_id),
+                quickReply: boundQR
+              }], sourceId)
+            } else {
+              const msg = userState?.current_trip_id
+                ? '🔄 已找到旅程！請輸入新旅程密碼（原旅程連結將解除）。'
+                : '🔍 已找到旅程！請輸入密碼驗證。'
+              await supabase.from('line_user_states').update({ pending_trip_id: mapping.trip_id, current_trip_id: null }).eq('line_user_id', sourceId)
+              await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
+            }
           }
         } else {
           await replyMessage(replyToken, [{ type: 'text', text: `❌ 找不到代碼 [${linebotId}]` }], sourceId)
@@ -871,11 +891,12 @@ serve(async (req) => {
       // 5. 密碼驗證
       if (isBinding) {
         const { data: trip } = await supabase.from('trips').select('access_code, name, members').eq('id', userState.pending_trip_id).maybeSingle()
-        if (trip?.access_code === cleanText) {
+        // 免密碼旅程（例如等待輸入期間密碼被移除）也直接放行
+        if (trip && (!requiresAccessCode(trip.access_code) || trip.access_code === cleanText)) {
           await supabase.from('line_user_states').update({ current_trip_id: userState.pending_trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
           await replyMessage(replyToken, [{
             type: 'text',
-            text: `✅ 綁定成功：\n${trip.name}\n\n目前成員：\n${trip.members.join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${userState.pending_trip_id}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！`,
+            text: buildBindSuccessText(trip.name, trip.members, userState.pending_trip_id),
             quickReply: boundQR
           }], sourceId)
         } else {

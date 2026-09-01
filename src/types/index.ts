@@ -1,7 +1,8 @@
 export interface Trip {
   id: string;
   name: string;
-  access_code: string;
+  /** NULL 或空白代表該旅程免密碼 */
+  access_code: string | null;
   members: string[];
   categories: string[];
   category?: string | null;

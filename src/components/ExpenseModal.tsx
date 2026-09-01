@@ -20,6 +20,7 @@ import Modal from './Modal';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { calculateDistribution } from '../utils/finance';
+import { getLocalDateString } from '../utils/date';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
 
@@ -41,7 +42,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState(trip.base_currency);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateString());
   const [category, setCategory] = useState(trip.categories[0] || '其他');
   
   // Payer Control
@@ -150,7 +151,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setDescription('');
         setAmount('');
         setCurrency(trip.default_currency || trip.base_currency);
-        setDate(new Date().toISOString().split('T')[0]);
+        setDate(getLocalDateString());
         setCategory(trip.default_category || trip.categories[0] || '其他');
         setPhotoList([]);
         setDragIndex(null);

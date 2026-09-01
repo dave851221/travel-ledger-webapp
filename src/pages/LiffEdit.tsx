@@ -5,6 +5,7 @@ import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { getLocalDateString } from '../utils/date';
 
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -108,7 +109,7 @@ const LiffEdit: React.FC = () => {
           description: String(decoded.d || decoded.description || ''),
           amount: Number(decoded.a ?? decoded.amount ?? 0),
           currency: String(decoded.c || decoded.currency || tripData.base_currency),
-          date: String(decoded.dt || decoded.date || new Date().toISOString().split('T')[0]),
+          date: String(decoded.dt || decoded.date || getLocalDateString()),
           category: String(decoded.cat || decoded.category || tripData.categories[0]),
           payer_data: decoded.p || decoded.payer_data || {},
           split_data: decoded.s || decoded.split_data || decoded.split_details || {},

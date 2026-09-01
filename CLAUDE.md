@@ -45,7 +45,8 @@ supabase functions deploy line-webhook --no-verify-jwt        # 部署至 Supaba
 - **資料庫：** `trips` 與 `expenses` 資料表含有 JSONB 欄位（`payer_data`、`split_data`、`rates`、`precision_config`）。軟刪除使用 `deleted_at` 欄位；結算紀錄以 `is_settlement` 標記。
 - **即時同步：** `trips` 與 `expenses` 皆透過 `supabase_realtime` 發布，Dashboard 訂閱即時更新。
 - **儲存空間：** `travel-images` bucket，收據照片路徑為 `expenses/{tripId}/{messageId}.jpg`。
-- **驗證機制：** 未使用 Supabase Auth。密碼驗證透過 Supabase RPC `verify_trip_code(p_trip_id, p_code)` 在伺服器端完成，`access_code` 不會傳至瀏覽器。驗證結果以 `auth_{tripId}` 存於 localStorage。RLS 政策目前為開放狀態（`FOR ALL USING (true)`）。
+- **驗證機制：** 未使用 Supabase Auth。密碼驗證透過 Supabase RPC `verify_trip_code(p_trip_id, p_code)` 在伺服器端完成。驗證結果以 `auth_{tripId}` 存於 localStorage。RLS 政策目前為開放狀態（`FOR ALL USING (true)`）。
+- **旅程密碼為選填：** `trips.access_code` 為 `NULL` 或全空白即代表「免密碼旅程」。判斷一律使用 trim 後是否為空字串，寫入時空值統一存成 `NULL`（前端 `access_code.trim() || null`，Edge Function `requiresAccessCode()`）。免密碼時：`TripPortal` 透過 RPC `trip_requires_code(p_trip_id)` 得知後直接放行、`verify_trip_code` 一律回傳 true、LINE Bot 收到 `ID:XXXXXX` 後直接完成綁定不再要求輸入通行碼。相關 SQL 見 `supabase/migrations/20260902_optional_access_code.sql`。
 
 ### LINE Bot Edge Function（`supabase/functions/line-webhook/index.ts`）
 

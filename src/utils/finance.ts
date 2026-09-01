@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import Papa from 'papaparse';
 import type { Expense } from '../types';
+import { getLocalDateString } from './date';
 
 /**
  * High-precision financial utilities using decimal.js
@@ -94,7 +95,7 @@ export const exportExpensesToCSV = (expenses: Expense[], tripName: string) => {
   const url = URL.createObjectURL(blob);
   
   link.setAttribute("href", url);
-  link.setAttribute("download", `旅遊支出備份_${tripName}_${new Date().toISOString().split('T')[0]}.csv`);
+  link.setAttribute("download", `旅遊支出備份_${tripName}_${getLocalDateString()}.csv`);
   link.style.visibility = 'hidden';
   document.body.appendChild(link);
   link.click();
