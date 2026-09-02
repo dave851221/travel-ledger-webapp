@@ -11,6 +11,16 @@ node_modules
 dist
 dist-ssr
 *.local
+*.tsbuildinfo
+
+# Environment variables (contains Supabase keys — never commit)
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local cache (machine-specific, contains pooler connection string)
+supabase/.temp
+supabase/.branches
 
 # Editor directories and files
 .vscode/*
