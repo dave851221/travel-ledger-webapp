@@ -13,6 +13,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp'
 
 
+// 收據照片的 bucket。路徑慣例 expenses/{tripId}/{檔名}，
+// supabase/scripts/delete_trip.sql 依賴這個前綴清理照片，勿隨意更名。
+const RECEIPTS_BUCKET = 'travel-images'
+
 const RATE_LIMIT_MSG = '⚠️ AI 服務暫時達到免費使用量上限，請隔天再試。'
 const isRateLimit = (e: any) => String(e?.message).startsWith('RATE_LIMIT:')
 
@@ -53,13 +57,173 @@ function extractJSON(text: string): string {
 }
 
 // 收集 expense 中提到但不在旅程成員清單內的名字，回傳去重後的陣列
-function findUnknownMembers(expense: any, members: string[]): string[] {
-  const mentioned = new Set<string>([
-    ...Object.keys(expense?.payer_data ?? {}),
-    ...Object.keys(expense?.split_details ?? {}),
-  ])
-  const allowed = new Set(members)
-  return Array.from(mentioned).filter(m => !allowed.has(m))
+
+/**
+ * 給 AI 的成員別名提示。
+ *
+ * 以前這段直接把「代杰／阿杰／Jay／小杰」寫死在 prompt 裡，
+ * 對其他旅程來說那是一個不存在的人名，只會變成噪音。
+ * 改成用這趟旅程實際的成員舉例。
+ */
+function memberAliasHint(members: string[]): string {
+  if (!members || members.length === 0) return ''
+  const sample = members[0]
+  return `\n【成員名稱】只能使用：${members.join('、')}
+使用者可能用暱稱或簡稱（例如把「${sample}」說成別的叫法），請對應回上面清單裡的正式名稱；
+對應不出來時就用 chat 反問，不要自己造一個名字。\n`
+}
+
+/**
+ * 把 AI 回傳的金額欄位統一成 { 成員: 金額 }。
+ *
+ * 接受兩種形式：
+ *   - [{ member, amount }]  ← response_schema 產生的陣列
+ *   - { 成員: 金額 }         ← 舊版草稿與沒有 schema 的模型可能仍回這種
+ */
+function toAmountMap(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const member = String((entry as any)?.member ?? '').trim()
+      if (!member) continue
+      out[member] = (out[member] ?? 0) + (Number((entry as any)?.amount) || 0)
+    }
+    return out
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = Number(v) || 0
+    }
+  }
+  return out
+}
+
+/** 就地把 expense 的金額欄位正規化成 map */
+function normalizeExpenseAmountMaps(expense: any): void {
+  if (!expense) return
+  expense.payer_data = toAmountMap(expense.payer_data)
+  expense.split_details = toAmountMap(expense.split_details ?? expense.split_data)
+}
+
+/** 把字串正規化後比較：忽略大小寫、全半形空白與常見標點 */
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[\s\u3000._-]/g, '')
+    .trim()
+}
+
+/**
+ * 把 AI 給的名字對應回成員清單裡的正式名稱。
+ *
+ * 依序嘗試：完全相同 → 正規化後相同 → 其中一方是另一方的子字串
+ * （涵蓋「小明」對「王小明」、「Amy」對「amy」這類情況）。
+ * 仍然對不上就回傳 null，讓呼叫端去問使用者，而不是硬猜。
+ */
+function resolveMember(name: string, members: string[]): string | null {
+  if (!name) return null
+  if (members.includes(name)) return name
+
+  const target = normalizeName(name)
+  if (!target) return null
+
+  const exact = members.find(m => normalizeName(m) === target)
+  if (exact) return exact
+
+  const partial = members.filter(m => {
+    const n = normalizeName(m)
+    return n.includes(target) || target.includes(n)
+  })
+  // 只有唯一解才算數，兩個以上一樣像就代表有歧義，寧可去問
+  return partial.length === 1 ? partial[0] : null
+}
+
+/**
+ * 把 expense 裡的成員 key 盡量對應回正式名稱。
+ * 回傳對應後的物件，以及真的對不上的名字。
+ */
+function resolveExpenseMembers(
+  expense: any,
+  members: string[],
+): { unresolved: string[] } {
+  const unresolved: string[] = []
+
+  for (const field of ['payer_data', 'split_details', 'split_data']) {
+    const data = expense?.[field]
+    if (!data || typeof data !== 'object') continue
+
+    const remapped: Record<string, number> = {}
+    for (const [rawName, value] of Object.entries(data)) {
+      const resolved = resolveMember(rawName, members)
+      if (resolved) {
+        // 同一位成員被指到兩次時金額相加，不要互相覆蓋
+        remapped[resolved] = (remapped[resolved] ?? 0) + (Number(value) || 0)
+      } else {
+        unresolved.push(rawName)
+      }
+    }
+    expense[field] = remapped
+  }
+
+  return { unresolved: [...new Set(unresolved)] }
+}
+
+/** ISO 4217 常見幣別，用來擋掉 AI 幻想出來的代碼 */
+const KNOWN_CURRENCIES = new Set([
+  'TWD', 'JPY', 'USD', 'EUR', 'KRW', 'CNY', 'HKD', 'GBP', 'AUD', 'CAD',
+  'SGD', 'THB', 'MYR', 'PHP', 'VND', 'IDR', 'NZD', 'CHF', 'MOP', 'INR',
+])
+
+/**
+ * 驗證幣別。
+ *
+ * 之前完全不檢查：AI 回傳的字串直接寫進資料庫，未知幣別會被當成 2 位小數，
+ * 結算時匯率當 1，金額就默默失真了。
+ * 旅程 rates 裡有的最優先，其次是 ISO 白名單，都不符就退回旅程主幣別。
+ */
+function normalizeCurrency(
+  currency: unknown,
+  trip: { rates?: Record<string, number>; base_currency: string; default_currency?: string },
+): { currency: string; warning: string | null } {
+  const raw = String(currency ?? '').trim().toUpperCase()
+  const fallback = trip.default_currency || trip.base_currency
+
+  if (!raw) return { currency: fallback, warning: null }
+  if (trip.rates && Object.prototype.hasOwnProperty.call(trip.rates, raw)) {
+    return { currency: raw, warning: null }
+  }
+  if (KNOWN_CURRENCIES.has(raw)) {
+    // 是真的幣別，但這趟旅程沒設匯率 —— 記得起來，但要提醒
+    return { currency: raw, warning: `⚠️ 這趟旅程沒有設定 ${raw} 的匯率，統計時會以 1:1 計算。` }
+  }
+  return { currency: fallback, warning: `⚠️ 無法辨識幣別「${raw}」，已改用 ${fallback}。` }
+}
+
+/**
+ * 驗證日期。
+ *
+ * 之前也是直接寫進資料庫，沒有格式或範圍檢查 ——
+ * AI 算錯年份就會出現 2019 或 2031 年的支出。
+ * 格式錯或超出今天前後一年就退回今天。
+ */
+function normalizeDate(date: unknown, today: string): { date: string; warning: string | null } {
+  const raw = String(date ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { date: today, warning: raw ? `⚠️ 日期格式無法辨識，已改用今天 ${today}。` : null }
+  }
+
+  const parsed = new Date(`${raw}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: today, warning: `⚠️ 日期無效，已改用今天 ${today}。` }
+  }
+
+  const todayMs = new Date(`${today}T00:00:00Z`).getTime()
+  const ONE_YEAR = 365 * 24 * 60 * 60 * 1000
+  if (Math.abs(parsed.getTime() - todayMs) > ONE_YEAR) {
+    return { date: today, warning: `⚠️ 日期 ${raw} 距離今天超過一年，已改用今天 ${today}。` }
+  }
+
+  return { date: raw, warning: null }
 }
 
 // 將待確認支出暫存於 chat_history，讓 postback 只傳 nonce（避免 300 bytes 上限）
@@ -98,14 +262,14 @@ const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀�
 3. 綁定後，我會列出目前的成員供您確認。
 
 ⚙️ 個人偏好設定：
-• 可輸入「設定:預設代杰付款，所有人均分金額。」
+• 可輸入「設定:預設由我付款，所有人均分金額。」
 (可記錄最後一筆設定，設定後 AI 會參考您的習慣進行解析)
 
 💰 快速記帳相關功能：
 • 基礎：可直接說「晚餐 1200」
 • 收據分析：直接上傳照片
-• 指定付款：說「代杰付了Uber 300」
-• 複雜分帳：說「拉麵 3000 日幣，代杰先付，大家平分」
+• 指定付款：說「小明付了Uber 300」
+• 複雜分帳：說「拉麵 3000 日幣，小明先付，大家平分」
 • 修正記帳：說「剛剛那筆改 500」
 • 撤銷記帳：輸入「取消上一筆」或「撤銷上一筆」
 
@@ -145,7 +309,7 @@ function requiresAccessCode(code: string | null | undefined): boolean {
 }
 
 function buildBindSuccessText(tripName: string, members: string[], tripId: string): string {
-  return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！`
+  return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是我，大家平分」囉！`
 }
 
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {
@@ -168,7 +332,7 @@ async function analyzeReceiptPhoto(photoUrl: string, question: string): Promise<
   const analysisText = await askGemini([{
     role: "user",
     parts: [{ text: analyzePrompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }]
-  }], false, GEMINI_OCR_MODELS)
+  }], { useJsonMode: false, models: GEMINI_OCR_MODELS })
   try {
     const analysisRes = JSON.parse(extractJSON(analysisText))
     return analysisRes.content || analysisText
@@ -207,6 +371,82 @@ async function replyMessage(replyToken: string, messages: any[], to?: string) {
   }
 }
 
+// ============================================================
+// 結構化輸出
+//
+// 以前是在 prompt 裡手寫 JSON 範例，靠 extractJSON 撈括號硬救格式錯誤。
+// 交給 response_schema 之後，格式由 API 保證，prompt 只需專注在「內容」。
+// ============================================================
+
+// Gemini 的 response_schema 不支援 additionalProperties，
+// 所以「成員 → 金額」不能寫成動態 key 的物件，只能用陣列表達。
+// 解析後由 toAmountMap() 轉回程式內部慣用的 { 成員: 金額 }。
+const AMOUNT_LIST_SCHEMA = {
+  type: 'ARRAY',
+  description: '每位成員分到的金額',
+  items: {
+    type: 'OBJECT',
+    properties: {
+      member: { type: 'STRING', description: '成員名稱，必須一字不差地來自成員清單' },
+      amount: { type: 'NUMBER' },
+    },
+    required: ['member', 'amount'],
+  },
+}
+
+const EXPENSE_DATA_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    description: { type: 'STRING', description: '品項或商店名稱。外文請保留原文並在括號附繁體中文' },
+    amount: { type: 'NUMBER', description: '總金額' },
+    currency: { type: 'STRING', description: 'ISO 幣別代碼，例如 TWD / JPY / USD' },
+    date: { type: 'STRING', description: 'YYYY-MM-DD' },
+    category: { type: 'STRING', description: '從分類清單中挑一個' },
+    payer_data: AMOUNT_LIST_SCHEMA,
+    split_details: AMOUNT_LIST_SCHEMA,
+  },
+  required: ['description', 'amount', 'currency', 'date', 'category', 'payer_data', 'split_details'],
+}
+
+/** 文字對話：可能是記帳、聊天／查詢，或請系統重新分析某張收據 */
+const TEXT_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    type: { type: 'STRING', enum: ['expense', 'chat', 'analyze_photo'] },
+    data: EXPENSE_DATA_SCHEMA,
+    content: { type: 'STRING', description: 'type 為 chat 時的回覆內容' },
+    url: { type: 'STRING', description: 'type 為 analyze_photo 時的收據照片網址' },
+    question: { type: 'STRING', description: 'type 為 analyze_photo 時使用者的問題' },
+  },
+  required: ['type'],
+}
+
+/** 收據 OCR：認得出來就回 expense，不是收據就回 not_receipt */
+const OCR_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    type: { type: 'STRING', enum: ['expense', 'not_receipt'] },
+    data: EXPENSE_DATA_SCHEMA,
+  },
+  required: ['type'],
+}
+
+/**
+ * 不隨對話變動的規則。放進 system_instruction 與每次的旅程 context 分開，
+ * 模型比較不會在長對話中把人設或格式規則忘掉。
+ */
+const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪利歐系列的角色，講話親切、偶爾穿插「Yoshi!」叫聲。
+你的工作是把使用者的自然語言轉成記帳資料，或回答關於這趟旅程花費的問題。
+
+不可違反的規則：
+1. payer_data 與 split_details 的 key **只能**是使用者訊息中提供的「成員清單」裡的字串，一字不差。
+   使用者用暱稱、諧音或縮寫時，可以合理推測對應到清單裡最接近的成員，並改用清單上的正式名稱。
+   若沒把握對應到誰，寧可回傳 chat 詢問，**絕對不可以**自創或音譯出清單外的名字。
+2. 金額盡量不帶小數，但 payer_data 與 split_details 的各自總和都必須完全等於 amount。
+3. 旅程已封存時，一律不可回傳 expense，改用 chat 說明無法記帳。
+4. 歷史支出僅供查詢參考，不要把既有的支出重複記一次。
+5. 查詢類的回答用條列式、簡短，適合在手機上閱讀。`
+
 // For text tasks: start with the thinking model (better reasoning)
 const GEMINI_FALLBACK_MODELS = [
   'gemini-3.1-flash-lite', // 500 RPD free tier
@@ -226,34 +466,91 @@ const GEMINI_OCR_MODELS = [
   'gemini-2.0-flash-lite',
 ]
 
-async function askGemini(contents: any[], useJsonMode = true, models = GEMINI_FALLBACK_MODELS) {
-  const generationConfig = useJsonMode ? { response_mime_type: "application/json" } : {}
+interface AskGeminiOptions {
+  /** 要求回傳 JSON。搭配 schema 時模型會被結構化輸出約束住 */
+  useJsonMode?: boolean
+  models?: string[]
+  /** 不隨對話變動的規則（人設、輸出約束），與每次的旅程 context 分開 */
+  systemInstruction?: string
+  /** 回應的 JSON schema。給了就不必在 prompt 裡手寫格式範例 */
+  responseSchema?: Record<string, unknown>
+  /** 記帳要穩定，聊天可以活潑一點 */
+  temperature?: number
+}
+
+async function askGemini(contents: any[], options: AskGeminiOptions = {}) {
+  const {
+    useJsonMode = true,
+    models = GEMINI_FALLBACK_MODELS,
+    systemInstruction,
+    responseSchema,
+    temperature,
+  } = options
+
+  const generationConfig: Record<string, unknown> = {}
+  if (useJsonMode) generationConfig.response_mime_type = 'application/json'
+  // 結構化輸出：由 API 保證格式，比在 prompt 裡描述 JSON 範例可靠得多
+  if (useJsonMode && responseSchema) generationConfig.response_schema = responseSchema
+  if (temperature !== undefined) generationConfig.temperature = temperature
+
+  const body: Record<string, unknown> = { contents, generationConfig }
+  if (systemInstruction) {
+    body.system_instruction = { parts: [{ text: systemInstruction }] }
+  }
+
+  let lastError: string | null = null
+
   for (const model of models) {
     console.log(`[AI] Calling Gemini model: ${model}`)
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig })
-    })
+
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    } catch (err) {
+      // 連線失敗／逾時也換下一個模型，不要整個放棄
+      lastError = `fetch failed: ${err instanceof Error ? err.message : String(err)}`
+      console.warn(`[AI] ${model} ${lastError}, trying next model...`)
+      continue
+    }
+
     if (response.status === 429) {
+      lastError = 'rate limited'
       console.warn(`[AI] Rate limited on ${model}, trying next model...`)
       continue
     }
-    if (response.status === 404) {
-      console.warn(`[AI] Model not found: ${model} (may have been deprecated), trying next model...`)
+    if (response.status === 404 || response.status === 400) {
+      // 404：模型已下架。400：這個模型不支援送出的設定（例如舊模型不吃 response_schema）
+      lastError = `HTTP ${response.status}`
+      console.warn(`[AI] ${model} rejected the request (${response.status}), trying next model...`)
+      continue
+    }
+    if (response.status >= 500) {
+      lastError = `HTTP ${response.status}`
+      console.warn(`[AI] ${model} server error ${response.status}, trying next model...`)
       continue
     }
     if (!response.ok) {
       const errText = await response.text()
       throw new Error(`Gemini API error ${response.status}: ${errText}`)
     }
+
     const data = await response.json()
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) throw new Error(`Gemini returned empty response: ${JSON.stringify(data).substring(0, 500)}`)
+    if (!text) {
+      // 安全機制擋下或思考預算用盡都可能回空，換模型比直接失敗好
+      lastError = `empty response (finishReason: ${data?.candidates?.[0]?.finishReason ?? 'unknown'})`
+      console.warn(`[AI] ${model} returned ${lastError}, trying next model...`)
+      continue
+    }
     return text
   }
-  throw new Error('RATE_LIMIT: All Gemini models are currently rate limited or unavailable.')
+
+  throw new Error(`RATE_LIMIT: All Gemini models are currently rate limited or unavailable. Last error: ${lastError}`)
 }
 
 async function getGroupMemberName(groupId: string, userId: string): Promise<string> {
@@ -472,7 +769,7 @@ serve(async (req) => {
           if (photo_ids.length > 0 && trip_id) {
             const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
             console.log(`[PHOTO] Remove photo URL: ${urls}`)
-            await supabase.storage.from('travel-images').remove(urls)
+            await supabase.storage.from(RECEIPTS_BUCKET).remove(urls)
           }
 
           await replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }], sourceId)
@@ -510,12 +807,12 @@ serve(async (req) => {
           const imageBuffer = await lineRes.arrayBuffer()
 
           console.log(`[STORAGE] Uploading to: ${filePath}`)
-          const { error: uploadErr } = await supabase.storage.from('travel-images').upload(filePath, imageBuffer, {
+          const { error: uploadErr } = await supabase.storage.from(RECEIPTS_BUCKET).upload(filePath, imageBuffer, {
             contentType: 'image/jpeg', upsert: true
           })
           if (uploadErr) throw uploadErr
 
-          const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(filePath)
+          const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(filePath)
           const base64Image = encodeBase64(new Uint8Array(imageBuffer))
           const today = getTodayString(getTripTimezone(trip))
 
@@ -548,7 +845,7 @@ serve(async (req) => {
 5. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
    - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
    - 🚫 payer_data 及 split_details 的 key **絕對只能**寫「成員清單」中已列出的字串，一字不差。
-     若使用者用了暱稱、口誤、諧音或縮寫（例如把「代杰」說成「阿杰」「Jay」「小杰」），可以合理推測對應到清單裡最接近的成員，並使用清單上的正式名稱。
+     若使用者用了暱稱、口誤、諧音或縮寫，可以合理推測對應到清單裡最接近的成員，並使用清單上的正式名稱。
      但若沒把握、找不到夠接近的對應，請寧可走「成員第一位 / 全員均分」的預設邏輯，**絕對不可以**自創、音譯、或把不存在的名字寫進 JSON。
    - 墊付邏輯的優先權(payer_data):
      1. 旅程預設付款人（若有設定）
@@ -559,21 +856,11 @@ serve(async (req) => {
      1. 旅程預設分攤成員（若有設定）
      2. 使用者設定所提及的分攤方式
      3. 全員均分
-6. 必須回傳 JSON：
-{
-  "type": "expense",
-  "data": {
-    "description": "品項描述",
-    "amount": 數字,
-    "currency": "ISO代碼",
-    "date": "YYYY-MM-DD",
-    "category": "從分類清單中挑選最接近的一個",
-    "payer_data": { "成員": 金額 },
-    "split_details": { "成員": 金額 }
-  }
-}
-7. 如果這看起來完全不像收據（例如：人物照、風景照、截圖等），請直接回傳：{"type": "not_receipt"}，無需任何說明或讚美，系統會自動清除照片。
-8. **重要限制**：若封存狀態為「已封存」，嚴禁回傳 type: "expense"，請告知使用者旅程已封存無法記帳，但可以繼續分析或聊天。
+6. 回傳格式由系統的 response schema 約束，type 請填 "expense"。
+   payer_data 與 split_details 都是陣列，每個元素是 { "member": "成員名稱", "amount": 金額 }。
+7. 如果這看起來完全不像收據（例如：人物照、風景照、截圖等），請回傳 type: "not_receipt"，
+   無需任何說明或讚美，系統會自動清除照片。
+8. **重要限制**：若封存狀態為「已封存」，一律回傳 type: "not_receipt"，系統會另行告知使用者旅程已封存。
 `
 
           const aiResponse = await askGemini([
@@ -581,32 +868,43 @@ serve(async (req) => {
               { text: ocrPrompt },
               { inlineData: { mimeType: "image/jpeg", data: base64Image } }
             ]}
-          ], true, GEMINI_OCR_MODELS)
+          ], { models: GEMINI_OCR_MODELS, responseSchema: OCR_RESPONSE_SCHEMA, temperature: 0.2 })
 
           let res: any
           try {
             res = JSON.parse(extractJSON(aiResponse))
           } catch {
             console.error('[OCR] Non-JSON response:', aiResponse.substring(0, 200))
-            await supabase.storage.from('travel-images').remove([filePath])
+            await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
             await replyMessage(replyToken, [{ type: 'text', text: '😅 收據辨識格式異常，請重新傳送照片。' }], sourceId)
             continue
           }
           if (res.type === 'expense') {
             const expense = res.data
 
-            // 防呆：AI 可能誤用旅程不存在的成員名稱，發現時不出 Flex/LIFF，改用文字提示請使用者重新傳送
-            const unknownMembers = findUnknownMembers(expense, trip.members)
-            if (unknownMembers.length > 0) {
-              console.warn(`[OCR] Unknown members detected: ${unknownMembers.join(', ')}`)
-              await supabase.storage.from('travel-images').remove([filePath])
+            normalizeExpenseAmountMaps(expense)
+
+            // 成員名稱：先嘗試對應回正式名稱（暱稱、大小寫、部分符合都能救回來），
+            // 真的對不上才放棄。以前是一律直接拒絕，使用者只能自己猜要怎麼講。
+            const { unresolved } = resolveExpenseMembers(expense, trip.members)
+            if (unresolved.length > 0) {
+              console.warn(`[OCR] Unresolvable members: ${unresolved.join(', ')}`)
+              await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
               await replyMessage(replyToken, [{
                 type: 'text',
-                text: `😅 我在這張收據的分帳中找不到下列成員：${unknownMembers.join('、')}\n\n目前旅程成員只有：${trip.members.join('、')}\n\n請確認名字是否正確，或在文字訊息中明確指定要用哪些成員，再重新傳送照片。`,
+                text: `😅 我在這張收據的分帳中找不到下列成員：${unresolved.join('、')}\n\n目前旅程成員只有：${trip.members.join('、')}\n\n請確認名字是否正確，或在文字訊息中明確指定要用哪些成員，再重新傳送照片。`,
                 quickReply: boundQR
               }], sourceId)
               continue
             }
+
+            // 幣別與日期的把關。以前這兩個欄位是 AI 講什麼就寫什麼，
+            // 幻想出來的幣別會讓金額在統計時默默失真，錯誤的年份則會讓支出跑到別的月份去。
+            const ocrCurrency = normalizeCurrency(expense.currency, trip)
+            expense.currency = ocrCurrency.currency
+            const ocrDate = normalizeDate(expense.date, today)
+            expense.date = ocrDate.date
+            const ocrWarnings = [ocrCurrency.warning, ocrDate.warning].filter(Boolean) as string[]
 
             const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
@@ -638,7 +936,12 @@ serve(async (req) => {
               .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
 
-            await replyMessage(replyToken, [{
+            // 幣別或日期被修正過就一併告知，不要默默改掉使用者看不到的東西
+            const ocrWarningMsg = ocrWarnings.length > 0
+              ? [{ type: 'text' as const, text: ocrWarnings.join('\n') }]
+              : []
+
+            await replyMessage(replyToken, [...ocrWarningMsg, {
               type: "flex", altText: `收據辨識預覽: ${expense.description}`,
               contents: {
                 type: "bubble",
@@ -678,15 +981,15 @@ serve(async (req) => {
             }], sourceId)
           } else if (res.type === 'not_receipt') {
             console.log(`[PHOTO] Not a receipt, silently deleting: ${filePath}`)
-            await supabase.storage.from('travel-images').remove([filePath])
+            await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
           } else {
             console.log(`[PHOTO] Non-expense photo response, deleting: ${filePath}`)
-            await supabase.storage.from('travel-images').remove([filePath])
+            await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
             await replyMessage(replyToken, [{ type: 'text', text: res.content || '抱歉，這張照片我辨識不出來。' }], sourceId)
           }
         } catch (e) {
           console.error('[OCR_ERROR]', e)
-          await supabase.storage.from('travel-images').remove([filePath])
+          await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
           const msg = isRateLimit(e) ? RATE_LIMIT_MSG : '😵 處理圖片時發生錯誤，請稍後再試。'
           await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
         }
@@ -800,7 +1103,7 @@ serve(async (req) => {
         const config = userState.default_config
         const msg = config
           ? `⚙️ 您目前的個人偏好設定：\n\n${config}\n\n如需修改，輸入「設定: 新設定內容」`
-          : '⚙️ 您尚未設定個人偏好。\n\n輸入「設定: 預設代杰付款，大家均分」來設定。'
+          : '⚙️ 您尚未設定個人偏好。\n\n輸入「設定: 預設由我付款，大家均分」來設定。'
         await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
         continue
       }
@@ -809,7 +1112,7 @@ serve(async (req) => {
       if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定：'))) {
         const config = cleanText.substring(3).trim()
         if (!config) {
-          await replyMessage(replyToken, [{ type: 'text', text: '⚙️ 設定內容不能為空，請輸入偏好內容，例如：\n「設定: 預設代杰付款，大家均分」' }], sourceId)
+          await replyMessage(replyToken, [{ type: 'text', text: '⚙️ 設定內容不能為空，請輸入偏好內容，例如：\n「設定: 預設由我付款，大家均分」' }], sourceId)
           continue
         }
         await supabase.from('line_user_states').update({ default_config: config }).eq('line_user_id', sourceId)
@@ -1019,61 +1322,61 @@ serve(async (req) => {
         const expensesSummary = (expenses ?? []).map((e: any) => {
           const base = `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}]`
           if (e.photo_urls?.length > 0) {
-            const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(e.photo_urls[0])
+            const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(e.photo_urls[0])
             return `${base} [收據照片: ${publicUrl}]`
           }
           return base
         }).join('\n')
 
-        const promptInstruction = `你是旅遊記帳小幫手「耀西」（瑪利歐系列角色），偶爾穿插「Yoshi!」叫聲。若使用者打招呼或問自我介紹，親切介紹自己可以記帳、查詢支出、分析收據等功能。
-
-【旅程】${trip.name}｜成員：${trip.members.join('、')}｜分類：${trip.categories.join('、')}（預設：${trip.default_category || '無'}）
+        // 只放「這次對話的當下狀態」。人設與不可變規則已在 YOSHI_SYSTEM_INSTRUCTION，
+        // 輸出格式則交給 TEXT_RESPONSE_SCHEMA，不必再用文字描述一次。
+        const tripContext = `【旅程】${trip.name}｜成員：${trip.members.join('、')}｜分類：${trip.categories.join('、')}（預設：${trip.default_category || '無'}）
 【幣別】${JSON.stringify(trip.rates)}，主幣：${trip.base_currency}，預設：${trip.default_currency || '無'}
 【今日】${today}｜${trip.is_archived ? '⚠️ 已封存（唯讀，禁止記帳）' : '進行中'}
 【使用者設定】${userState.default_config || '無'}｜傳訊者：${memberName}
 【旅程預設付款人】${trip.default_payer?.length ? trip.default_payer.join('、') : '無'}｜預設分攤：${trip.default_split_members?.length ? trip.default_split_members.join('、') : '全員'}
 
-【規則】
-- 記帳 → {"type":"expense","data":{...}}；聊天/查詢 → {"type":"chat","content":"..."}
-- 已封存時嚴禁回傳 expense，改用 chat 告知。
-- payer_data（墊付）優先權：①旅程預設付款人 ②使用者設定 ③傳訊者對應成員 ④成員第一位
-- split_details（分攤）優先權：①旅程預設分攤 ②使用者設定 ③全員均分
-- 🚫 payer_data 與 split_details 的 key **絕對只能**寫「成員清單」中列出的字串，一字不差。
-  使用者若用暱稱、口誤、諧音或縮寫（例如把「代杰」說成「阿杰」「Jay」「小杰」），可以合理推測對應到清單裡最接近的成員，並使用清單上的正式名稱。
-  但若沒把握、找不到夠接近的對應，寧可回傳 chat 類型詢問使用者，**絕對不可以**自創、音譯、或把不存在的名字寫進 expense JSON。
-- 金額盡量無小數，但總和必須完全相等。
-- 幣別優先順序：使用者說明 > 使用者設定 > 旅程預設幣別。
-- 歷史支出僅供查詢，勿重複記錄。
-- 若使用者詢問某筆含收據照片的支出細節（品項、翻譯等），回傳 analyze_photo JSON，讓系統重新分析照片作答。
+【判斷優先權】
+- payer_data（墊付）：①旅程預設付款人 ②使用者設定 ③傳訊者對應的成員 ④成員第一位
+- split_details（分攤）：①旅程預設分攤 ②使用者設定 ③全員均分
+- 幣別：使用者明講 > 使用者設定 > 旅程預設幣別
+${memberAliasHint(trip.members)}
+【近期支出（最近10筆，僅供查詢參考）】
+${expensesSummary || '（尚無支出）'}
 
-【近期對話】
-${(history ?? []).map(h => `${h.role === 'user' ? 'U' : 'Y'}: ${h.content}`).join('\n')}
+【回應方式】
+- 想記一筆新支出 → type: expense
+- 想修正上一則「記帳建議」→ type: expense，帶上修正後的內容
+- 詢問某筆有收據照片的支出細節（品項明細、外文翻譯等）→ type: analyze_photo，
+  url 填近期支出中對應的照片網址（找不到就填空字串，系統會自動全庫搜尋），question 填使用者的問題
+- 其他聊天或查詢 → type: chat`
 
-【近期支出（最近10筆）】
-${expensesSummary}
-
----
-使用者說：「${userText}」
-
-判斷：
-A. 若歷史含「記帳建議」且使用者想修正 → 回傳修正後的 expense JSON，保留原 photo_ids。
-B. 若使用者想記錄新支出 → 回傳 expense JSON（無 photo_ids）。
-C. 其他聊天/查詢 → 回傳 chat JSON，查詢用條列式換行呈現。
-D. 若使用者詢問某筆有收據照片支出的詳細內容（如品項明細、外文翻譯等）→ 回傳 analyze_photo JSON，url 填入近期支出中對應的收據照片網址，question 填入使用者問題。
-
-JSON schema（expense）: {"type":"expense","data":{"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","category":"","payer_data":{},"split_details":{},"photo_ids":[]}}
-JSON schema（chat）: {"type":"chat","content":""}
-JSON schema（analyze_photo）: {"type":"analyze_photo","url":"完整收據照片網址（若近期10筆中找不到符合的支出，url 填空字串，系統會自動全庫搜尋）","question":"使用者的具體問題"}
-`
+        // 真正的多輪對話。以前是把歷史壓成 "U: ... / Y: ..." 塞進單一 prompt，
+        // 模型較難分辨哪些是自己說過的話。
+        const conversation: any[] = [
+          { role: 'user', parts: [{ text: tripContext }] },
+          { role: 'model', parts: [{ text: '{"type":"chat","content":"了解，我已掌握這趟旅程的設定。"}' }] },
+          ...(history ?? []).map((h: any) => ({
+            role: h.role === 'user' ? 'user' : 'model',
+            parts: [{ text: h.content }],
+          })),
+          { role: 'user', parts: [{ text: cleanText }] },
+        ]
 
         try {
-          const aiResponse = await askGemini([{ role: "user", parts: [{ text: promptInstruction }] }])
+          const aiResponse = await askGemini(conversation, {
+            systemInstruction: YOSHI_SYSTEM_INSTRUCTION,
+            responseSchema: TEXT_RESPONSE_SCHEMA,
+            temperature: 0.4,
+          })
           const res = JSON.parse(extractJSON(aiResponse))
           if (res.type === 'expense') {
             const expense = res.data
 
-            // 防呆：AI 可能誤用旅程不存在的成員名稱，發現時不出 Flex/LIFF，改用文字提示請使用者重新描述
-            const unknownMembers = findUnknownMembers(expense, trip.members)
+            normalizeExpenseAmountMaps(expense)
+
+            // 同上：先試著把暱稱對應回正式名稱
+            const { unresolved: unknownMembers } = resolveExpenseMembers(expense, trip.members)
             if (unknownMembers.length > 0) {
               console.warn(`[TEXT] Unknown members detected: ${unknownMembers.join(', ')}`)
               await replyMessage(replyToken, [{
@@ -1084,7 +1387,14 @@ JSON schema（analyze_photo）: {"type":"analyze_photo","url":"完整收據照�
               continue
             }
 
-            const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
+            // 幣別與日期的把關，與 OCR 路徑相同
+            const textCurrency = normalizeCurrency(expense.currency, trip)
+            expense.currency = textCurrency.currency
+            const textDate = normalizeDate(expense.date, today)
+            expense.date = textDate.date
+            const textWarnings = [textCurrency.warning, textDate.warning].filter(Boolean) as string[]
+
+            const precision = (trip.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
@@ -1111,7 +1421,7 @@ JSON schema（analyze_photo）: {"type":"analyze_photo","url":"完整收據照�
             if (photo_ids.length > 0) {
               const firstId = photo_ids[0]
               const filePath = firstId.includes('/') ? firstId : `expenses/${trip.id}/${firstId}.jpg`
-              const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(filePath)
+              const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(filePath)
               heroSection = { type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" }
             }
 
@@ -1120,10 +1430,15 @@ JSON schema（analyze_photo）: {"type":"analyze_photo","url":"完整收據照�
               .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
 
+            // 幣別或日期被修正過就一併告知，不要默默改掉使用者看不到的東西
+            const textWarningMsg = textWarnings.length > 0
+              ? [{ type: 'text' as const, text: textWarnings.join('\n') }]
+              : []
+
             // storePendingExpense 與 replyMessage 並行執行，縮短回覆延遲
             await Promise.all([
               storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId }),
-              replyMessage(replyToken, [{
+              replyMessage(replyToken, [...textWarningMsg, {
                 type: "flex", altText: `確認記帳: ${expense.description}`,
                 contents: {
                   type: "bubble",
@@ -1194,7 +1509,7 @@ JSON schema（analyze_photo）: {"type":"analyze_photo","url":"完整收據照�
                   await pushMessage(sourceId, [{ type: 'text', text: '😅 此旅程中找不到任何帶有收據照片的支出紀錄。', quickReply: boundQR }])
                 } else {
                   const expenseList = withPhotos.map((e: any) => {
-                    const { data: { publicUrl } } = supabase.storage.from('travel-images').getPublicUrl(e.photo_urls[0])
+                    const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(e.photo_urls[0])
                     return `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}] [照片: ${publicUrl}]`
                   }).join('\n')
 
