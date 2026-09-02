@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateDistribution, formatAmount } from './finance';
+import { calculateDistribution, formatAmount, getCurrencyPrecision } from './finance';
 
 describe('calculateDistribution', () => {
   it('整除時每人拿到相同金額', () => {
@@ -95,5 +95,31 @@ describe('formatAmount', () => {
 
   it('旅程設定優先於內建預設', () => {
     expect(formatAmount(1234.5, 'TWD', { TWD: 2 })).toBe('1234.50');
+  });
+});
+
+describe('getCurrencyPrecision', () => {
+  it('旅程設定優先', () => {
+    expect(getCurrencyPrecision('TWD', { TWD: 2 })).toBe(2);
+    expect(getCurrencyPrecision('USD', { USD: 0 })).toBe(0);
+  });
+
+  it('沒設定時，TWD/JPY/KRW 為 0 位', () => {
+    expect(getCurrencyPrecision('TWD')).toBe(0);
+    expect(getCurrencyPrecision('JPY')).toBe(0);
+    expect(getCurrencyPrecision('KRW')).toBe(0);
+  });
+
+  it('其餘幣別為 2 位', () => {
+    expect(getCurrencyPrecision('USD')).toBe(2);
+    expect(getCurrencyPrecision('EUR')).toBe(2);
+    expect(getCurrencyPrecision('XYZ')).toBe(2);
+  });
+
+  it('與 formatAmount 一致（避免兩處各自寫 fallback）', () => {
+    for (const cur of ['TWD', 'JPY', 'KRW', 'USD', 'XYZ']) {
+      const decimals = formatAmount(1.23456, cur).split('.')[1]?.length ?? 0;
+      expect(decimals).toBe(getCurrencyPrecision(cur));
+    }
   });
 });

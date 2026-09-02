@@ -14,9 +14,19 @@ export const toDecimal = (val: number | string) => new Decimal(val || 0);
  */
 const DEFAULT_CURRENCY_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 };
 
+/**
+ * 某個幣別要用幾位小數。
+ *
+ * 優先序：旅程的 precision_config → 內建預設（TWD/JPY/KRW 為 0 位）→ 2 位。
+ * 所有需要判斷精度的地方都該走這裡，不要各自寫 fallback。
+ */
+export const getCurrencyPrecision = (
+  currency: string,
+  precisionConfig: Record<string, number> = {}
+): number => precisionConfig[currency] ?? DEFAULT_CURRENCY_PRECISION[currency] ?? 2;
+
 export const formatAmount = (amount: number, currency: string, precisionConfig: Record<string, number> = {}) => {
-  const precision = precisionConfig[currency] ?? DEFAULT_CURRENCY_PRECISION[currency] ?? 2;
-  return new Decimal(amount).toFixed(precision);
+  return new Decimal(amount).toFixed(getCurrencyPrecision(currency, precisionConfig));
 };
 
 /**

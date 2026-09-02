@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   X,
   Camera,
@@ -19,7 +19,7 @@ import {
 import Modal from './Modal';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
-import { calculateDistribution } from '../utils/finance';
+import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
 import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
 import Decimal from 'decimal.js';
@@ -65,7 +65,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
-  const precision = trip.precision_config[currency] ?? (currency === 'TWD' ? 0 : 2);
+  const precision = getCurrencyPrecision(currency, trip.precision_config);
   const numAmount = useMemo(() => parseFloat(amount) || 0, [amount]);
 
   // General Distribution Logic
@@ -84,8 +84,29 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     return calculateDistribution(total, activeList, lockedMap, adjMember, precision);
   }, [precision]);
 
+  // 編輯模式開啟時的基準狀態。
+  // 在使用者真的動到金額／成員之前，保留資料庫裡原本的分帳金額不重算；
+  // 一旦有任何變動就恢復正常的自動重算。
+  // （舊作法是把所有成員設成 locked，結果改金額後分攤永遠不動，
+  //   使用者得逐一解鎖才會重算，非常違反直覺。）
+  const payerBaselineRef = useRef<string | null>(null);
+  const splitBaselineRef = useRef<string | null>(null);
+
+  // 開啟 modal 時，複雜的分帳直接攤開，單純的就維持收合
+  useEffect(() => {
+    if (!isOpen) return;
+    setShowPayerDetail(payerActive.size > 1);
+    setShowSplitDetail(splitActive.size > 0 && splitActive.size !== trip.members.length);
+    // 只在開啟的當下判斷一次，之後由使用者自己控制
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const payerSignature = `${numAmount}|${[...payerActive].sort().join(',')}`;
+  const splitSignature = `${numAmount}|${[...splitActive].sort().join(',')}|${adjustmentMember ?? ''}`;
+
   // Auto-recalculate Payers (only if not manually locked everything)
   useEffect(() => {
+    if (payerBaselineRef.current === payerSignature) return;
     if (payerLocked.size === payerActive.size && payerLocked.size > 0) return;
     const newData = runDistribution(numAmount, payerActive, payerLocked, payerData, null);
     setPayerData(prev => {
@@ -95,10 +116,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       });
       return next;
     });
-  }, [numAmount, payerActive, payerLocked, runDistribution]);
+  }, [numAmount, payerActive, payerLocked, runDistribution, payerSignature]);
 
   // Auto-recalculate Splitters
   useEffect(() => {
+    if (splitBaselineRef.current === splitSignature) return;
     if (splitLocked.size === splitActive.size && splitLocked.size > 0) return;
     const newData = runDistribution(numAmount, splitActive, splitLocked, splitData, adjustmentMember);
     setSplitData(prev => {
@@ -108,7 +130,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       });
       return next;
     });
-  }, [numAmount, splitActive, splitLocked, adjustmentMember, runDistribution]);
+  }, [numAmount, splitActive, splitLocked, adjustmentMember, runDistribution, splitSignature]);
 
   // Initialization & Reset — declared after auto-recalc effects so that on the
   // first render, React batches the setSplitData/setPayerData from init AFTER
@@ -137,7 +159,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         const pActive = new Set(activePayers);
         setPayerActive(pActive);
         setPayerData(editData.payer_data);
-        setPayerLocked(new Set(activePayers));
+        setPayerLocked(new Set());
+        payerBaselineRef.current =
+          `${editData.amount}|${[...pActive].sort().join(',')}`;
 
         // Set Splitters (only check if amount > 0)
         const activeSplitters = Object.entries(editData.split_data)
@@ -146,7 +170,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         const sActive = new Set(activeSplitters);
         setSplitActive(sActive);
         setSplitData(editData.split_data);
-        setSplitLocked(new Set(activeSplitters));
+        setSplitLocked(new Set());
+        splitBaselineRef.current =
+          `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
       } else {
         // --- New Mode ---
         setDescription('');
@@ -165,6 +191,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setPayerActive(activePayers);
         setPayerLocked(new Set());
         setPayerData({});
+        payerBaselineRef.current = null;
 
         const defaultSplit = trip.default_split_members?.length
           ? new Set(trip.default_split_members.filter(m => trip.members.includes(m)))
@@ -172,6 +199,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setSplitActive(defaultSplit.size > 0 ? defaultSplit : new Set(trip.members));
         setSplitLocked(new Set());
         setSplitData({});
+        splitBaselineRef.current = null;
 
         // adjMember: 優先 currentUser（若在預設付款人中）→ 第一個預設付款人 → 第一位成員
         const adjMember = activePayers.has(currentUser || '')
@@ -181,6 +209,27 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       }
     }
   }, [isOpen, editData, trip.members, currentUser, trip.base_currency]);
+
+  // 兩張成員表預設收合。以五人旅程為例，展開時光是這兩區就有 50 個控制項
+  // 擋在金額欄與送出鍵之間；多數記帳其實直接套用預設值即可。
+  // 只要偵測到不是「單一付款人 + 全員均分」的單純情況，就自動展開。
+  const [showPayerDetail, setShowPayerDetail] = useState(false);
+  const [showSplitDetail, setShowSplitDetail] = useState(false);
+
+  const payerSummary = useMemo(() => {
+    const names = [...payerActive];
+    if (names.length === 0) return '尚未選擇付款人';
+    if (names.length === 1) return `${names[0]} 付`;
+    return `${names.length} 人分別墊付`;
+  }, [payerActive]);
+
+  const splitSummary = useMemo(() => {
+    const names = [...splitActive];
+    if (names.length === 0) return '尚未選擇分攤成員';
+    if (names.length === trip.members.length) return '全員均分';
+    if (names.length === 1) return `${names[0]} 全額負擔`;
+    return `${names.length} 人分攤`;
+  }, [splitActive, trip.members.length]);
 
   const payerSum = useMemo(() => Object.values(payerData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [payerData]);
   const splitSum = useMemo(() => Object.values(splitData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [splitData]);
@@ -245,11 +294,20 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!numAmount || !description || !supabase) return;
+    if (!supabase) {
+      setError('尚未連線到資料庫，請稍後再試');
+      return;
+    }
+    if (!numAmount) {
+      setError('請輸入金額');
+      return;
+    }
     if (!isPayerValid || !isSplitValid) {
       setError('金額分配與總額不符，請檢查付款或分攤明細');
       return;
     }
+    // 描述留空時用分類名代入，讓「只打金額」也能成立
+    const finalDescription = description.trim() || category;
 
     try {
       setLoading(true);
@@ -302,7 +360,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       });
 
       const record = {
-        trip_id: trip.id, date, category, description, amount: numAmount, currency,
+        trip_id: trip.id, date, category, description: finalDescription, amount: numAmount, currency,
         payer_data: finalPayerData, split_data: finalSplitData, adjustment_member: adjustmentMember,
         photo_urls: finalPhotoUrls, is_settlement: false
       };
@@ -328,7 +386,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           body: {
             line_user_id: liffMeta.line_user_id,
             expense_id: savedExpenseId,
-            description,
+            description: finalDescription,
             amount: numAmount,
             currency,
           }
@@ -356,10 +414,10 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           {/* Header Info */}
           <div className="grid grid-cols-1 gap-4">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">支出描述</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">支出描述<span className="ml-1 normal-case tracking-normal text-slate-300">(選填)</span></label>
               <div className="relative">
                 <Receipt className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input required type="text" placeholder="例如：機場晚餐" className="w-full pl-11 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm" value={description} onChange={e => setDescription(e.target.value)} />
+                <input type="text" placeholder={`例如：機場晚餐（留空則記為「${category}」）`} className="w-full pl-11 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm" value={description} onChange={e => setDescription(e.target.value)} />
               </div>
             </div>
             <div className="space-y-1.5">
@@ -371,7 +429,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={12} />
                 </div>
-                <input required type="number" step="any" inputMode="decimal" placeholder="0.00" className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-black text-lg" value={amount} onChange={e => setAmount(e.target.value)} />
+                <input required autoFocus type="number" step="any" inputMode="decimal" placeholder="0.00" className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-black text-lg" value={amount} onChange={e => setAmount(e.target.value)} />
               </div>
             </div>
           </div>
@@ -391,14 +449,24 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
           {/* Payers */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between ml-1">
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">誰付的錢？</label>
+            <button
+              type="button"
+              onClick={() => setShowPayerDetail(v => !v)}
+              className="w-full flex items-center justify-between ml-1 pr-1 text-left group"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0 cursor-pointer">誰付的錢？</label>
                 <ValidationBadge isValid={isPayerValid} current={payerSum} target={numAmount} />
+                {!showPayerDetail && (
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{payerSummary}</span>
+                )}
               </div>
-              <CreditCard size={14} className="text-slate-300" />
-            </div>
-            <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <CreditCard size={14} className="text-slate-300" />
+                <ChevronDown size={14} className={`text-slate-400 transition-transform ${showPayerDetail ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            <div className={`bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 ${showPayerDetail ? '' : 'hidden'}`}>
               {trip.members.map(member => (
                 <div key={member} className="flex items-center justify-between p-3 gap-2">
                   <div className="flex items-center gap-2 shrink-0">
@@ -454,17 +522,29 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
           {/* Splitters */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between ml-1">
-              <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">每人分攤</label>
+            <button
+              type="button"
+              onClick={() => setShowSplitDetail(v => !v)}
+              className="w-full flex items-center justify-between ml-1 pr-1 text-left group"
+            >
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0 cursor-pointer">每人分攤</label>
                   <ValidationBadge isValid={isSplitValid} current={splitSum} target={numAmount} />
+                  {!showSplitDetail && (
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{splitSummary}</span>
+                  )}
                 </div>
-                <p className="text-[8px] text-slate-400 font-medium">點擊 ⭐ 以指定成員吸收餘數</p>
+                {showSplitDetail && (
+                  <p className="text-[8px] text-slate-400 font-medium">點擊 ⭐ 以指定成員吸收餘數</p>
+                )}
               </div>
-              <Coins size={14} className="text-slate-300" />
-            </div>
-            <div className="bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Coins size={14} className="text-slate-300" />
+                <ChevronDown size={14} className={`text-slate-400 transition-transform ${showSplitDetail ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            <div className={`bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 ${showSplitDetail ? '' : 'hidden'}`}>
               {trip.members.map(member => (
                 <div key={member} className="flex items-center justify-between p-3 gap-2">
                   <div className="flex items-center gap-2 shrink-0">
@@ -579,17 +659,19 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                 );
               })}
               <label className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-slate-400 hover:border-blue-400 cursor-pointer">
-                <Camera size={20} /><span className="text-[8px] font-bold mt-1">添加</span><input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoChange} />
+                <Camera size={20} /><span className="text-[8px] font-bold mt-1">添加</span><input type="file" multiple accept="image/*" capture="environment" className="hidden" onChange={handlePhotoChange} />
               </label>
             </div>
           </div>
 
           {error && <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-xl flex items-center gap-3 text-red-600 dark:text-red-400 text-xs font-bold"><AlertCircle size={16} />{error}</div>}
 
-          <button disabled={loading} type="submit" className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4">
-            {loading ? <Loader2 className="animate-spin" size={20} /> : (editData ? <Save size={20} /> : <Plus size={20} strokeWidth={3} />)}
-            <span>{loading ? '儲存中...' : (editData?.id ? '儲存修改' : '確認新增支出')}</span>
-          </button>
+          <div className="sticky bottom-0 -mx-1 px-1 pt-3 pb-1 bg-gradient-to-t from-white via-white to-white/0 dark:from-slate-800 dark:via-slate-800 dark:to-slate-800/0">
+            <button disabled={loading} type="submit" className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+              {loading ? <Loader2 className="animate-spin" size={20} /> : (editData ? <Save size={20} /> : <Plus size={20} strokeWidth={3} />)}
+              <span>{loading ? '儲存中...' : (editData?.id ? '儲存修改' : '確認新增支出')}</span>
+            </button>
+          </div>
         </form>
       </div>
     </Modal>
