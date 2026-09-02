@@ -24,9 +24,12 @@ npm run build     # tsc -b + vite build
 npm run lint      # ESLint 掃整個專案
 npm run preview   # 本機預覽正式建置結果
 npm run db:build  # 由 supabase/schema/ 重新產生 bootstrap.generated.sql
+npm test          # Vitest（純函式，不含 UI）
+npm run test:watch
 ```
 
-專案目前**沒有自動化測試**，Lint 是主要的品質把關工具。提交前請跑 `npm run lint`。
+提交前請跑 `npm run lint && npm test && npm run build` —— CI 這三關都會擋。
+測試只涵蓋 `src/utils/` 的純函式與跨實作的契約比對，沒有元件層級的測試。
 
 **Supabase Edge Function：**
 
@@ -76,10 +79,15 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 `src/utils/finance.ts` 全面使用 **Decimal.js**。`calculateDistribution()` 處理餘數分配：
 金額除不盡時，餘數指定給 `adjustment_member`，確保 `Σ(分攤) === 總額`。
 
-⚠️ **這套邏輯有兩份實作**：前端的 `src/utils/finance.ts`，以及 LINE Bot Edge Function
-內透過 esm.sh 引入 Decimal.js 重新實作的同名函式。`calculateSettlements` 同樣有兩份
-（`Dashboard.tsx` 與 Edge Function）。**修改任何一邊都必須同步另一邊**，目前沒有任何
-機制會偵測漂移。已知的既存差異見 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+結清演算法在 `src/utils/settlement.ts`（`calculateSettlements`）。
+
+⚠️ **這兩套邏輯各有兩份實作**：前端在 `src/utils/`，LINE Bot 在
+`supabase/functions/_shared/finance.ts`。無法直接共用同一個檔案 ——
+前端走 npm 的 decimal.js，Edge Function 走 esm.sh 的 URL import。
+
+**改任何一邊都必須同步另一邊**，但現在有 `src/utils/finance.parity.test.ts`
+這支契約測試會用大量隨機輸入比對兩份實作，漂移會直接讓 CI 失敗。
+`_shared/deps.ts` 那層間接就是為了讓測試能在 Node 下載入 Deno 的模組。
 
 ### 行程登錄檔模式
 

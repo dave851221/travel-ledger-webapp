@@ -38,14 +38,18 @@ RLS 政策全部是 `FOR ALL USING (true)`（見 [`supabase/schema/05_policies.s
 `currentUser` 存在 `localStorage`。清快取就會失去身分設定，需重新選擇。
 目前影響輕微，但沒有更好的替代方案（因為沒有帳號系統，見風險 1）。
 
-### 4. 財務演算法有兩份實作
+### 4. 結算的匯率換算兩邊不一致（低，但會算錯錢）
 
-`calculateDistribution` 同時存在於 `src/utils/finance.ts` 與
-`supabase/functions/line-webhook/index.ts`，`calculateSettlements` 則存在於
-`Dashboard.tsx` 與同一支 Edge Function。目前靠人工保持同步，沒有任何機制偵測漂移。
+Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
+網頁端（`Dashboard.tsx`）是 `rates[...]`。若 `rates` 裡 base currency 的值不等於 1，
+兩邊會算出不同的結算結果。
 
-已知的實際差異：Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
-網頁端是 `rates[...]`；若 `rates` 裡 base currency 不等於 1，兩邊會算出不同結果。
+這一段不在契約測試的涵蓋範圍內（測試比對的是 `calculateDistribution` 與
+`calculateSettlements` 兩支純函式，不是呼叫端如何準備 balance）。
+修法是把餘額彙總也收進 `_shared/`。
+
+> 演算法本身的重複已由 `src/utils/finance.parity.test.ts` 的契約測試看守，
+> 改一邊忘了另一邊會讓 CI 失敗。
 
 ---
 
@@ -55,6 +59,8 @@ RLS 政策全部是 `FOR ALL USING (true)`（見 [`supabase/schema/05_policies.s
 
 - 修正上述已知風險 2 與 4。
 - 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
+- Edge Function 模組化，並為 LINE webhook 事件與 Gemini 回應補上真正的型別
+  （目前那 33 處 `any` 在 ESLint 是 warning，見 `eslint.config.js` 的說明）。
 
 ### 中期
 
