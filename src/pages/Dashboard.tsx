@@ -46,9 +46,11 @@ import { getLocalDateString } from '../utils/date';
 import { getCategoryColor } from '../utils/category';
 import { calculateSettlements } from '../utils/settlement';
 import { photoUrl } from '../utils/storage';
+import { buildQuickAddDraft } from '../utils/quickAdd';
 import { useToast } from '../hooks/useToast';
 import Toast from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
+import QuickAddBar from '../components/QuickAddBar';
 import { useTripData } from '../hooks/useTripData';
 import { useTripStats } from '../hooks/useTripStats';
 import { useTrash } from '../hooks/useTrash';
@@ -136,6 +138,35 @@ const Dashboard: React.FC = () => {
       setIsEmptyTrashConfirmOpen(false);
       refetchDeleted();
     }
+  };
+
+  // 把快速記帳列已經打好的內容轉進完整表單。
+  // 傳一份沒有 id 的草稿，ExpenseModal 會視為新增而非編輯。
+  const openQuickAddInFullForm = (prefill: { description: string; amount: string }) => {
+    if (!trip) return;
+    const draft = buildQuickAddDraft(
+      `${prefill.description} ${prefill.amount}`.trim(),
+      trip,
+      currentUser,
+    );
+    if (!draft) return;
+    setEditingExpense({
+      id: '',
+      trip_id: trip.id,
+      date: draft.date,
+      category: draft.category,
+      description: draft.description,
+      amount: draft.amount,
+      currency: draft.currency,
+      payer_data: draft.payer_data,
+      split_data: draft.split_data,
+      adjustment_member: draft.adjustment_member,
+      photo_urls: [],
+      is_settlement: false,
+      deleted_at: null,
+      created_at: new Date().toISOString(),
+    });
+    setIsExpenseModalOpen(true);
   };
 
   const handleEditExpense = (exp: Expense) => {
@@ -437,6 +468,16 @@ const Dashboard: React.FC = () => {
                     </button>
                   )}
                 </div>
+                {trip && !trip.is_archived && (
+                  <QuickAddBar
+                    trip={trip}
+                    currentUser={currentUser}
+                    onSaved={refetchExpenses}
+                    onOpenFullForm={openQuickAddInFullForm}
+                    showToast={showToast}
+                  />
+                )}
+
                 <div className="space-y-3">
                   <div className="relative w-full">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />

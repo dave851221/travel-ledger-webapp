@@ -407,7 +407,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   );
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editData ? "編輯支出紀錄" : "新增支出紀錄"}>
+    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? "編輯支出紀錄" : "新增支出紀錄"}>
       <div className="w-full max-w-lg mx-auto overflow-hidden px-1">
         <form onSubmit={handleSubmit} className="space-y-6 max-h-[75vh] overflow-y-auto no-scrollbar py-2">
           
