@@ -39,6 +39,11 @@ jobs:
       - name: Test
         run: npm test
 
+      # Edge Function 是 Deno 程式碼，tsc 看不到它。
+      # 這個專案踩過「部署後靜默失效」的坑，型別檢查是最基本的一道防線。
+      - name: Type-check Edge Functions
+        run: npm run check:functions
+
       - name: Build
         run: npm run build
         env:

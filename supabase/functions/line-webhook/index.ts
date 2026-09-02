@@ -152,7 +152,9 @@ async function verifySignature(body: string, signature: string | null): Promise<
   if (!signature || !LINE_CHANNEL_SECRET) return false
   const encoder = new TextEncoder()
   const key = await crypto.subtle.importKey('raw', encoder.encode(LINE_CHANNEL_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
-  return await crypto.subtle.verify('HMAC', key, decodeBase64(signature), encoder.encode(body))
+  // decodeBase64 回傳 Uint8Array<ArrayBufferLike>，新版 TS lib 不再視為 BufferSource
+  const sigBytes = decodeBase64(signature) as unknown as BufferSource
+  return await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(body))
 }
 
 async function analyzeReceiptPhoto(photoUrl: string, question: string): Promise<string> {
@@ -392,12 +394,17 @@ serve(async (req) => {
 
           const { data: trip } = await supabase.from('trips').select('precision_config, members, is_archived').eq('id', trip_id).single()
 
-          if (trip?.is_archived) {
+          if (!trip) {
+            // 旅程可能已被刪除（見 docs/DB_MAINTENANCE.md），此時舊卡片的按鈕不該讓整個函式崩掉
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId);
+            continue;
+          }
+          if (trip.is_archived) {
             await replyMessage(replyToken, [{ type: 'text', text: '❌ 此旅程已封存，無法新增支出。' }], sourceId);
             continue;
           }
 
-          const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
+          const precision = (trip.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
           const numAmount = new Decimal(parseFloat(expense.amount as any) || 0).toDecimalPlaces(precision).toNumber()
           const payerMembers = Object.keys(expense.payer_data).filter(m => trip.members.includes(m))
           const splitMembers = Object.keys(expense.split_details).filter(m => trip.members.includes(m))
@@ -932,6 +939,10 @@ serve(async (req) => {
 
         if (cleanText === '結算') {
           const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates').eq('id', tripId).single()
+          if (!trip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+            continue
+          }
           const { data: allExp } = await supabase.from('expenses')
             .select('amount, currency, payer_data, split_data')
             .eq('trip_id', tripId).is('deleted_at', null)
@@ -961,6 +972,10 @@ serve(async (req) => {
 
         if (cleanText === '旅程總覽') {
           const { data: trip } = await supabase.from('trips').select('name, members, base_currency, is_archived').eq('id', tripId).single()
+          if (!trip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+            continue
+          }
           const today = getTodayString(getTripTimezone(trip))
           const { data: allExp } = await supabase.from('expenses')
             .select('amount, currency').eq('trip_id', tripId)
