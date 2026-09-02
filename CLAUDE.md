@@ -26,10 +26,15 @@ npm run preview   # 本機預覽正式建置結果
 npm run db:build  # 由 supabase/schema/ 重新產生 bootstrap.generated.sql
 npm test          # Vitest（純函式，不含 UI）
 npm run test:watch
+npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查
 ```
 
-提交前請跑 `npm run lint && npm test && npm run build` —— CI 這三關都會擋。
-測試只涵蓋 `src/utils/` 的純函式與跨實作的契約比對，沒有元件層級的測試。
+提交前請跑 `npm run lint && npm test && npm run check:functions && npm run build`
+—— CI 這四關都會擋。測試只涵蓋 `src/utils/` 的純函式與跨實作的契約比對，
+沒有元件層級的測試。
+
+`tsc` 只看得到 `src/`，Edge Function 是 Deno 程式碼，必須用 `check:functions`
+才檢查得到 —— 這個專案踩過「部署後靜默失效」的坑，別跳過這一關。
 
 **Supabase Edge Function：**
 
@@ -123,7 +128,12 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 3. **文字訊息**：先比對快捷指令（直接查 DB），其餘交給 Gemini 回傳結構化 JSON
 4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片
 5. **Postback**：按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出
-6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式
+6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式。
+   群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者。
+
+**AI 回傳的內容一律先驗證再落地**：成員名稱做模糊比對後對應回正式名稱、
+幣別比對旅程 `rates` 與 ISO 白名單、日期檢查格式與合理範圍。
+任何被修正的欄位都會告知使用者，不會默默改掉。細節見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)。
 
 行為規格詳見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)。
 

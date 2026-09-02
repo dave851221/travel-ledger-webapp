@@ -59,8 +59,14 @@ Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
 
 - 修正上述已知風險 2 與 4。
 - 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
-- Edge Function 模組化，並為 LINE webhook 事件與 Gemini 回應補上真正的型別
-  （目前那 33 處 `any` 在 ESLint 是 warning，見 `eslint.config.js` 的說明）。
+- Edge Function 模組化（目前仍是 1600 行單檔），並為 LINE webhook 事件與
+  Gemini 回應補上真正的型別（那些 `any` 在 ESLint 是 warning，見 `eslint.config.js`）。
+- LINE Bot 尚未支援：修改／刪除既有支出（只能撤銷最近一筆）、多品項收據拆帳、
+  自由條件的支出查詢（目前只有今日／本週／本月／結算幾個固定指令，
+  其餘交給 AI 但它只看得到最近 10 筆）。
+  這些適合改用 Gemini function calling 一次解決，並與
+  [`MCP_SERVER_DESIGN.md`](MCP_SERVER_DESIGN.md) 的工具清單共用同一層實作。
+- Webhook 目前整條同步處理到底，OCR 路徑有超過 LINE replyToken 時效的風險。
 
 ### 中期
 
