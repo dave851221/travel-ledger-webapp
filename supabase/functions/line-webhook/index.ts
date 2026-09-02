@@ -553,10 +553,23 @@ async function askGemini(contents: any[], options: AskGeminiOptions = {}) {
   throw new Error(`RATE_LIMIT: All Gemini models are currently rate limited or unavailable. Last error: ${lastError}`)
 }
 
-async function getGroupMemberName(groupId: string, userId: string): Promise<string> {
+/**
+ * 取得發言者的 LINE 顯示名稱。
+ *
+ * group 與 room 走不同的 endpoint —— 原本只處理 group，
+ * 導致多人聊天室的發言者永遠是「未知」，還被當成身分餵進 prompt。
+ */
+async function getChatMemberName(
+  sourceType: 'group' | 'room',
+  chatId: string,
+  userId: string,
+): Promise<string> {
   try {
+    const endpoint = sourceType === 'group'
+      ? `https://api.line.me/v2/bot/group/${chatId}/member/${userId}`
+      : `https://api.line.me/v2/bot/room/${chatId}/member/${userId}`
     const response = await fetch(
-      `https://api.line.me/v2/bot/group/${groupId}/member/${userId}`,
+      endpoint,
       { headers: { "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` } }
     );
     if (!response.ok) {
@@ -588,12 +601,18 @@ serve(async (req) => {
       const isGroup = sourceType !== 'user'
       console.log(`[EVENT] ${JSON.stringify(event, null, 2)}`);
 
+      // 群組／聊天室共用同一份綁定與偏好（刻意的設計，讓大家都能記同一本帳），
+      // 但每次互動仍要看得出是誰做的。
+      const speakerUserId: string | null = event.source.userId ?? null
       let memberName = "未知";
       const needsMemberName = event.type === 'message' && (event.message?.type === 'text' || event.message?.type === 'image');
-      if (event.source.type === "group" && needsMemberName) {
-        const fetchedName = await getGroupMemberName(event.source.groupId, event.source.userId);
-        memberName = fetchedName || `User_${event.source.userId.substring(0, 8)}`;
+      if ((sourceType === "group" || sourceType === "room") && needsMemberName && speakerUserId) {
+        const chatId = event.source.groupId || event.source.roomId
+        const fetchedName = await getChatMemberName(sourceType, chatId, speakerUserId);
+        memberName = fetchedName || `User_${speakerUserId.substring(0, 8)}`;
       }
+      // 一對一聊天不需要打 API，發言者就是對話本身
+      const speakerLabel = isGroup ? memberName : null
 
       let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
       if (!userState) {
@@ -730,7 +749,12 @@ serve(async (req) => {
           if (savedExpense?.id) {
             supabase.from('line_chat_history').insert({
               line_user_id: sourceId, role: 'saved',
-              content: JSON.stringify({ expense_id: savedExpense.id, description: expense.description })
+              content: JSON.stringify({
+                expense_id: savedExpense.id,
+                description: expense.description,
+                by: speakerLabel,
+              }),
+              speaker_user_id: speakerUserId, speaker_name: speakerLabel,
             }).then(() => {})
           }
 
@@ -738,8 +762,10 @@ serve(async (req) => {
           const undoItems = savedExpense?.id
             ? [{ type: "action", action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: savedExpense.id, d: expense.description }) } }]
             : []
+          // 群組裡標明是誰記的，一對一就不必贅述
+          const savedBy = speakerLabel ? `\n（由 ${speakerLabel} 記錄）` : ''
           await replyMessage(replyToken, [{
-            type: 'text', text: `✅ 已存入：${expense.description}`,
+            type: 'text', text: `✅ 已存入：${expense.description}${savedBy}`,
             quickReply: { items: [...undoItems, ...boundQR.items] }
           }], sourceId)
 
@@ -1155,7 +1181,9 @@ serve(async (req) => {
               const saved = JSON.parse(savedHistory[0].content)
               const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', saved.expense_id)
               if (error) throw error
-              await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${saved.description}`, quickReply: boundQR }], sourceId)
+              // 群組內任何人都能撤銷任何人的紀錄（刻意保留），但要講清楚撤掉的是誰記的那筆
+              const originalBy = saved.by && saved.by !== speakerLabel ? `（原由 ${saved.by} 記錄）` : ''
+              await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${saved.description}${originalBy}`, quickReply: boundQR }], sourceId)
             } catch {
               await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
             }
@@ -1306,7 +1334,10 @@ serve(async (req) => {
           supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: true }).limit(6)
         ])
         // fire-and-forget：不阻塞主流程
-        supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'user', content: cleanText }).then(() => {})
+        supabase.from('line_chat_history').insert({
+          line_user_id: sourceId, role: 'user', content: cleanText,
+          speaker_user_id: speakerUserId, speaker_name: speakerLabel,
+        }).then(() => {})
 
         // 約 10% 機率清理 30 天前的對話記錄，降低 DB 寫入頻率
         if (Math.random() < 0.1) {

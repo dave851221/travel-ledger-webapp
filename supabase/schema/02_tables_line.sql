@@ -28,15 +28,20 @@ CREATE TABLE IF NOT EXISTS public.line_user_states (
 --   'user' / 'model'：餵給 Gemini 的對話上下文
 --   'pending'       ：Flex 卡片的 postback payload 側通道（繞過 300 bytes 限制）
 --   'saved'         ：最近一筆存檔的支出 id，供「撤銷上一筆」使用
+--   speaker_* 記錄實際發言者。群組共用同一份狀態是刻意的設計，
+--   但每次互動仍要看得出是誰做的（Flex 卡片、撤銷訊息都會顯示）。
 CREATE TABLE IF NOT EXISTS public.line_chat_history (
-    id           BIGSERIAL PRIMARY KEY,
-    line_user_id TEXT NOT NULL REFERENCES public.line_user_states(line_user_id) ON DELETE CASCADE,
-    role         TEXT NOT NULL,
-    content      TEXT NOT NULL,
-    created_at   TIMESTAMPTZ DEFAULT NOW()
+    id              BIGSERIAL PRIMARY KEY,
+    line_user_id    TEXT NOT NULL REFERENCES public.line_user_states(line_user_id) ON DELETE CASCADE,
+    role            TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    speaker_user_id TEXT,
+    speaker_name    TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON public.line_chat_history (line_user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_history_speaker ON public.line_chat_history (speaker_user_id);
 
 -- 動作鎖：以 PK 衝突當作鎖，防止使用者連點 Flex 按鈕造成重複記帳
 CREATE TABLE IF NOT EXISTS public.line_processed_actions (
