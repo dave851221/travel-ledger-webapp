@@ -1,7 +1,8 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
-import Decimal from "https://esm.sh/decimal.js@10.4.3"
+import { Decimal } from "../_shared/deps.ts"
+import { calculateDistribution, calculateSettlements, DEFAULT_PRECISION } from "../_shared/finance.ts"
 
 const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
 const LINE_CHANNEL_SECRET = Deno.env.get('LINE_CHANNEL_SECRET') || ''
@@ -11,7 +12,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 
 const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp'
 
-const DEFAULT_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 }
 
 const RATE_LIMIT_MSG = '⚠️ AI 服務暫時達到免費使用量上限，請隔天再試。'
 const isRateLimit = (e: any) => String(e?.message).startsWith('RATE_LIMIT:')
@@ -146,84 +146,6 @@ function requiresAccessCode(code: string | null | undefined): boolean {
 
 function buildBindSuccessText(tripName: string, members: string[], tripId: string): string {
   return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是代杰，大家平分」囉！`
-}
-
-function calculateDistribution(
-  total: number,
-  activeMembers: string[],
-  lockedData: Record<string, number> = {},
-  adjustmentMember: string | null = null,
-  precision: number = 2
-): Record<string, number> {
-  const result: Record<string, Decimal> = {};
-  if (activeMembers.length === 0) return {};
-
-  const dTotal = new Decimal(total || 0);
-  let remainingAmount = dTotal;
-
-  const unlockedActiveMembers = activeMembers.filter(m => {
-    if (lockedData[m] !== undefined) {
-      const lockedVal = new Decimal(lockedData[m]);
-      result[m] = lockedVal;
-      remainingAmount = remainingAmount.minus(lockedVal);
-      return false;
-    }
-    return true;
-  });
-
-  if (unlockedActiveMembers.length > 0) {
-    const share = remainingAmount.dividedBy(unlockedActiveMembers.length).toDecimalPlaces(precision, Decimal.ROUND_DOWN);
-    unlockedActiveMembers.forEach(m => {
-      result[m] = share;
-      remainingAmount = remainingAmount.minus(share);
-    });
-
-    if (!remainingAmount.isZero()) {
-      const target = (adjustmentMember && unlockedActiveMembers.includes(adjustmentMember))
-        ? adjustmentMember
-        : unlockedActiveMembers[0];
-      result[target] = result[target].plus(remainingAmount);
-    }
-  } else if (!remainingAmount.isZero()) {
-    const target = (adjustmentMember && activeMembers.includes(adjustmentMember))
-      ? adjustmentMember
-      : activeMembers[0];
-    if (result[target]) {
-      result[target] = result[target].plus(remainingAmount);
-    } else {
-      result[target] = remainingAmount;
-    }
-  }
-
-  const finalResult: Record<string, number> = {};
-  Object.keys(result).forEach(m => {
-    finalResult[m] = result[m].toNumber();
-  });
-  return finalResult;
-}
-
-function calculateSettlements(memberBalances: Record<string, number>): { from: string, to: string, amount: number }[] {
-  const EPSILON = new Decimal('0.01')
-  const debtors: { name: string, amt: Decimal }[] = []
-  const creditors: { name: string, amt: Decimal }[] = []
-  Object.entries(memberBalances).forEach(([name, bal]) => {
-    const d = new Decimal(bal)
-    if (d.lt(EPSILON.negated())) debtors.push({ name, amt: d.negated() })
-    else if (d.gt(EPSILON)) creditors.push({ name, amt: d })
-  })
-  debtors.sort((a, b) => b.amt.comparedTo(a.amt))
-  creditors.sort((a, b) => b.amt.comparedTo(a.amt))
-  const result: { from: string, to: string, amount: number }[] = []
-  let i = 0, j = 0
-  while (i < debtors.length && j < creditors.length) {
-    const minAmt = Decimal.min(debtors[i].amt, creditors[j].amt)
-    result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt.toNumber() })
-    debtors[i].amt = debtors[i].amt.minus(minAmt)
-    creditors[j].amt = creditors[j].amt.minus(minAmt)
-    if (debtors[i].amt.lt(EPSILON)) i++
-    if (creditors[j].amt.lt(EPSILON)) j++
-  }
-  return result
 }
 
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {

@@ -1,0 +1,99 @@
+import { describe, it, expect } from 'vitest';
+import { calculateDistribution, formatAmount } from './finance';
+
+describe('calculateDistribution', () => {
+  it('整除時每人拿到相同金額', () => {
+    expect(calculateDistribution(300, ['A', 'B', 'C'], {}, null, 0))
+      .toEqual({ A: 100, B: 100, C: 100 });
+  });
+
+  it('除不盡時餘數歸給 adjustmentMember', () => {
+    // 100 / 3 = 33.33…，ROUND_DOWN 後每人 33，餘 1 給 B
+    const r = calculateDistribution(100, ['A', 'B', 'C'], {}, 'B', 0);
+    expect(r).toEqual({ A: 33, B: 34, C: 33 });
+    expect(r.A + r.B + r.C).toBe(100);
+  });
+
+  it('adjustmentMember 不在名單中時，餘數歸給第一位', () => {
+    const r = calculateDistribution(100, ['A', 'B', 'C'], {}, '路人', 0);
+    expect(r).toEqual({ A: 34, B: 33, C: 33 });
+  });
+
+  it('adjustmentMember 為 null 時，餘數歸給第一位', () => {
+    expect(calculateDistribution(100, ['A', 'B', 'C'], {}, null, 0))
+      .toEqual({ A: 34, B: 33, C: 33 });
+  });
+
+  it('鎖定的成員金額不變，其餘均分剩下的金額', () => {
+    // A 鎖定 50，剩 50 由 B、C 均分
+    const r = calculateDistribution(100, ['A', 'B', 'C'], { A: 50 }, null, 0);
+    expect(r).toEqual({ A: 50, B: 25, C: 25 });
+  });
+
+  it('鎖定成員後仍除不盡時，餘數歸給未鎖定的 adjustmentMember', () => {
+    // A 鎖定 40，剩 60 由 B、C、D 均分 = 20 各
+    const r = calculateDistribution(101, ['A', 'B', 'C', 'D'], { A: 40 }, 'C', 0);
+    expect(r.A).toBe(40);
+    expect(r.B + r.C + r.D).toBe(61);
+    expect(r.C).toBeGreaterThan(r.B); // C 承擔餘數
+  });
+
+  it('全部成員都鎖定且加總不等於總額時，差額強制加給調整成員', () => {
+    const r = calculateDistribution(100, ['A', 'B'], { A: 30, B: 30 }, 'B', 0);
+    expect(r).toEqual({ A: 30, B: 70 });
+  });
+
+  it('全部成員都鎖定且加總正好等於總額時，維持原樣', () => {
+    expect(calculateDistribution(100, ['A', 'B'], { A: 30, B: 70 }, null, 0))
+      .toEqual({ A: 30, B: 70 });
+  });
+
+  it('成員清單為空時回傳空物件', () => {
+    expect(calculateDistribution(100, [], {}, null, 0)).toEqual({});
+  });
+
+  it('總額為 0 時每人皆為 0', () => {
+    expect(calculateDistribution(0, ['A', 'B'], {}, null, 0)).toEqual({ A: 0, B: 0 });
+  });
+
+  it('precision 2 時保留兩位小數且總和精確', () => {
+    const r = calculateDistribution(10, ['A', 'B', 'C'], {}, 'A', 2);
+    expect(r).toEqual({ A: 3.34, B: 3.33, C: 3.33 });
+    expect(r.A + r.B + r.C).toBeCloseTo(10, 10);
+  });
+
+  it('避開浮點數誤差：0.1 + 0.2 的情境', () => {
+    const r = calculateDistribution(0.3, ['A', 'B', 'C'], {}, null, 2);
+    expect(r).toEqual({ A: 0.1, B: 0.1, C: 0.1 });
+  });
+
+  it('單一成員拿到全額', () => {
+    expect(calculateDistribution(999, ['A'], {}, null, 0)).toEqual({ A: 999 });
+  });
+
+  it('負數總額（退款情境）也能正確分配', () => {
+    const r = calculateDistribution(-100, ['A', 'B', 'C'], {}, 'A', 0);
+    expect(r.A + r.B + r.C).toBe(-100);
+  });
+});
+
+describe('formatAmount', () => {
+  it('使用旅程的 precision_config', () => {
+    expect(formatAmount(1234.5, 'USD', { USD: 2 })).toBe('1234.50');
+    expect(formatAmount(1234.5, 'JPY', { JPY: 0 })).toBe('1235');
+  });
+
+  it('precision_config 沒有該幣別時，退回內建預設（TWD/JPY/KRW 為 0 位）', () => {
+    expect(formatAmount(1234.5, 'TWD', {})).toBe('1235');
+    expect(formatAmount(1234.5, 'JPY', {})).toBe('1235');
+    expect(formatAmount(1234.5, 'KRW', {})).toBe('1235');
+  });
+
+  it('完全未知的幣別退回 2 位小數', () => {
+    expect(formatAmount(1234.5, 'XYZ', {})).toBe('1234.50');
+  });
+
+  it('旅程設定優先於內建預設', () => {
+    expect(formatAmount(1234.5, 'TWD', { TWD: 2 })).toBe('1234.50');
+  });
+});

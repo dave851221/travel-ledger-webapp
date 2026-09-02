@@ -44,7 +44,7 @@ import Modal from '../components/Modal';
 import { formatAmount } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
 import { getCategoryColor } from '../utils/category';
-import Decimal from 'decimal.js';
+import { calculateSettlements } from '../utils/settlement';
 
 type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'recycle' | 'siblings';
 
@@ -479,30 +479,6 @@ const Dashboard: React.FC = () => {
   const openAlbum = (urls: string[]) => {
     setPreviewAlbum(urls.map(url => `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${url}`));
     setCurrentPhotoIdx(0);
-  };
-
-  const calculateSettlements = (memberBalances: Record<string, number>) => {
-    const EPSILON = new Decimal('0.01');
-    const debtors: { name: string, amt: Decimal }[] = [];
-    const creditors: { name: string, amt: Decimal }[] = [];
-    Object.entries(memberBalances).forEach(([name, bal]) => {
-      const d = new Decimal(bal);
-      if (d.lt(EPSILON.negated())) debtors.push({ name, amt: d.negated() });
-      else if (d.gt(EPSILON)) creditors.push({ name, amt: d });
-    });
-    debtors.sort((a, b) => b.amt.comparedTo(a.amt));
-    creditors.sort((a, b) => b.amt.comparedTo(a.amt));
-    const result: { from: string, to: string, amount: number }[] = [];
-    let i = 0, j = 0;
-    while (i < debtors.length && j < creditors.length) {
-      const minAmt = Decimal.min(debtors[i].amt, creditors[j].amt);
-      result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt.toNumber() });
-      debtors[i].amt = debtors[i].amt.minus(minAmt);
-      creditors[j].amt = creditors[j].amt.minus(minAmt);
-      if (debtors[i].amt.lt(EPSILON)) i++;
-      if (creditors[j].amt.lt(EPSILON)) j++;
-    }
-    return result;
   };
 
   const confirmSettleUp = async () => {
