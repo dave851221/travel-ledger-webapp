@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Receipt, HandCoins, ChevronLeft, ChevronRight, Star } from 'lucide-react';
 import type { Expense, Trip } from '../types';
 import { formatAmount } from '../utils/finance';
+import { photoUrl } from '../utils/storage';
 import { getCategoryColor } from '../utils/category';
 import Decimal from 'decimal.js';
 
@@ -35,7 +36,7 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, onClose }) => {
 
   const prec = trip.precision_config ?? {};
   const photos = (expense.photo_urls ?? []).map(
-    url => `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${url}`
+    url => photoUrl(url)
   );
 
   const totalDecimal = new Decimal(expense.amount);

@@ -21,6 +21,7 @@ import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { calculateDistribution } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
+import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
 
@@ -276,7 +277,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         if (item.kind === 'new') {
           const ext = item.file.name.split('.').pop() || 'jpg';
           const filePath = `expenses/${trip.id}/${crypto.randomUUID()}.${ext}`;
-          const { error: uErr } = await supabase.storage.from('travel-images').upload(filePath, item.file);
+          const { error: uErr } = await supabase.storage.from(RECEIPTS_BUCKET).upload(filePath, item.file);
           if (uErr) throw uErr;
           newPhotoPathMap.set(item.key, filePath);
         }
@@ -533,7 +534,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             <div className="flex flex-wrap gap-3">
               {photoList.map((item, i) => {
                 const src = item.kind === 'existing'
-                  ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${item.url}`
+                  ? photoUrl(item.url)
                   : item.preview;
                 const isDragging = dragIndex === i;
                 const isDropTarget = dropTarget === i && dragIndex !== null && dragIndex !== i;

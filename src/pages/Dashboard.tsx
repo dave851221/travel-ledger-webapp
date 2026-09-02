@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   PieChart as PieChartIcon, 
@@ -35,7 +35,7 @@ import {
   LabelList
 } from 'recharts';
 import { supabase } from '../api/supabase';
-import type { Trip, Expense } from '../types';
+import type { Expense } from '../types';
 import { hasItinerary, getItineraryComponent } from '../features/itinerary/registry';
 import ExpenseModal from '../components/ExpenseModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
@@ -45,6 +45,14 @@ import { formatAmount } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
 import { getCategoryColor } from '../utils/category';
 import { calculateSettlements } from '../utils/settlement';
+import { photoUrl } from '../utils/storage';
+import { useToast } from '../hooks/useToast';
+import Toast from '../components/Toast';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useTripData } from '../hooks/useTripData';
+import { useTripStats } from '../hooks/useTripStats';
+import { useTrash } from '../hooks/useTrash';
+import { useTripAuthGuard } from '../hooks/useTripAuthGuard';
 
 type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'recycle' | 'siblings';
 
@@ -57,11 +65,13 @@ const Dashboard: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
-  const [siblingTrips, setSiblingTrips] = useState<Trip[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 通行碼關卡未通過前不抓任何資料，並導回 TripPortal
+  const authed = useTripAuthGuard(id);
+
+  const {
+    trip, expenses, deletedExpenses, siblingTrips, loading, savedUser,
+    refetchTrip, refetchExpenses, refetchDeleted,
+  } = useTripData(authed ? id : undefined, useCallback(() => navigate('/'), [navigate]));
   const [activeTab, setActiveTab] = useState<TabType>(() => hasItinerary(id || '') ? 'itinerary' : 'ledger');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -76,12 +86,7 @@ const Dashboard: React.FC = () => {
   const [currentPhotoIdx, setCurrentPhotoIdx] = useState(0);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
-  // Toast State
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 2500);
-  };
+  const { toast, showToast } = useToast();
 
   // Delete Confirmation State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -98,211 +103,39 @@ const Dashboard: React.FC = () => {
   // Settlement Confirmation State
   const [settleConfirm, setSettleConfirm] = useState<{ from: string, to: string, amount: number, cur: string } | null>(null);
 
-  // 逾期垃圾桶紀錄的清理，每次載入頁面只執行一次
-  const purgeDoneRef = useRef(false);
-
+  // 首次載入完成後套用記住的身分；沒有記錄就請使用者先選一次
   useEffect(() => {
-    const checkAuth = () => {
-      const authed = localStorage.getItem(`auth_${id}`);
-      if (!authed) {
-        navigate(`/trip/${id}`);
-        return false;
-      }
-      return true;
-    };
-
-    if (checkAuth()) {
-      initDashboard();
-      if (!supabase || !id) return;
-      const channel = supabase.channel(`trip_changes_${id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `trip_id=eq.${id}` }, () => {
-          fetchExpenses();
-          fetchDeletedExpenses();
-        })
-        // 旅程設定（成員、匯率、分類…）也要即時同步，否則別人改完這邊要重新整理才看得到
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${id}` }, () => {
-          fetchTripData();
-        }).subscribe();
-      return () => { supabase.removeChannel(channel); };
-    }
-  }, [id, navigate]);
+    if (loading) return;
+    if (savedUser) setCurrentUser(savedUser);
+    else setIsWelcomeSelectorOpen(true);
+  }, [loading, savedUser]);
 
   useEffect(() => {
     if (trip?.name) document.title = `${trip.name} - 旅遊小本本`;
   }, [trip?.name]);
 
-  const initDashboard = async () => {
-    setLoading(true);
-    await Promise.all([fetchTripData(), fetchExpenses(), fetchDeletedExpenses()]);
-    const savedUser = localStorage.getItem(`me_${id}`);
-    if (savedUser) {
-      setCurrentUser(savedUser);
-    } else {
-      setIsWelcomeSelectorOpen(true);
-    }
-    setLoading(false);
-  };
-
-  const fetchTripData = async () => {
-    if (!supabase || !id) return;
-    try {
-      const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
-      if (error) throw error;
-      setTrip(data);
-      fetchSiblingTrips(data?.category, id);
-    } catch (err) { console.error(err); navigate('/'); }
-  };
-
-  // Other trips that share this trip's category. Includes archived per design.
-  const fetchSiblingTrips = async (category: string | null | undefined, currentId: string) => {
-    if (!supabase) { setSiblingTrips([]); return; }
-    const trimmed = (category || '').trim();
-    if (!trimmed) { setSiblingTrips([]); return; }
-    try {
-      const { data, error } = await supabase
-        .from('trips')
-        .select('*')
-        .eq('category', trimmed)
-        .neq('id', currentId)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setSiblingTrips(data || []);
-    } catch (err) {
-      console.error(err);
-      setSiblingTrips([]);
-    }
-  };
-
-  const fetchExpenses = async () => {
-    if (!supabase || !id) return;
-    try {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .eq('trip_id', id)
-        .is('deleted_at', null)
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setExpenses(data || []);
-    } catch (err) { console.error(err); }
-  };
-
-  const fetchDeletedExpenses = async () => {
-    if (!supabase || !id) return;
-    try {
-      const { data, error } = await supabase.from('expenses').select('*').eq('trip_id', id).not('deleted_at', 'is', null).order('deleted_at', { ascending: false });
-      if (error) throw error;
-      const now = new Date();
-      const validDeleted: Expense[] = [];
-      const expiredIds: string[] = [];
-      const expiredPhotoUrls: string[] = [];
-      (data || []).forEach((exp: Expense) => {
-        if (!exp.deleted_at) return;
-        const hoursDiff = (now.getTime() - new Date(exp.deleted_at).getTime()) / (1000 * 60 * 60);
-        if (hoursDiff <= 24) {
-          validDeleted.push(exp);
-        } else {
-          expiredIds.push(exp.id);
-          (exp.photo_urls || []).forEach(url => { if (url) expiredPhotoUrls.push(url); });
-        }
-      });
-      // 逾期紀錄的永久刪除每次載入頁面只做一次。
-      // 這個函式也會被 realtime 事件呼叫，若每次都清理，多個裝置同時開著會重複
-      // 對同一批 id 與照片下刪除指令。
-      if (expiredIds.length > 0 && !purgeDoneRef.current) {
-        purgeDoneRef.current = true;
-        if (expiredPhotoUrls.length > 0) {
-          await supabase.storage.from('travel-images').remove(expiredPhotoUrls);
-        }
-        await supabase.from('expenses').delete().in('id', expiredIds);
-      }
-      setDeletedExpenses(validDeleted);
-    } catch (err) { console.error(err); }
-  };
+  const { softDelete, restore, permanentlyDelete, emptyTrash } = useTrash(id, showToast);
 
   const handleDeleteExpense = async () => {
-    if (!deleteConfirmId || !supabase) return;
-    try {
-      const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', deleteConfirmId);
-      if (error) throw error;
-      showToast('紀錄已移至垃圾桶');
-      setDeleteConfirmId(null);
-    } catch (err) { showToast('刪除失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
+    if (!deleteConfirmId) return;
+    if (await softDelete(deleteConfirmId)) setDeleteConfirmId(null);
   };
 
-  const handleRestoreExpense = async (expenseId: string) => {
-    if (!supabase) return;
-    try {
-      const { error } = await supabase.from('expenses').update({ deleted_at: null }).eq('id', expenseId);
-      if (error) throw error;
-      showToast('紀錄已還原');
-    } catch (err) { showToast('還原失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
-  };
+  const handleRestoreExpense = (expenseId: string) => restore(expenseId);
 
   const handlePermanentlyDeleteExpense = async () => {
-    if (!permDeleteConfirmId || !supabase) return;
-    try {
-      // 1. 先取得該筆紀錄的資料以獲取照片路徑
-      const { data: exp, error: fetchError } = await supabase
-        .from('expenses')
-        .select('photo_urls')
-        .eq('id', permDeleteConfirmId)
-        .single();
-      
-      if (fetchError) throw fetchError;
-
-      // 2. 如果有照片，先從 Storage 刪除
-      if (exp?.photo_urls && exp.photo_urls.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from('travel-images')
-          .remove(exp.photo_urls);
-        if (storageError) console.error('照片刪除失敗:', storageError);
-      }
-
-      // 3. 刪除資料庫紀錄
-      const { error } = await supabase.from('expenses').delete().eq('id', permDeleteConfirmId);
-      if (error) throw error;
-      
-      showToast('紀錄已永久刪除');
+    if (!permDeleteConfirmId) return;
+    if (await permanentlyDelete(permDeleteConfirmId)) {
       setPermDeleteConfirmId(null);
-      fetchDeletedExpenses();
-    } catch (err) { showToast('刪除失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
+      refetchDeleted();
+    }
   };
 
   const handleEmptyTrash = async () => {
-    if (!supabase || !id) return;
-    try {
-      // 1. 先取得垃圾桶內所有紀錄的照片清單
-      const { data: exps, error: fetchError } = await supabase
-        .from('expenses')
-        .select('photo_urls')
-        .eq('trip_id', id)
-        .not('deleted_at', 'is', null);
-      
-      if (fetchError) throw fetchError;
-
-      // 2. 整理出所有照片路徑
-      const allPhotoUrls = (exps || [])
-        .flatMap((exp: { photo_urls: string[] | null }) => exp.photo_urls || [])
-        .filter((url: string) => !!url);
-
-      // 3. 如果有照片，整批從 Storage 刪除
-      if (allPhotoUrls.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from('travel-images')
-          .remove(allPhotoUrls);
-        if (storageError) console.error('整批照片刪除失敗:', storageError);
-      }
-
-      // 4. 刪除資料庫紀錄
-      const { error } = await supabase.from('expenses').delete().eq('trip_id', id).not('deleted_at', 'is', null);
-      if (error) throw error;
-
-      showToast('垃圾桶已完全清空');
+    if (await emptyTrash()) {
       setIsEmptyTrashConfirmOpen(false);
-      fetchDeletedExpenses();
-    } catch (err) { showToast('清空失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
+      refetchDeleted();
+    }
   };
 
   const handleEditExpense = (exp: Expense) => {
@@ -365,61 +198,7 @@ const Dashboard: React.FC = () => {
     });
   }, [expenses, searchQuery, selectedCategories]);
 
-  const stats = useMemo(() => {
-    const byCurrency: Record<string, { total: number, paidByMe: number, owedByMe: number }> = {};
-    const grandBase = { total: 0, paidByMe: 0, owedByMe: 0 };
-    const categoryMap: Record<string, number> = {};
-    const memberDetails: Record<string, { totalOwed: number, categories: Record<string, number> }> = {};
-    const balances: Record<string, Record<string, number>> = { 'GRAND_TOTAL': {} };
-    // 有支出使用了旅程未設定匯率的幣別 → 下方會以 1:1 換算，金額會失真，需提醒使用者
-    const missingRateCurrencies = new Set<string>();
-    if (!trip) return { byCurrency, grandBase, categoryData: [], memberDetails: {}, balances, missingRateCurrencies: [] as string[] };
-    trip.members.forEach(m => {
-      memberDetails[m] = { totalOwed: 0, categories: {} };
-      balances['GRAND_TOTAL'][m] = 0;
-    });
-    expenses.forEach(e => {
-      if (trip.rates[e.currency] === undefined) missingRateCurrencies.add(e.currency);
-      const rate = trip.rates[e.currency] || 1;
-      const amountInBase = e.amount * rate;
-      if (!byCurrency[e.currency]) {
-        byCurrency[e.currency] = { total: 0, paidByMe: 0, owedByMe: 0 };
-        balances[e.currency] = {};
-        trip.members.forEach(m => balances[e.currency][m] = 0);
-      }
-      const pMe = currentUser ? (Number(e.payer_data[currentUser]) || 0) : 0;
-      const oMe = currentUser ? (Number(e.split_data[currentUser]) || 0) : 0;
-
-      // 只有「非結清」紀錄才計入總支出與分類統計
-      if (!e.is_settlement) {
-        byCurrency[e.currency].total += Number(e.amount) || 0;
-        byCurrency[e.currency].paidByMe += pMe;
-        byCurrency[e.currency].owedByMe += oMe;
-        grandBase.total += amountInBase;
-        grandBase.paidByMe += (pMe * rate);
-        grandBase.owedByMe += (oMe * rate);
-        categoryMap[e.category] = (categoryMap[e.category] || 0) + amountInBase;
-        trip.members.forEach(m => {
-          const owed = Number(e.split_data[m]) || 0;
-          const owedInBase = owed * rate;
-          memberDetails[m].totalOwed += owedInBase;
-          memberDetails[m].categories[e.category] = (memberDetails[m].categories[e.category] || 0) + owedInBase;
-        });
-      }
-
-      // 所有紀錄（含結清）都要計入餘額，用來計算誰該給誰多少錢
-      trip.members.forEach(m => {
-        const paid = Number(e.payer_data[m]) || 0;
-        const owed = Number(e.split_data[m]) || 0;
-        balances[e.currency][m] += (paid - owed);
-        balances['GRAND_TOTAL'][m] += ((paid - owed) * rate);
-      });
-    });
-    const categoryData = Object.entries(categoryMap)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-    return { byCurrency, grandBase, categoryData, memberDetails, balances, missingRateCurrencies: Array.from(missingRateCurrencies) };
-  }, [expenses, trip, currentUser]);
+  const stats = useTripStats(expenses, trip, currentUser);
 
   const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
   const [expandedCatStats, setExpandedCatStats] = useState<Set<string>>(new Set());
@@ -477,7 +256,7 @@ const Dashboard: React.FC = () => {
   };
 
   const openAlbum = (urls: string[]) => {
-    setPreviewAlbum(urls.map(url => `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${url}`));
+    setPreviewAlbum(urls.map(photoUrl));
     setCurrentPhotoIdx(0);
   };
 
@@ -492,7 +271,7 @@ const Dashboard: React.FC = () => {
         payer_data: { [from]: amount }, split_data: { [to]: amount }, is_settlement: true
       }]);
       if (error) throw error;
-      setSettleConfirm(null); fetchExpenses();
+      setSettleConfirm(null); refetchExpenses();
     } catch (err) { showToast('結清失敗: ' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
@@ -723,7 +502,7 @@ const Dashboard: React.FC = () => {
                         <div key={exp.id} onClick={() => setDetailExpense(exp)} className={`group p-3 sm:p-5 rounded-2xl border transition-all flex items-center gap-4 sm:gap-6 relative overflow-hidden cursor-pointer ${exp.is_settlement ? 'bg-emerald-50/20 dark:bg-emerald-900/5 border-dashed border-emerald-200 hover:bg-emerald-50/40' : 'bg-white dark:bg-slate-900 border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50'}`}>
                           <div className={`w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border border-slate-100 relative ${exp.photo_urls?.length ? 'cursor-zoom-in' : ''}`} onClick={e => { e.stopPropagation(); if (exp.photo_urls?.length) openAlbum(exp.photo_urls); }}>
                             {exp.photo_urls && exp.photo_urls.length > 0 ? (
-                              <><img src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/${exp.photo_urls[0]}`} className="w-full h-full object-cover" alt="receipt" />{exp.photo_urls.length > 1 && <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-[8px] font-black text-white">+{exp.photo_urls.length}</div>}</>
+                              <><img src={photoUrl(exp.photo_urls[0])} className="w-full h-full object-cover" alt="receipt" />{exp.photo_urls.length > 1 && <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-[8px] font-black text-white">+{exp.photo_urls.length}</div>}</>
                             ) : (
                               <div className="bg-slate-50 dark:bg-slate-800/50 w-full h-full flex items-center justify-center text-slate-400">{exp.is_settlement ? <HandCoins size={20} /> : <Receipt size={20} />}</div>
                             )}
@@ -1204,24 +983,28 @@ const Dashboard: React.FC = () => {
         </div>
       </main>
 
-      {/* Confirmation Modal for Settlement */}
       {settleConfirm && (
-        <Modal isOpen={!!settleConfirm} onClose={() => setSettleConfirm(null)} title="確認結清紀錄">
-          <div className="py-6 text-center space-y-6">
-            <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-900/20 rounded-full flex items-center justify-center mx-auto text-emerald-600 shadow-inner"><HandCoins size={40} /></div>
-            <div className="space-y-2">
-              <p className="text-slate-500 font-bold">您即將建立一筆結清紀錄：</p>
-              <div className="text-2xl font-black text-slate-900 dark:text-white flex items-center justify-center gap-4">
-                {settleConfirm.from} <ChevronRight className="text-slate-300" /> {settleConfirm.to}
-              </div>
-              <p className="text-3xl font-black text-blue-600">{fmt(settleConfirm.amount, settleConfirm.cur, trip?.precision_config)} <span className="text-sm opacity-60">{settleConfirm.cur}</span></p>
+        <ConfirmDialog
+          isOpen={!!settleConfirm}
+          onClose={() => setSettleConfirm(null)}
+          onConfirm={confirmSettleUp}
+          title="確認結清紀錄"
+          icon={<HandCoins size={40} />}
+          tone="primary"
+          description={<p className="text-slate-500 font-bold">您即將建立一筆結清紀錄：</p>}
+          confirmLabel="確認結清"
+          confirmIcon={<Check size={20} strokeWidth={3} />}
+        >
+          <div className="space-y-2 -mt-4">
+            <div className="text-2xl font-black text-slate-900 dark:text-white flex items-center justify-center gap-4">
+              {settleConfirm.from} <ChevronRight className="text-slate-300" /> {settleConfirm.to}
             </div>
-            <div className="flex gap-4 pt-4">
-              <button onClick={() => setSettleConfirm(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
-              <button onClick={confirmSettleUp} className="flex-1 px-6 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all flex items-center justify-center gap-2"><Check size={20} strokeWidth={3} />確認結清</button>
-            </div>
+            <p className="text-3xl font-black text-blue-600">
+              {fmt(settleConfirm.amount, settleConfirm.cur, trip?.precision_config)}
+              <span className="text-sm opacity-60"> {settleConfirm.cur}</span>
+            </p>
           </div>
-        </Modal>
+        </ConfirmDialog>
       )}
 
       {/* Manual Settlement Modal */}
@@ -1328,24 +1111,20 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {trip && (<ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { fetchExpenses(); }} showToast={showToast} editData={editingExpense} />)}
-      {trip && (<SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} trip={trip} onSuccess={() => { fetchTripData(); showToast('設定已更新'); }} expenses={expenses} />)}
+      {trip && (<ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { refetchExpenses(); }} showToast={showToast} editData={editingExpense} />)}
+      {trip && (<SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} trip={trip} onSuccess={() => { refetchTrip(); showToast('設定已更新'); }} expenses={expenses} />)}
 
-      {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
-        <Modal isOpen={!!deleteConfirmId} onClose={() => setDeleteConfirmId(null)} title="確認刪除紀錄">
-          <div className="py-6 text-center space-y-6">
-            <div className="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto text-rose-600 shadow-inner"><Trash2 size={40} /></div>
-            <div className="space-y-2">
-              <p className="text-xl font-black text-slate-900 dark:text-white">確定要刪除這筆紀錄嗎？</p>
-              <p className="text-sm text-slate-500 font-bold">刪除後紀錄會移至垃圾桶，24 小時內可還原。</p>
-            </div>
-            <div className="flex gap-4 pt-4">
-              <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
-              <button onClick={handleDeleteExpense} className="flex-1 px-6 py-4 rounded-2xl bg-rose-500 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-600 transition-all flex items-center justify-center gap-2">確認刪除</button>
-            </div>
-          </div>
-        </Modal>
+        <ConfirmDialog
+          isOpen={!!deleteConfirmId}
+          onClose={() => setDeleteConfirmId(null)}
+          onConfirm={handleDeleteExpense}
+          title="確認刪除紀錄"
+          icon={<Trash2 size={40} />}
+          heading="確定要刪除這筆紀錄嗎？"
+          description={<p className="text-sm text-slate-500 font-bold">刪除後紀錄會移至垃圾桶，24 小時內可還原。</p>}
+          confirmLabel="確認刪除"
+        />
       )}
 
       {/* Welcome Identity Selector Modal */}
@@ -1385,53 +1164,34 @@ const Dashboard: React.FC = () => {
         </Modal>
       )}
 
-      {/* Permanent Delete Confirmation Modal */}
       {permDeleteConfirmId && (
-        <Modal isOpen={!!permDeleteConfirmId} onClose={() => setPermDeleteConfirmId(null)} title="永久刪除紀錄">
-          <div className="py-6 text-center space-y-6">
-            <div className="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center mx-auto text-rose-600 shadow-inner">
-              <AlertTriangle size={40} />
-            </div>
-            <div className="space-y-2">
-              <p className="text-xl font-black text-slate-900 dark:text-white">確定要永久刪除嗎？</p>
-              <p className="text-sm text-rose-500 font-bold">此動作將無法復原，該筆支出將永久消失。</p>
-            </div>
-            <div className="flex gap-4 pt-4">
-              <button onClick={() => setPermDeleteConfirmId(null)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
-              <button onClick={handlePermanentlyDeleteExpense} className="flex-1 px-6 py-4 rounded-2xl bg-rose-600 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-700 transition-all">永久刪除</button>
-            </div>
-          </div>
-        </Modal>
+        <ConfirmDialog
+          isOpen={!!permDeleteConfirmId}
+          onClose={() => setPermDeleteConfirmId(null)}
+          onConfirm={handlePermanentlyDeleteExpense}
+          title="永久刪除紀錄"
+          icon={<AlertTriangle size={40} />}
+          heading="確定要永久刪除嗎？"
+          description={<p className="text-sm text-rose-500 font-bold">此動作將無法復原，該筆支出將永久消失。</p>}
+          confirmLabel="永久刪除"
+        />
       )}
 
-      {/* Empty Trash Confirmation Modal */}
       {isEmptyTrashConfirmOpen && (
-        <Modal isOpen={isEmptyTrashConfirmOpen} onClose={() => setIsEmptyTrashConfirmOpen(false)} title="清空垃圾桶">
-          <div className="py-6 text-center space-y-6">
-            <div className="w-20 h-20 bg-rose-600 rounded-full flex items-center justify-center mx-auto text-white shadow-xl shadow-rose-500/30">
-              <Trash2 size={40} />
-            </div>
-            <div className="space-y-2">
-              <p className="text-xl font-black text-slate-900 dark:text-white">確定要清空垃圾桶嗎？</p>
-              <p className="text-sm text-rose-600 font-black px-4 py-2 bg-rose-50 dark:bg-rose-900/20 rounded-xl">警告：所有垃圾桶內的紀錄將會永久刪除且無法復原。</p>
-            </div>
-            <div className="flex gap-4 pt-4">
-              <button onClick={() => setIsEmptyTrashConfirmOpen(false)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all">取消</button>
-              <button onClick={handleEmptyTrash} className="flex-1 px-6 py-4 rounded-2xl bg-rose-600 text-white font-black shadow-xl shadow-rose-500/20 hover:bg-rose-700 transition-all">確認清空</button>
-            </div>
-          </div>
-        </Modal>
+        <ConfirmDialog
+          isOpen={isEmptyTrashConfirmOpen}
+          onClose={() => setIsEmptyTrashConfirmOpen(false)}
+          onConfirm={handleEmptyTrash}
+          title="清空垃圾桶"
+          icon={<Trash2 size={40} />}
+          solidIcon
+          heading="確定要清空垃圾桶嗎？"
+          description={<p className="text-sm text-rose-600 font-black px-4 py-2 bg-rose-50 dark:bg-rose-900/20 rounded-xl">警告：所有垃圾桶內的紀錄將會永久刪除且無法復原。</p>}
+          confirmLabel="確認清空"
+        />
       )}
 
-      {/* Toast Notification */}
-      {toast && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-4 duration-300">
-          <div className={`px-6 py-3 rounded-full shadow-2xl border flex items-center gap-3 font-black text-sm ${toast.type === 'success' ? 'bg-emerald-500 text-white border-emerald-400' : 'bg-rose-500 text-white border-rose-400'}`}>
-            {toast.type === 'success' ? <Check size={18} strokeWidth={3} /> : <AlertTriangle size={18} strokeWidth={3} />}
-            {toast.message}
-          </div>
-        </div>
-      )}
+      <Toast toast={toast} />
     </div>
   );
 };
