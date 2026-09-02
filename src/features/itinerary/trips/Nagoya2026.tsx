@@ -1,11 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
+import { DaySelector, ItineraryCard, TripMap } from '../components';
 
 const Nagoya2026: React.FC = () => {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMap = useRef<LeafletMap | null>(null);
-  const carMarker = useRef<LeafletMarker | null>(null);
-  const currentPolyline = useRef<LeafletPolyline | null>(null);
-  const [activeDay, setActiveTab] = useState('day1');
+  const [activeDay, setActiveDay] = useState('day1');
 
   const routes: Record<string, [number, number][]> = {
     'day1': [[34.8584, 136.8053], [35.1429, 136.9014], [35.1738, 136.9080]],
@@ -18,120 +15,31 @@ const Nagoya2026: React.FC = () => {
     'day8': [[35.1709, 136.8815], [34.8584, 136.8053]]
   };
 
-  const animateCar = (route: [number, number][], index: number) => {
-    if (index >= route.length - 1 || !carMarker.current) return;
+  // 這幾天走鐵路，其餘自駕
+  const TRAIN_DAYS = ['day1', 'day6', 'day7', 'day8'];
 
-    const start = route[index];
-    const end = route[index + 1];
-    const duration = 1000;
-    let startTime: number | null = null;
-
-    const step = (time: number) => {
-      if (startTime === null) startTime = time;
-      const progress = (time - startTime) / duration;
-      if (progress > 1) {
-        animateCar(route, index + 1);
-        return;
-      }
-      const lat = start[0] + (end[0] - start[0]) * progress;
-      const lng = start[1] + (end[1] - start[1]) * progress;
-      if (carMarker.current) {
-        carMarker.current.setLatLng([lat, lng]);
-        requestAnimationFrame(step);
-      }
-    };
-    requestAnimationFrame(step);
-  };
-
-  const updateMap = (day: string) => {
-    if (!leafletMap.current || !window.L) return;
-    const L = window.L;
-    const route = routes[day];
-    if (!route) return;
-
-    if (currentPolyline.current) leafletMap.current.removeLayer(currentPolyline.current);
-    if (carMarker.current) leafletMap.current.removeLayer(carMarker.current);
-
-    currentPolyline.current = L.polyline(route, {
-      color: '#0d6efd', weight: 4, opacity: 0.7, dashArray: '10, 10'
-    }).addTo(leafletMap.current);
-
-    // Optimized Auto-Zoom: Using flyToBounds for smoother transition
-    leafletMap.current.flyToBounds(currentPolyline.current.getBounds(), { 
-      padding: [30, 30],
-      duration: 1.5,
-      maxZoom: 13 
-    });
-
-    const isTrain = ['day1', 'day6', 'day7', 'day8'].includes(day);
-    const icon = L.divIcon({
-      className: 'car-icon',
-      html: `<div style="font-size: 24px; text-align: center;">${isTrain ? '🚇' : '🚗'}</div>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
-    });
-
-    carMarker.current = L.marker(route[0], { icon }).addTo(leafletMap.current);
-    animateCar(route, 0);
-  };
-
-  useEffect(() => {
-    if (!window.L || !mapRef.current || leafletMap.current) return;
-
-    const L = window.L;
-    leafletMap.current = L.map(mapRef.current).setView([35.1738, 136.8994], 9);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(leafletMap.current);
-
-    updateMap('day1');
-
-    return () => {
-      if (leafletMap.current) {
-        leafletMap.current.remove();
-        leafletMap.current = null;
-      }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleTabChange = (day: string) => {
-    setActiveTab(day);
-    updateMap(day);
-  };
+  const DAYS = [
+    { key: 'day1', subLabel: '4/4 抵達' },
+    { key: 'day2', subLabel: '4/5 犬山' },
+    { key: 'day3', subLabel: '4/6 高山' },
+    { key: 'day4', subLabel: '4/7 金澤' },
+    { key: 'day5', subLabel: '4/8 移動' },
+    { key: 'day6', subLabel: '4/9 市區' },
+    { key: 'day7', subLabel: '4/10 伊勢' },
+    { key: 'day8', subLabel: '4/11 返程' },
+  ];
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* Map Section */}
-      <div ref={mapRef} className="w-full h-40 sm:h-96 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner z-0" />
+      <TripMap
+        routes={routes}
+        activeDay={activeDay}
+        center={[35.1738, 136.8994]}
+        zoom={9}
+        vehicleIcon={(day) => (TRAIN_DAYS.includes(day) ? '🚇' : '🚗')}
+      />
 
-      {/* Tabs */}
-      <div className="flex overflow-x-auto pb-2 no-scrollbar gap-2">
-        {Object.keys(routes).map((day, idx) => (
-          <button
-            key={day}
-            onClick={() => handleTabChange(day)}
-            className={`shrink-0 px-4 py-2 rounded-full text-[10px] sm:text-xs font-bold transition-all border ${
-              activeDay === day 
-                ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
-                : 'bg-white dark:bg-slate-900 text-slate-500 border-slate-100 dark:border-slate-800 hover:border-blue-300'
-            }`}
-          >
-            Day {idx + 1}<br />
-            <span className="opacity-70 font-normal text-[9px] sm:text-[10px]">
-              {day === 'day1' && '4/4 抵達'}
-              {day === 'day2' && '4/5 犬山'}
-              {day === 'day3' && '4/6 高山'}
-              {day === 'day4' && '4/7 金澤'}
-              {day === 'day5' && '4/8 移動'}
-              {day === 'day6' && '4/9 市區'}
-              {day === 'day7' && '4/10 伊勢'}
-              {day === 'day8' && '4/11 返程'}
-            </span>
-          </button>
-        ))}
-      </div>
+      <DaySelector days={DAYS} activeDay={activeDay} onChange={setActiveDay} />
 
       {/* Content Container */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm p-3 sm:p-8">
@@ -149,18 +57,6 @@ const Nagoya2026: React.FC = () => {
 };
 
 // --- Sub-components ---
-
-const ItineraryCard: React.FC<{ icon: string; children: React.ReactNode }> = ({ icon, children }) => (
-  <div className="relative pl-8 sm:pl-10 pb-8 last:pb-0">
-    <div className="absolute left-3.5 sm:left-4 top-0 bottom-0 w-0.5 bg-slate-100 dark:bg-slate-800" />
-    <div className="absolute left-0 top-0 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white dark:bg-slate-800 border-2 border-blue-600 flex items-center justify-center z-10 shadow-sm text-xs sm:text-sm">
-      {icon}
-    </div>
-    <div className="bg-slate-50/50 dark:bg-slate-800/30 rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-slate-100 dark:border-slate-800 hover:shadow-md transition-shadow">
-      {children}
-    </div>
-  </div>
-);
 
 const Day1Content = () => (
   <div className="space-y-4">
