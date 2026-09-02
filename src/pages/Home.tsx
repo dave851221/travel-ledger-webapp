@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { PlusCircle, Plane, Calendar, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, Tag, FolderOpen } from 'lucide-react';
+import { PlusCircle, Plane, Calendar, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Tag, FolderOpen, Archive } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -10,6 +10,47 @@ const TRIPS_PER_GROUP = 3;
 
 const categorySlug = (name: string) => `cat-${encodeURIComponent(name)}`;
 
+const TripCard: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick }) => (
+  <div
+    onClick={onClick}
+    className="group relative bg-white dark:bg-slate-900 p-5 rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] hover:shadow-[0_12px_24px_-8px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 cursor-pointer border border-slate-100 dark:border-slate-800 flex flex-col h-full overflow-hidden"
+  >
+    <div className="flex justify-between items-center mb-4">
+      <div className="text-left">
+        <span className="block text-[9px] font-bold text-slate-300 dark:text-slate-600 uppercase tracking-widest mb-0.5">Currencies</span>
+        <span className="inline-block text-[9px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded uppercase">
+          {Object.keys(trip.rates || {}).join(' / ')}
+        </span>
+      </div>
+      {trip.is_archived && (
+        <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 rounded">
+          <Lock size={10} /> 封存
+        </div>
+      )}
+    </div>
+
+    <h3 className="text-lg font-bold text-slate-800 dark:text-white leading-tight group-hover:text-blue-600 transition-colors mb-6 flex-grow">
+      {trip.name}
+    </h3>
+
+    <div className="pt-4 border-t border-slate-50 dark:border-slate-800/50 flex items-center justify-between">
+      <div className="flex items-center gap-4 text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
+        <div className="flex items-center gap-1.5">
+          <Users size={14} />
+          <span>{trip.members.length} 人</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Calendar size={14} />
+          <span>{new Date(trip.created_at).toLocaleDateString()}</span>
+        </div>
+      </div>
+      <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-600 group-hover:text-white transition-all">
+        <ChevronRight size={16} />
+      </div>
+    </div>
+  </div>
+);
+
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -18,6 +59,7 @@ const Home: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [showArchived, setShowArchived] = useState(false);
   const groupRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const [newTrip, setNewTrip] = useState({
@@ -53,9 +95,14 @@ const Home: React.FC = () => {
     }
   };
 
+  // 已封存的旅程收進頁面底部的摺疊區塊，不參與分類分組，
+  // 避免首頁隨著旅程累積而越來越長。
+  const activeTrips = useMemo(() => trips.filter(t => !t.is_archived), [trips]);
+  const archivedTrips = useMemo(() => trips.filter(t => t.is_archived), [trips]);
+
   const groupedTrips = useMemo(() => {
     const buckets = new Map<string, Trip[]>();
-    trips.forEach(t => {
+    activeTrips.forEach(t => {
       const key = (t.category && t.category.trim()) || UNCATEGORIZED;
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key)!.push(t);
@@ -74,7 +121,7 @@ const Home: React.FC = () => {
       return bLatest - aLatest;
     });
     return uncategorized ? [...named, uncategorized] : named;
-  }, [trips]);
+  }, [activeTrips]);
 
   const knownCategories = useMemo(() => {
     const set = new Set<string>();
@@ -222,45 +269,7 @@ const Home: React.FC = () => {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {visibleTrips.map(trip => (
-                        <div
-                          key={trip.id}
-                          onClick={() => navigate(`/trip/${trip.id}`)}
-                          className="group relative bg-white dark:bg-slate-900 p-5 rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] hover:shadow-[0_12px_24px_-8px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 cursor-pointer border border-slate-100 dark:border-slate-800 flex flex-col h-full overflow-hidden"
-                        >
-                          <div className="flex justify-between items-center mb-4">
-                            <div className="text-left">
-                              <span className="block text-[9px] font-bold text-slate-300 dark:text-slate-600 uppercase tracking-widest mb-0.5">Currencies</span>
-                              <span className="inline-block text-[9px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded uppercase">
-                                {Object.keys(trip.rates || {}).join(' / ')}
-                              </span>
-                            </div>
-                            {trip.is_archived && (
-                              <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 rounded">
-                                <Lock size={10} /> 封存
-                              </div>
-                            )}
-                          </div>
-
-                          <h3 className="text-lg font-bold text-slate-800 dark:text-white leading-tight group-hover:text-blue-600 transition-colors mb-6 flex-grow">
-                            {trip.name}
-                          </h3>
-
-                          <div className="pt-4 border-t border-slate-50 dark:border-slate-800/50 flex items-center justify-between">
-                            <div className="flex items-center gap-4 text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
-                              <div className="flex items-center gap-1.5">
-                                <Users size={14} />
-                                <span>{trip.members.length} 人</span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <Calendar size={14} />
-                                <span>{new Date(trip.created_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                            <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                              <ChevronRight size={16} />
-                            </div>
-                          </div>
-                        </div>
+                        <TripCard key={trip.id} trip={trip} onClick={() => navigate(`/trip/${trip.id}`)} />
                       ))}
                     </div>
                     {groupTrips.length > TRIPS_PER_GROUP && (
@@ -276,6 +285,39 @@ const Home: React.FC = () => {
                   </section>
                 );
               })}
+
+              {archivedTrips.length > 0 && (
+                <section id="archived" className="scroll-mt-24">
+                  <button
+                    onClick={() => setShowArchived(v => !v)}
+                    className="w-full flex items-center gap-3 px-1 py-2 group"
+                  >
+                    <div className="p-2 rounded-lg bg-slate-100 text-slate-400 dark:bg-slate-800">
+                      <Archive size={16} />
+                    </div>
+                    <div className="text-left">
+                      <h2 className="text-lg md:text-xl font-black text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors">
+                        已封存
+                      </h2>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        {archivedTrips.length} trips
+                      </span>
+                    </div>
+                    <ChevronDown
+                      size={20}
+                      className={`ml-auto text-slate-400 transition-transform duration-300 ${showArchived ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+
+                  {showArchived && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                      {archivedTrips.map(trip => (
+                        <TripCard key={trip.id} trip={trip} onClick={() => navigate(`/trip/${trip.id}`)} />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
             </div>
           )}
         </div>
