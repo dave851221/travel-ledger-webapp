@@ -1,0 +1,44 @@
+# Supabase CLI 專案設定
+# 完整可用選項見 https://supabase.com/docs/guides/local-development/cli/config
+# 這裡只列出本專案實際需要的部分，其餘沿用 CLI 預設值。
+
+# 本機開發時容器的命名前綴（與雲端 project ref 無關，ref 存在 supabase/.temp/，已 gitignore）
+project_id = "travel-ledger-webapp"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+# 收據照片。路徑慣例 expenses/{tripId}/{檔名}，詳見 supabase/schema/07_storage.sql
+[storage.buckets.travel-images]
+public = true
+file_size_limit = "10MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/webp"]
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+port = 54323
+
+# ⚠️ LINE Messaging API 的 webhook 呼叫不帶 Supabase JWT。
+#    若啟用 JWT 驗證，LINE Bot 會對所有訊息完全無反應（後台顯示 401）。
+#    部署時仍請明確加上旗標，不要只依賴這份設定：
+#      supabase functions deploy line-webhook --no-verify-jwt
+[functions.line-webhook]
+verify_jwt = false
+
+# 由網頁端透過 supabase.functions.invoke() 呼叫，走正常的 JWT 驗證
+[functions.liff-notify]
+verify_jwt = true

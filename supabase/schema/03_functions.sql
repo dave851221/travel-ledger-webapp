@@ -1,0 +1,86 @@
+-- ============================================================
+-- 03_functions — 資料庫函式
+-- ============================================================
+
+-- 通行碼驗證（SECURITY DEFINER：讓 access_code 不必離開資料庫）
+-- access_code 為 NULL 或全空白代表免密碼，一律回傳 TRUE
+DROP FUNCTION IF EXISTS public.verify_trip_code(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.verify_trip_code(TEXT, TEXT);  -- 早期版本的簽章
+
+CREATE FUNCTION public.verify_trip_code(p_trip_id UUID, p_code TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_code TEXT;
+BEGIN
+    SELECT access_code INTO v_code FROM public.trips WHERE id = p_trip_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    IF btrim(coalesce(v_code, '')) = '' THEN
+        RETURN TRUE;
+    END IF;
+    RETURN v_code = coalesce(p_code, '');
+END;
+$$;
+
+-- 這個旅程需不需要輸入通行碼？供 TripPortal 決定是否顯示密碼欄
+-- 查無此旅程時回傳 TRUE（fail closed）
+DROP FUNCTION IF EXISTS public.trip_requires_code(UUID);
+
+CREATE FUNCTION public.trip_requires_code(p_trip_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT coalesce(
+        (SELECT btrim(coalesce(access_code, '')) <> '' FROM public.trips WHERE id = p_trip_id),
+        TRUE
+    );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.verify_trip_code(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.trip_requires_code(UUID)     TO anon, authenticated;
+
+-- 產生 6 位短碼，字元集排除容易混淆的 0/1/I/O
+CREATE OR REPLACE FUNCTION public.generate_linebot_id()
+RETURNS TEXT
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+    chars  TEXT := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    result TEXT := '';
+    i      INTEGER := 0;
+BEGIN
+    FOR i IN 1..6 LOOP
+        result := result || substr(chars, floor(random() * length(chars) + 1)::integer, 1);
+    END LOOP;
+    RETURN result;
+END;
+$$;
+
+-- 新旅程建立時自動配一組短碼。
+-- 必須是 SECURITY DEFINER：line_trip_id_mapping 有 RLS，
+-- 以呼叫者權限寫入會失敗（這是踩過的坑，見 CLAUDE.md）
+CREATE OR REPLACE FUNCTION public.trigger_generate_line_mapping()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.line_trip_id_mapping (trip_id, linebot_id)
+    VALUES (NEW.id, public.generate_linebot_id())
+    ON CONFLICT (trip_id) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+-- 通知 PostgREST 重新載入 schema，讓新建立/變更的 RPC 立即可用
+NOTIFY pgrst, 'reload schema';
