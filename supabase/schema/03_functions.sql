@@ -82,5 +82,11 @@ BEGIN
 END;
 $$;
 
+-- 這兩支只給 trips 的 INSERT trigger 內部使用，不是對外 API，
+-- 撤銷 PostgREST 會用到的角色的執行權限，避免被當成 RPC 呼叫。
+-- PostgreSQL 在觸發器觸發時不檢查 EXECUTE 權限，因此不影響自動配發短碼。
+REVOKE ALL ON FUNCTION public.generate_linebot_id()           FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.trigger_generate_line_mapping() FROM PUBLIC, anon, authenticated;
+
 -- 通知 PostgREST 重新載入 schema，讓新建立/變更的 RPC 立即可用
 NOTIFY pgrst, 'reload schema';

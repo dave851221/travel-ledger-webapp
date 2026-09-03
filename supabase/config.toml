@@ -30,7 +30,8 @@ allowed_mime_types = ["image/png", "image/jpeg", "image/webp"]
 [edge_runtime]
 enabled = true
 policy = "oneshot"
-port = 54323
+# 除錯用的 Chrome inspector 連接埠（本機開發才會用到）
+inspector_port = 8083
 
 # ⚠️ LINE Messaging API 的 webhook 呼叫不帶 Supabase JWT。
 #    若啟用 JWT 驗證，LINE Bot 會對所有訊息完全無反應（後台顯示 401）。
