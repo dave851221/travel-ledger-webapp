@@ -39,6 +39,10 @@ port = 54323
 [functions.line-webhook]
 verify_jwt = false
 
-# 由網頁端透過 supabase.functions.invoke() 呼叫，走正常的 JWT 驗證
+# 由網頁端透過 supabase.functions.invoke() 呼叫。
+# ⚠️ 這裡必須是 false。invoke() 帶的是 VITE_SUPABASE_ANON_KEY，而本專案用的是
+#    新格式的 sb_publishable_… 金鑰 —— 它不是 JWT，開啟驗證會直接被擋掉，
+#    結果是 LIFF 存檔後的 LINE 推播訊息靜默失效。
+#    線上實際部署的狀態也是 verify_jwt=false，這裡與之對齊。
 [functions.liff-notify]
-verify_jwt = true
+verify_jwt = false
