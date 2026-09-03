@@ -36,6 +36,7 @@ function getQuickReply(bound: boolean, showGroupToggle = false, mentionRequired 
     { type: "action", action: { type: "message", label: "💰 結算", text: "結算" } },
     { type: "action", action: { type: "message", label: "🗺️ 旅程總覽", text: "旅程總覽" } },
     { type: "action", action: { type: "message", label: "🗑 刪除支出", text: "刪除支出" } },
+    { type: "action", action: { type: "message", label: "✏️ 編輯支出", text: "編輯支出" } },
     { type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } },
   ]
   if (showGroupToggle) {
@@ -104,6 +105,64 @@ function normalizeExpenseAmountMaps(expense: any): void {
   if (!expense) return
   expense.payer_data = toAmountMap(expense.payer_data)
   expense.split_details = toAmountMap(expense.split_details ?? expense.split_data)
+}
+
+/**
+ * 判斷使用者是不是想刪除或修改「已經存檔」的支出。
+ *
+ * 這件事必須在進 AI 之前攔下來：AI 沒有刪除或修改既有紀錄的能力，
+ * 交給它的話，修改會變成再記一筆重複的支出，刪除則會得到一句
+ * 「已經幫您刪除了」的假話。
+ *
+ * 要求同時出現動詞與受詞，避免「改天再說」「取消行程」這類誤判。
+ */
+const RECORD_NOUN = /(支出|花費|帳|紀錄|記錄|這筆|那筆|上一筆|上上一筆)/
+const DELETE_VERB = /(刪除|刪掉|刪了|移除|拿掉|去掉)/
+// 「改 500」「改500」這種「改 + 數字」是最常見的說法，必須涵蓋。
+// 不收單獨的「改」，否則「這筆帳我改天再處理」會被誤判。
+const EDIT_VERB = /(修改|編輯|更改|改成|改為|改到|改一下|改\s*\d)/
+
+function detectRecordIntent(text: string): 'delete' | 'edit' | null {
+  if (!RECORD_NOUN.test(text)) return null
+  if (DELETE_VERB.test(text)) return 'delete'
+  if (EDIT_VERB.test(text)) return 'edit'
+  return null
+}
+
+/**
+ * AI 有時會回「已經幫您刪除了」「我已經修改好了」，但它根本做不到 ——
+ * 這種假訊息比沒有功能更糟，使用者會以為帳已經改掉了。
+ * 送出前先攔下來。
+ */
+const FALSE_ACTION_CLAIM =
+  /(已經?(幫[你您])?(刪除|刪掉|移除|修改|更改|編輯|更新)|(刪除|刪掉|移除|修改|更改|編輯|更新)(好|完|了)|幫[你您](刪|改))/
+
+function claimsCompletedAction(text: string): boolean {
+  return FALSE_ACTION_CLAIM.test(text)
+}
+
+/**
+ * 產生「編輯既有支出」的 LIFF 網址。
+ *
+ * 關鍵是把真正的 expense id 放進 payload：LiffEdit 會讀 decoded.id，
+ * ExpenseModal 判斷有 id 就執行 UPDATE。少了它就會變成新增一筆重複的。
+ */
+function buildEditLiffUrl(expense: any, tripId: string, sourceId: string): string {
+  const payload = {
+    id: expense.id,
+    d: expense.description,
+    a: expense.amount,
+    c: expense.currency,
+    dt: expense.date,
+    cat: expense.category,
+    p: expense.payer_data ?? {},
+    s: expense.split_data ?? {},
+    pi: expense.photo_urls ?? [],
+    u: sourceId,
+  }
+  const encoded = encodeBase64(new TextEncoder().encode(JSON.stringify(payload)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&data=${encoded}`
 }
 
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
@@ -315,6 +374,7 @@ const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀�
 • 修正記帳：說「剛剛那筆改 500」
 • 撤銷記帳：輸入「取消上一筆」或「刪除上一筆」
 • 刪除任一筆：輸入「刪除支出」，會列出近期紀錄讓你點選
+• 修改任一筆：輸入「編輯支出」，點選後開啟編輯畫面
 
 📊 快捷查詢（直接輸入或點選下方按鈕）：
 • 今日支出 / 本月支出 / 結算 / 旅程總覽
@@ -488,7 +548,12 @@ const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪�
 2. 金額盡量不帶小數，但 payer_data 與 split_details 的各自總和都必須完全等於 amount。
 3. 旅程已封存時，一律不可回傳 expense，改用 chat 說明無法記帳。
 4. 歷史支出僅供查詢參考，不要把既有的支出重複記一次。
-5. 查詢類的回答用條列式、簡短，適合在手機上閱讀。`
+5. 查詢類的回答用條列式、簡短，適合在手機上閱讀。
+6. 🚫 你**沒有**刪除或修改「已經存檔」的支出的能力。
+   絕對不可以說「已經幫你刪除了」「我已經改好了」這類話 —— 那是假的。
+   使用者想刪除或修改既有紀錄時，請回覆：請輸入「刪除支出」或「編輯支出」，
+   系統會列出近期紀錄讓他點選。
+   （你能做的只有：提出新的記帳建議、修正尚未存檔的草稿、以及查詢。）`
 
 // For text tasks: start with the thinking model (better reasoning)
 const GEMINI_FALLBACK_MODELS = [
@@ -1127,10 +1192,12 @@ serve(async (req) => {
       const QUICK_CMD_KEYWORDS = ['今日支出', '今天支出', '本週支出', '近期支出', '本月支出', '結算', '旅程總覽']
       const UNDO_KEYWORDS = ['取消上一筆', '撤銷上一筆', '刪除上一筆', '刪掉上一筆', '移除上一筆']
       const DELETE_LIST_KEYWORDS = ['刪除支出', '刪除紀錄', '刪除記錄', '管理支出', '刪除哪一筆']
+      const EDIT_LIST_KEYWORDS = ['編輯支出', '編輯紀錄', '編輯記錄', '修改支出', '修改紀錄']
       const isUndoKeyword = UNDO_KEYWORDS.includes(userText)
       const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(userText)
+      const isEditListKeyword = EDIT_LIST_KEYWORDS.includes(userText)
       const isToggleKeyword = userText === '模式:全回應模式' || userText === '模式:提及模式'
-      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程' || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword || isDeleteListKeyword || isToggleKeyword
+      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程' || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword || isDeleteListKeyword || isEditListKeyword || isToggleKeyword
 
       // 「耀西」必須出現在訊息開頭（去除 @mention 前綴後），避免誤觸
       const strippedForTrigger = userText.replace(/@\S+\s*/g, '').trimStart()
@@ -1276,9 +1343,72 @@ serve(async (req) => {
       if (isBound) {
         const tripId = userState.current_trip_id
 
+        // 明確指令，或用自然語言表達的同一個意圖。
+        // 兩者都必須在進 AI 之前處理掉，否則會變成重複記帳或收到假的完成訊息。
+        const recordIntent = detectRecordIntent(cleanText)
+        const isDeleteListIntent = DELETE_LIST_KEYWORDS.includes(cleanText)
+          || (recordIntent === 'delete' && !UNDO_KEYWORDS.includes(cleanText))
+        const isEditListIntent = EDIT_LIST_KEYWORDS.includes(cleanText) || recordIntent === 'edit'
+
+        // 列出近期支出讓使用者點選編輯。
+        // 「剛剛那筆改 500」交給 AI 會變成再記一筆重複的支出 ——
+        // 它只會產生新的草稿，沒有能力修改已存檔的紀錄。
+        if (isEditListIntent) {
+          const { data: recent } = await supabase.from('expenses')
+            .select('id, description, amount, currency, date, category, payer_data, split_data, photo_urls')
+            .eq('trip_id', tripId)
+            .is('deleted_at', null)
+            .order('date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(6)
+
+          if (!recent || recent.length === 0) {
+            await replyMessage(replyToken, [{
+              type: 'text', text: '目前沒有可編輯的支出紀錄。', quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
+          const rows: any[] = []
+          recent.forEach((e: any, idx: number) => {
+            if (idx > 0) rows.push({ type: 'separator', margin: 'md' })
+            rows.push({
+              type: 'box', layout: 'horizontal', margin: 'md', spacing: 'sm', alignItems: 'center',
+              contents: [
+                {
+                  type: 'box', layout: 'vertical', flex: 5, contents: [
+                    { type: 'text', text: String(e.description), size: 'sm', weight: 'bold', wrap: true },
+                    { type: 'text', text: `${e.date} · ${e.amount} ${e.currency}`, size: 'xxs', color: '#aaaaaa', margin: 'xs' },
+                  ],
+                },
+                {
+                  type: 'button', flex: 2, style: 'primary', color: '#5AC8FA', height: 'sm',
+                  action: { type: 'uri', label: '✏️ 編輯', uri: buildEditLiffUrl(e, tripId, sourceId) },
+                },
+              ],
+            })
+          })
+
+          await replyMessage(replyToken, [{
+            type: 'flex', altText: '選擇要編輯的支出',
+            contents: {
+              type: 'bubble', size: 'mega',
+              body: {
+                type: 'box', layout: 'vertical', contents: [
+                  { type: 'text', text: '✏️ 選擇要編輯的支出', weight: 'bold', size: 'md' },
+                  { type: 'text', text: `最近 ${recent.length} 筆 · 點選後會開啟編輯畫面`, size: 'xxs', color: '#aaaaaa', margin: 'xs', wrap: true },
+                  { type: 'separator', margin: 'lg' },
+                  ...rows,
+                ],
+              },
+            },
+          }], sourceId)
+          continue
+        }
+
         // 列出近期支出讓使用者點選刪除。
         // 比「撤銷上一筆」好用：可以刪任何一筆，而不只是最後一筆。
-        if (DELETE_LIST_KEYWORDS.includes(cleanText)) {
+        if (isDeleteListIntent) {
           const { data: recent } = await supabase.from('expenses')
             .select('id, description, amount, currency, date')
             .eq('trip_id', tripId)
@@ -1773,6 +1903,16 @@ ${expenseList}
             }
           } else {
             let safeContent = res.content || ""
+
+            // 最後一道防線：AI 沒有刪除或修改既有支出的能力，
+            // 但它有時會回「已經幫您刪除了」。使用者信了就以為帳已經改掉，
+            // 這種假訊息比直說做不到還糟，所以在送出前換掉。
+            if (claimsCompletedAction(safeContent)) {
+              console.warn('[GUARD] Blocked a false completion claim:', safeContent.substring(0, 120))
+              safeContent = '我沒辦法直接刪除或修改已經存檔的支出 🙇\n\n'
+                + '請輸入「刪除支出」或「編輯支出」，我會列出近期紀錄讓你點選。'
+            }
+
             if (safeContent.length > 4900) safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
             if (!safeContent) safeContent = 'Yoshi! 🥚 有什麼需要幫忙的嗎？'
             supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent }).then(() => {})
