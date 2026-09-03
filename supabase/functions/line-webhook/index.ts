@@ -106,6 +106,30 @@ function normalizeExpenseAmountMaps(expense: any): void {
   expense.split_details = toAmountMap(expense.split_details ?? expense.split_data)
 }
 
+/** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
+const CHAT_HISTORY_TURNS = 8
+
+/**
+ * 把歷史紀錄壓成適合當對話輪次的內容。
+ *
+ * 存進 line_chat_history 的 model 訊息是 `[記帳建議] {整包 JSON}`。
+ * 直接把那串 JSON 當成模型自己說過的話餵回去，它很容易改去修那筆舊草稿
+ * 而不是回應使用者當下這句話 —— 尤其在有 response_schema 約束的情況下。
+ * 壓成一行摘要，既保留「剛剛那筆改 500」需要的指代對象，又不會蓋過新訊息。
+ */
+function summarizeHistoryEntry(role: string, content: string): string {
+  if (role !== 'model' || !content.startsWith('[記帳建議]')) {
+    return content.length > 300 ? content.slice(0, 300) + '…' : content
+  }
+  try {
+    const draft = JSON.parse(content.slice('[記帳建議]'.length).trim())
+    const parts = [draft.description, draft.amount, draft.currency].filter(Boolean).join(' ')
+    return `（我先前提出的記帳建議：${parts}）`
+  } catch {
+    return '（我先前提出過一筆記帳建議）'
+  }
+}
+
 /** 把字串正規化後比較：忽略大小寫、全半形空白與常見標點 */
 function normalizeName(name: string): string {
   return name
@@ -1472,8 +1496,11 @@ serve(async (req) => {
             .not('is_settlement', 'is', true)
             .order('date', { ascending: false })
             .limit(10),
-          // 排除 pending/saved 內部記錄，只取對話歷史
-          supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: true }).limit(6)
+          // 排除 pending/saved 內部記錄，只取對話歷史。
+          // ⚠️ 必須用 descending 取「最近的 N 筆」，之後再反轉回時間順序。
+          //    寫成 ascending + limit 會永遠拿到史上最舊的那幾筆，
+          //    對話窗口不會前進，AI 會一直停留在很久以前的內容。
+          supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: false }).limit(CHAT_HISTORY_TURNS)
         ])
         // fire-and-forget：不阻塞主流程
         supabase.from('line_chat_history').insert({
@@ -1524,17 +1551,38 @@ ${expensesSummary || '（尚無支出）'}
   url 填近期支出中對應的照片網址（找不到就填空字串，系統會自動全庫搜尋），question 填使用者的問題
 - 其他聊天或查詢 → type: chat`
 
+        // 反轉回時間順序，並丟掉結尾沒有得到回覆的 user 訊息。
+        // 留著的話，合併同角色輪次時它會跟「當下這句話」黏成同一輪，
+        // 模型就分不清該回應哪一句了。
+        const orderedHistory = [...(history ?? [])].reverse()
+        while (orderedHistory.length > 0 && orderedHistory[orderedHistory.length - 1].role === 'user') {
+          orderedHistory.pop()
+        }
+
         // 真正的多輪對話。以前是把歷史壓成 "U: ... / Y: ..." 塞進單一 prompt，
         // 模型較難分辨哪些是自己說過的話。
-        const conversation: any[] = [
+        const rawConversation: any[] = [
           { role: 'user', parts: [{ text: tripContext }] },
           { role: 'model', parts: [{ text: '{"type":"chat","content":"了解，我已掌握這趟旅程的設定。"}' }] },
-          ...(history ?? []).map((h: any) => ({
+          // 查詢是新到舊，這裡反轉回舊到新才符合對話順序
+          ...orderedHistory.map((h: any) => ({
             role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: h.content }],
+            parts: [{ text: summarizeHistoryEntry(h.role, h.content) }],
           })),
           { role: 'user', parts: [{ text: cleanText }] },
         ]
+
+        // Gemini 的 contents 預期 user / model 交替。歷史裡可能出現連續兩則 model
+        // （例如拍照產生的草稿沒有對應的使用者文字），先合併起來避免格式異常。
+        const conversation = rawConversation.reduce((acc: any[], turn: any) => {
+          const prev = acc[acc.length - 1]
+          if (prev && prev.role === turn.role) {
+            prev.parts.push(...turn.parts)
+          } else {
+            acc.push({ role: turn.role, parts: [...turn.parts] })
+          }
+          return acc
+        }, [])
 
         try {
           const aiResponse = await askGemini(conversation, {
