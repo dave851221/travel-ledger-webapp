@@ -108,6 +108,42 @@ function normalizeExpenseAmountMaps(expense: any): void {
 }
 
 /**
+ * 讓這個聊天先前未處理的記帳草稿失效。
+ *
+ * 修正一筆草稿時（例如「剛剛那筆改 500」）會送出一張新的 Flex 卡片，
+ * 但舊卡片還留在聊天室裡，按下去仍會存入未修正的內容。
+ *
+ * 做法是把舊 nonce 直接塞進 line_processed_actions ——
+ * 那正是防重複點擊用的鎖，所以舊按鈕會走到既有的「此操作已處理過」分支，
+ * 不必另外設計一套失效機制。
+ */
+async function supersedePendingDrafts(sourceId: string, keepNonce: string): Promise<void> {
+  const { data } = await supabase.from('line_chat_history')
+    .select('content')
+    .eq('line_user_id', sourceId)
+    .eq('role', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(10)
+  if (!data || data.length === 0) return
+
+  const nonces: string[] = []
+  for (const row of data) {
+    try {
+      const n = JSON.parse(row.content)?.n
+      if (n && n !== keepNonce) nonces.push(n)
+    } catch { /* skip malformed */ }
+  }
+  if (nonces.length === 0) return
+
+  // 已存在的 nonce 會衝突，忽略即可（代表那張卡片早就處理過了）
+  await supabase.from('line_processed_actions')
+    .upsert(
+      nonces.map(n => ({ nonce: n, line_user_id: sourceId, action_type: 'superseded' })),
+      { onConflict: 'nonce', ignoreDuplicates: true },
+    )
+}
+
+/**
  * 判斷使用者是不是想刪除或修改「已經存檔」的支出。
  *
  * 這件事必須在進 AI 之前攔下來：AI 沒有刪除或修改既有紀錄的能力，
@@ -546,6 +582,8 @@ const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪�
    使用者用暱稱、諧音或縮寫時，可以合理推測對應到清單裡最接近的成員，並改用清單上的正式名稱。
    若沒把握對應到誰，寧可回傳 chat 詢問，**絕對不可以**自創或音譯出清單外的名字。
 2. 金額盡量不帶小數，但 payer_data 與 split_details 的各自總和都必須完全等於 amount。
+   🚫 **嚴禁換算匯率。** 使用者說「3000 日幣」就填 amount: 3000、currency: "JPY"，
+   不可以自行換成旅程的主幣別。換算由系統在統計時處理。
 3. 旅程已封存時，一律不可回傳 expense，改用 chat 說明無法記帳。
 4. 歷史支出僅供查詢參考，不要把既有的支出重複記一次。
 5. 查詢類的回答用條列式、簡短，適合在手機上閱讀。
@@ -1011,10 +1049,18 @@ serve(async (req) => {
 - 旅程預設分攤成員：${trip.default_split_members?.length ? trip.default_split_members.join(', ') : '全部成員'}
 
 ### 任務規則
-1. 辨識「總金額」與「幣別」。請從符號、地址或語系推斷幣別 (例如：¥/JPY, $/USD, NT/TWD, €/EUR)。
-   - 決定幣別的優先權為 (1.從收據辨識出幣別; 2.使用者設定中提及; 3.上方背景資訊的預設幣別)
+1. 辨識「總金額」與「幣別」。
+   - 🚫 **嚴禁換算匯率。** amount 必須是收據上印的那個數字，currency 必須是收據本身的幣別。
+     例如日本的收據寫 3,200 円，就填 amount: 3200、currency: "JPY"，
+     **絕對不可以**幫忙換成台幣，也不可以因為旅程的主幣別是 TWD 就改寫金額。
+     換算是系統在統計時自己會做的事，你只要忠實照抄。
+   - 幣別從符號、地址或語系判斷 (¥/JPY、$/USD、NT/TWD、€/EUR、₩/KRW、฿/THB)。
+   - 收據上真的看不出幣別時，才依序參考：使用者設定提及的幣別 → 背景資訊的預設幣別。
 2. 辨識「日期」。若收據上無明確日期，請使用今日。
-3. 辨識「品項描述」。提取商店名稱或主要品項。若是外文請保留原文，並在括號內加上簡單的繁體中文翻譯 (例如：一蘭ラーメン(拉麵))。
+3. 辨識「品項描述」。提取商店名稱或主要品項。
+   - 外文店名請保留原文，並在括號內補上簡短的繁體中文說明，讓人看得懂那是什麼店，
+     例如「肉の匠家 (和牛燒肉店)」、「一蘭ラーメン (拉麵)」、「ドン・キホーテ (驚安殿堂．藥妝百貨)」。
+   - 括號裡寫「這是什麼」而不是逐字直譯；只寫原文別人會看不懂，只寫中文又失去原始資訊。
 4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用預設分類。
 5. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
    - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
@@ -1108,6 +1154,8 @@ serve(async (req) => {
             }
 
             // storePendingExpense 與 chat history insert 並行執行
+            // 先讓舊草稿失效，再存新的：聊天室裡的舊卡片按下去不該存入過期內容
+            await supersedePendingDrafts(sourceId, nonce)
             await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId })
 
             const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids }, null, 2)}`
@@ -1638,14 +1686,10 @@ serve(async (req) => {
           speaker_user_id: speakerUserId, speaker_name: speakerLabel,
         }).then(() => {})
 
-        // 約 10% 機率清理 30 天前的對話記錄，降低 DB 寫入頻率
-        if (Math.random() < 0.1) {
-          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-          supabase.from('line_chat_history').delete().eq('line_user_id', sourceId).lt('created_at', thirtyDaysAgo).then(() => {})
-          // line_processed_actions 超過 7 天的 nonce 可安全移除
-          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-          supabase.from('line_processed_actions').delete().lt('created_at', sevenDaysAgo).then(() => {})
-        }
+        // 舊紀錄的清理已改由資料庫的 pg_cron 排程負責（每天一次，見
+        // supabase/migrations/20260903_cron_purge_line_history.sql）。
+        // 原本是在這裡以約 10% 機率順手清一次，但沒人講話就不會清，
+        // 而且會在使用者等回覆的時候多做兩次 DELETE。
 
         const today = getTodayString(getTripTimezone(trip))
 
@@ -1791,6 +1835,10 @@ ${expensesSummary || '（尚無支出）'}
             const textWarningMsg = textWarnings.length > 0
               ? [{ type: 'text' as const, text: textWarnings.join('\n') }]
               : []
+
+            // 修正草稿時會送出新卡片，舊卡片必須先失效，
+            // 否則按舊的「確認存入」會寫進未修正的金額。
+            await supersedePendingDrafts(sourceId, nonce)
 
             // storePendingExpense 與 replyMessage 並行執行，縮短回覆延遲
             await Promise.all([

@@ -19,18 +19,22 @@ const LiffEdit: React.FC = () => {
   // 儲存 init 完成後的 liff 實例
   const liffRef = useRef<LiffSDK | null>(null);
 
+  // liff.closeWindow() 只有在 liff.init() 成功之後才有作用，而 init 需要
+  // VITE_LIFF_ID。沒設定時視窗關不掉，window.close() 也會被瀏覽器封鎖 ——
+  // 與其放一顆按不動的按鈕，不如直接告訴使用者可以自己關掉這一頁。
+  const [canCloseWindow, setCanCloseWindow] = useState(false);
+
   const closeLiffWindow = useCallback(() => {
-    // 嘗試 liff.closeWindow()（需有 LIFF ID 才有效）
-    const liff = liffRef.current ?? window.liff;
-    try {
-      if (liff?.closeWindow) {
+    const liff = liffRef.current;
+    if (liff?.closeWindow) {
+      try {
         liff.closeWindow();
         return;
+      } catch (e) {
+        console.error('[LIFF] closeWindow error:', e);
       }
-    } catch (e) {
-      console.error('[LIFF] closeWindow error:', e);
     }
-    // 桌機瀏覽器 fallback
+    // 桌機瀏覽器：只有由 script 開啟的視窗才關得掉，多數情況會無效
     window.close();
   }, []);
 
@@ -41,8 +45,9 @@ const LiffEdit: React.FC = () => {
 
   const handleSuccess = useCallback(() => {
     setIsSuccess(true);
-    setTimeout(closeLiffWindow, 800);
-  }, [closeLiffWindow]);
+    // 關不掉的話就別嘗試，避免使用者看到畫面閃一下卻什麼都沒發生
+    if (canCloseWindow) setTimeout(closeLiffWindow, 800);
+  }, [closeLiffWindow, canCloseWindow]);
 
   useEffect(() => {
     const init = async () => {
@@ -66,6 +71,7 @@ const LiffEdit: React.FC = () => {
         if (liff && liffId) {
           await liff.init({ liffId });
           liffRef.current = liff;
+          setCanCloseWindow(typeof liff.closeWindow === 'function');
           if (!liff.isLoggedIn()) {
             liff.login();
             return;
@@ -168,7 +174,19 @@ const LiffEdit: React.FC = () => {
         <CheckCircle2 size={40} />
       </div>
       <h2 className="text-2xl font-black text-slate-900">記帳成功！</h2>
-      <button onClick={closeLiffWindow} className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full">返回 LINE</button>
+
+      {canCloseWindow ? (
+        <button
+          onClick={closeLiffWindow}
+          className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full"
+        >
+          返回 LINE
+        </button>
+      ) : (
+        <p className="mt-6 text-sm font-bold text-slate-500 leading-relaxed">
+          已存入帳目，可直接關閉此頁面回到 LINE。
+        </p>
+      )}
     </div>
   );
 
