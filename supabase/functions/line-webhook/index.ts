@@ -108,6 +108,66 @@ function normalizeExpenseAmountMaps(expense: any): void {
 }
 
 /**
+ * 取出這個聊天目前「還沒被處理」且帶有收據照片的記帳草稿。
+ *
+ * 「還沒被處理」＝ nonce 不在 line_processed_actions 裡，
+ * 也就是使用者既沒按確認存入、也沒按取消，那張卡片還等在聊天室裡。
+ */
+async function getOutstandingPhotoDraft(
+  sourceId: string,
+): Promise<{ nonce: string; exp: any; photoIds: string[]; tripId: string } | null> {
+  const { data: rows } = await supabase.from('line_chat_history')
+    .select('content')
+    .eq('line_user_id', sourceId)
+    .eq('role', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(5)
+  if (!rows || rows.length === 0) return null
+
+  const candidates: { nonce: string; exp: any; photoIds: string[]; tripId: string }[] = []
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.content)
+      const photoIds = parsed.p ?? []
+      if (parsed.n && Array.isArray(photoIds) && photoIds.length > 0) {
+        candidates.push({ nonce: parsed.n, exp: parsed.exp, photoIds, tripId: parsed.tid })
+      }
+    } catch { /* skip malformed */ }
+  }
+  if (candidates.length === 0) return null
+
+  const { data: used } = await supabase.from('line_processed_actions')
+    .select('nonce')
+    .in('nonce', candidates.map(c => c.nonce))
+  const usedSet = new Set((used ?? []).map((u: any) => u.nonce))
+
+  return candidates.find(c => !usedSet.has(c.nonce)) ?? null
+}
+
+/** 由 photo id 或路徑組出 Storage 的公開網址 */
+function photoPublicUrl(photoId: string, tripId: string): string {
+  const path = String(photoId).includes('/') ? String(photoId) : `expenses/${tripId}/${photoId}.jpg`
+  const { data } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(path)
+  return data.publicUrl
+}
+
+/** 下載收據照片並轉成 Gemini 需要的 inlineData */
+async function fetchPhotoPart(photoUrl: string): Promise<any | null> {
+  try {
+    const res = await fetch(photoUrl)
+    if (!res.ok) {
+      console.warn(`[REANALYZE] Failed to fetch photo: ${res.status}`)
+      return null
+    }
+    const buf = await res.arrayBuffer()
+    return { inlineData: { mimeType: 'image/jpeg', data: encodeBase64(new Uint8Array(buf)) } }
+  } catch (err) {
+    console.warn('[REANALYZE] photo fetch error:', err)
+    return null
+  }
+}
+
+/**
  * 讓這個聊天先前未處理的記帳草稿失效。
  *
  * 修正一筆草稿時（例如「剛剛那筆改 500」）會送出一張新的 Flex 卡片，
@@ -1758,11 +1818,35 @@ ${expensesSummary || '（尚無支出）'}
           return acc
         }, [])
 
+        // 如果聊天室裡還有一張沒被確認／取消的收據草稿，把那張收據一起送給 AI。
+        // 光看文字是分不出「A 是我吃的」對應多少錢的 —— 必須讓模型重新讀收據品項。
+        const photoDraft = await getOutstandingPhotoDraft(sourceId)
+        let reanalyzePhotoIds: string[] = []
+        if (photoDraft) {
+          const part = await fetchPhotoPart(photoPublicUrl(photoDraft.photoIds[0], photoDraft.tripId))
+          if (part) {
+            const d = photoDraft.exp ?? {}
+            const lastTurn = conversation[conversation.length - 1]
+            lastTurn.parts.unshift({
+              text: `【尚未確認的收據草稿】${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''}\n`
+                + `目前分攤：${JSON.stringify(d.s ?? {})}\n`
+                + `下面附上那張收據。若使用者這句話是在調整這筆的金額或分攤，`
+                + `請重新閱讀收據上的各品項，依照他說的分配方式重算 payer_data 與 split_details，`
+                + `並回傳 type: expense（description、amount、currency、date 沿用上面的草稿，除非使用者另有指示）。`
+                + `若只是閒聊或詢問，照常回 chat。`,
+            })
+            lastTurn.parts.push(part)
+            reanalyzePhotoIds = photoDraft.photoIds
+          }
+        }
+
         try {
           const aiResponse = await askGemini(conversation, {
             systemInstruction: YOSHI_SYSTEM_INSTRUCTION,
             responseSchema: TEXT_RESPONSE_SCHEMA,
             temperature: 0.4,
+            // 有附收據時改用視覺模型清單
+            models: reanalyzePhotoIds.length > 0 ? GEMINI_OCR_MODELS : GEMINI_FALLBACK_MODELS,
           })
           const res = JSON.parse(extractJSON(aiResponse))
           if (res.type === 'expense') {
@@ -1816,7 +1900,10 @@ ${expensesSummary || '（尚無支出）'}
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
             const nonce = Math.random().toString(36).substring(2, 10)
-            const photo_ids = expense.photo_ids || []
+            // 重新分析既有收據時沿用原本的照片，新卡片才會帶著收據縮圖
+            const photo_ids = reanalyzePhotoIds.length > 0
+              ? reanalyzePhotoIds
+              : (expense.photo_ids || [])
 
             let heroSection: any = null
             if (photo_ids.length > 0) {
