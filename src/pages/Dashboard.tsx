@@ -118,12 +118,25 @@ const Dashboard: React.FC = () => {
 
   const { softDelete, restore, permanentlyDelete, emptyTrash } = useTrash(id, showToast);
 
+  // 刪除與還原都會讓一筆紀錄在「帳目」與「垃圾桶」之間移動，兩份清單都要更新。
+  // 不能只靠 realtime：手機切到背景或鎖螢幕時 websocket 會被中斷，
+  // 事件收不到，畫面就要手動重整才會變。
+  const refetchLedgerAndTrash = useCallback(
+    () => Promise.all([refetchExpenses(), refetchDeleted()]),
+    [refetchExpenses, refetchDeleted],
+  );
+
   const handleDeleteExpense = async () => {
     if (!deleteConfirmId) return;
-    if (await softDelete(deleteConfirmId)) setDeleteConfirmId(null);
+    if (await softDelete(deleteConfirmId)) {
+      setDeleteConfirmId(null);
+      refetchLedgerAndTrash();
+    }
   };
 
-  const handleRestoreExpense = (expenseId: string) => restore(expenseId);
+  const handleRestoreExpense = async (expenseId: string) => {
+    if (await restore(expenseId)) refetchLedgerAndTrash();
+  };
 
   const handlePermanentlyDeleteExpense = async () => {
     if (!permDeleteConfirmId) return;
@@ -349,6 +362,15 @@ const Dashboard: React.FC = () => {
       {/* Navigation */}
       <nav className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-24 flex items-center justify-between gap-4">
+          {/* 回首頁。分類標籤只有在旅程有分類時才出現，未分類的旅程原本完全沒有返回入口 */}
+          <button
+            onClick={() => navigate('/')}
+            title="回到首頁"
+            aria-label="回到首頁"
+            className="shrink-0 p-2 -ml-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all"
+          >
+            <ChevronLeftIcon size={20} />
+          </button>
           <div className="flex-1 flex flex-col min-w-0">
             <h1 className={`${getTitleFontSize(trip?.name)} font-black text-slate-900 dark:text-white truncate`}>{trip?.name}</h1>
             <div className="flex items-center gap-2 mt-1 sm:mt-2 flex-wrap">
@@ -671,10 +693,14 @@ const Dashboard: React.FC = () => {
                   <h3 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white mb-6 uppercase tracking-[0.2em] self-start">消費類別佔比 (總計 {fmt(stats.grandBase.total, trip?.base_currency || 'TWD', trip?.precision_config)})</h3>
                   <div className="flex flex-col items-center gap-5">
 
-                    {/* Chart Area — no built-in Legend */}
+                    {/* Chart Area — no built-in Legend.
+                        ResponsiveContainer 的 initialDimension 預設是 {-1, -1}，StrictMode 下
+                        會先用那組值渲染一次，於是在 ResizeObserver 回報真實尺寸之前，
+                        Recharts 就會在 console 抱怨寬高小於 0。給一組合理初值即可，
+                        掛載後仍會被實際量測覆蓋。 */}
                     <div className="w-full max-w-[480px] h-[280px] sm:h-[340px] shrink-0">
                       {stats.categoryData.length > 0 ? (
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 480, height: 280 }}>
                           <PieChart>
                             <Pie data={stats.categoryData} cx="50%" cy="50%" innerRadius="38%" outerRadius="56%" paddingAngle={4} dataKey="value" stroke="none">
                               {stats.categoryData.map((_, idx) => (<Cell key={`c-${idx}`} fill={COLORS[idx % COLORS.length]} />))}

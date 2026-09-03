@@ -170,8 +170,21 @@ export const useTripData = (
       )
       .subscribe();
 
+    // 回到前景時重新抓一次。
+    // 手機把分頁切到背景或鎖螢幕時，realtime 的 websocket 會被中斷，
+    // 期間發生的變更不會補送，光靠訂閱會一直顯示舊資料。
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refetchTrip();
+        refetchExpenses();
+        refetchDeleted();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
       supabase.removeChannel(channel);
     };
   }, [id, refetchTrip, refetchExpenses, refetchDeleted]);

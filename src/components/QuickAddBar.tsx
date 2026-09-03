@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Zap, CornerDownLeft, Loader2, Settings2 } from 'lucide-react';
+import { Zap, Plus, Loader2, Settings2 } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import { buildQuickAddDraft, parseQuickAddInput } from '../utils/quickAdd';
@@ -85,7 +85,7 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); submit(); }
           }}
-          placeholder="快速記帳，例如「拉麵 3000」後按 Enter"
+          placeholder="拉麵 3000"
           className="flex-1 min-w-0 bg-transparent outline-none font-bold text-sm py-1.5"
           aria-label="快速記帳"
         />
@@ -107,18 +107,19 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
           disabled={!parsed || saving}
           className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-black text-xs transition-all"
         >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <CornerDownLeft size={14} />}
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} strokeWidth={3} />}
           記一筆
         </button>
       </div>
 
-      {/* 讓使用者在按下去之前就知道會存成什麼 */}
+      {/* 讓使用者在按下去之前就知道會存成什麼。
+          手機寬度有限，所以只列必要資訊並讓它自然換行。 */}
       {parsed && (
-        <p className="text-[10px] font-bold text-slate-400 px-2">
+        <p className="text-[10px] font-bold text-slate-400 px-2 leading-relaxed">
           {parsed.description || category} ·{' '}
           {formatAmount(parsed.amount, currency, trip.precision_config)} {currency} · {category} ·{' '}
-          {(trip.default_payer?.length ? trip.default_payer.join('、') : currentUser || trip.members[0])} 付 ·{' '}
-          {trip.default_split_members?.length ? `${trip.default_split_members.length} 人分攤` : '全員均分'}
+          {(trip.default_payer?.length ? trip.default_payer.join('、') : currentUser || trip.members[0])}付
+          {trip.default_split_members?.length ? `・${trip.default_split_members.length} 人分攤` : '・全員均分'}
         </p>
       )}
     </div>
