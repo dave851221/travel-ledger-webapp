@@ -32,3 +32,6 @@ supabase/.branches
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code 的本機設定（可能含個人存取權杖）
+.claude/settings.local.json

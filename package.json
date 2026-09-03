@@ -11,7 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
-    "db:build": "node scripts/build-schema.mjs"
+    "db:build": "node scripts/build-schema.mjs",
+    "fn:deploy": "supabase functions deploy line-webhook --no-verify-jwt && supabase functions deploy liff-notify",
+    "fn:serve": "supabase functions serve line-webhook"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.1",

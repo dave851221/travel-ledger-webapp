@@ -11,6 +11,7 @@
 | [`docs/DB_MAINTENANCE.md`](docs/DB_MAINTENANCE.md) | 後台維運（**刪除旅程**、清理孤兒照片、重設 LINE 綁定） | 需要手動操作資料庫時 |
 | [`docs/LINE_BOT.md`](docs/LINE_BOT.md) | LINE Bot 行為規格與自我介紹全文 | 改機器人邏輯或對話時 |
 | [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md) | 如何新增一個旅程行程頁 | 要做新行程頁時 |
+| [`docs/AI_TOOLING.md`](docs/AI_TOOLING.md) | 讓 AI 直接操作 Supabase（MCP 設定與風險） | 想請 AI 跑 SQL 或部署函式時 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 待辦、已知風險、未來規劃 | 想知道什麼還沒做、哪裡有雷 |
 | [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md) | MCP server 設計構想 | 規劃 LINE 以外的記帳管道時 |
 
@@ -24,6 +25,7 @@ npm run build     # tsc -b + vite build
 npm run lint      # ESLint 掃整個專案
 npm run preview   # 本機預覽正式建置結果
 npm run db:build  # 由 supabase/schema/ 重新產生 bootstrap.generated.sql
+npm run fn:deploy # 部署兩支 Edge Function（已自動帶 --no-verify-jwt）
 npm test          # Vitest（純函式，不含 UI）
 npm run test:watch
 npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查

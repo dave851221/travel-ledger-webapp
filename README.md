@@ -46,6 +46,7 @@ npm run db:build  # 重新產生資料庫初始化腳本
 | [docs/DB_MAINTENANCE.md](docs/DB_MAINTENANCE.md) | 後台維運，含刪除旅程的步驟 |
 | [docs/LINE_BOT.md](docs/LINE_BOT.md) | LINE Bot 行為規格 |
 | [docs/ITINERARY_AUTHORING.md](docs/ITINERARY_AUTHORING.md) | 新增行程頁 |
+| [docs/AI_TOOLING.md](docs/AI_TOOLING.md) | 讓 AI 直接操作 Supabase（MCP） |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 待辦與已知風險 |
 | [docs/MCP_SERVER_DESIGN.md](docs/MCP_SERVER_DESIGN.md) | MCP server 設計構想 |
 

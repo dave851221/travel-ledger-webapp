@@ -1,6 +1,9 @@
 # 資料庫維運
 
-需要手動在 Supabase SQL Editor 執行的操作。腳本放在 [`supabase/scripts/`](../supabase/scripts/)。
+需要在 Supabase SQL Editor 執行的操作。腳本放在 [`supabase/scripts/`](../supabase/scripts/)。
+
+> 設定好 [`AI_TOOLING.md`](AI_TOOLING.md) 的 Supabase MCP 之後，這些也可以請 AI 代跑，
+> 但**步驟與順序仍然一樣** —— 尤其是先 preview 再刪除、以及先清 Storage 再刪資料庫。
 
 ---
 
