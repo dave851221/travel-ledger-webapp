@@ -27,10 +27,28 @@ Windows PowerShell（永久生效，設定後要重開終端機）：
 > `.mcp.json` 裡寫的是 `${SUPABASE_ACCESS_TOKEN}`，權杖本身不會進版控。
 > **切勿**把權杖直接寫進 `.mcp.json` —— 那個檔案是要 commit 的。
 
-### 3. 重啟 Claude Code
+### 3. 完全重啟 VS Code
 
-在專案目錄重新啟動，它會提示是否信任這個專案的 MCP server，選同意。
-用 `/mcp` 可以確認 `supabase` 已連上。
+⚠️ **要整個 VS Code 關掉重開，只重啟 Claude Code 不夠。**
+
+Windows 的 `SetEnvironmentVariable(..., 'User')` 只會傳給**設定之後才啟動**的行程。
+Claude Code 以 VS Code 擴充套件執行，繼承的是 VS Code 的環境；
+如果 VS Code 在你設定變數之前就開著，它（以及它啟動的 MCP server）永遠看不到那個變數。
+
+症狀是 MCP server 有起來，但每次呼叫都回
+`Unauthorized. Please provide a valid access token` —— 看起來像權杖錯了，其實是根本沒傳進去。
+
+重開後用 `/mcp` 確認 `supabase` 已連上，第一次會問是否信任這個專案的 MCP server。
+
+**權杖到底有沒有效**，可以不靠 MCP 直接驗（不會印出權杖本身）：
+
+```powershell
+$t = [Environment]::GetEnvironmentVariable('SUPABASE_ACCESS_TOKEN','User')
+Invoke-RestMethod -Uri 'https://api.supabase.com/v1/projects' -Headers @{ Authorization = "Bearer $t" } |
+  Select-Object name, id, status
+```
+
+列得出專案就代表權杖沒問題，剩下的就是環境變數傳遞的問題。
 
 ---
 
@@ -70,6 +88,9 @@ Windows PowerShell（永久生效，設定後要重開終端機）：
    先 `list_trips` 找 UUID → `preview_trip` 核對名稱 → 才執行刪除。
    請 AI 幫忙時也一樣，先讓它把 preview 結果給你看過。
 4. **重要操作前先備份**：Supabase Dashboard → Database → Backups。
+5. **權杖本身別留在檔案裡**。設定時如果先貼在編輯器裡再執行，記得關掉時不要存檔。
+   權杖等同你 Supabase 帳號下所有專案的管理權限，外流的話請到
+   Account Settings → Access Tokens 撤銷並重新產生。
 
 ### 想收緊權限
 
