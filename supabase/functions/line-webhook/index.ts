@@ -26,7 +26,7 @@ function getQuickReply(bound: boolean, showGroupToggle = false, mentionRequired 
   if (!bound) {
     return {
       items: [
-        { type: "action", action: { type: "message", label: "❓ 如何使用", text: "耀西" } },
+        { type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } },
       ]
     }
   }
@@ -35,7 +35,8 @@ function getQuickReply(bound: boolean, showGroupToggle = false, mentionRequired 
     { type: "action", action: { type: "message", label: "📊 本月支出", text: "本月支出" } },
     { type: "action", action: { type: "message", label: "💰 結算", text: "結算" } },
     { type: "action", action: { type: "message", label: "🗺️ 旅程總覽", text: "旅程總覽" } },
-    { type: "action", action: { type: "message", label: "❓ 如何使用", text: "耀西" } },
+    { type: "action", action: { type: "message", label: "🗑 刪除支出", text: "刪除支出" } },
+    { type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } },
   ]
   if (showGroupToggle) {
     items.push(mentionRequired
@@ -184,19 +185,36 @@ const KNOWN_CURRENCIES = new Set([
 function normalizeCurrency(
   currency: unknown,
   trip: { rates?: Record<string, number>; base_currency: string; default_currency?: string },
-): { currency: string; warning: string | null } {
+): { currency: string; warning: string | null; reject: string | null } {
   const raw = String(currency ?? '').trim().toUpperCase()
   const fallback = trip.default_currency || trip.base_currency
+  const available = Object.keys(trip.rates ?? {})
 
-  if (!raw) return { currency: fallback, warning: null }
+  if (!raw) return { currency: fallback, warning: null, reject: null }
+
+  // 旅程有設匯率 → 正常放行
   if (trip.rates && Object.prototype.hasOwnProperty.call(trip.rates, raw)) {
-    return { currency: raw, warning: null }
+    return { currency: raw, warning: null, reject: null }
   }
+
+  // 是合法幣別，但這趟旅程沒有它的匯率。
+  // 不能就這樣存進去：統計會以 1:1 換算，金額直接失真且事後難以察覺。
   if (KNOWN_CURRENCIES.has(raw)) {
-    // 是真的幣別，但這趟旅程沒設匯率 —— 記得起來，但要提醒
-    return { currency: raw, warning: `⚠️ 這趟旅程沒有設定 ${raw} 的匯率，統計時會以 1:1 計算。` }
+    return {
+      currency: raw,
+      warning: null,
+      reject: `🙅 這趟旅程沒有設定 ${raw} 的匯率，先存起來的話統計會算錯。\n\n`
+        + `目前可用的幣別：${available.join('、') || '（尚未設定）'}\n\n`
+        + `請改用上面其中一種，或先到網頁的「設定 → 匯率精度」加入 ${raw} 的匯率。`,
+    }
   }
-  return { currency: fallback, warning: `⚠️ 無法辨識幣別「${raw}」，已改用 ${fallback}。` }
+
+  // 根本不是幣別代碼 —— 多半是 AI 看錯，退回旅程預設並告知
+  return {
+    currency: fallback,
+    warning: `⚠️ 無法辨識幣別「${raw}」，已改用 ${fallback}。`,
+    reject: null,
+  }
 }
 
 /**
@@ -271,7 +289,8 @@ const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀�
 • 指定付款：說「小明付了Uber 300」
 • 複雜分帳：說「拉麵 3000 日幣，小明先付，大家平分」
 • 修正記帳：說「剛剛那筆改 500」
-• 撤銷記帳：輸入「取消上一筆」或「撤銷上一筆」
+• 撤銷記帳：輸入「取消上一筆」或「刪除上一筆」
+• 刪除任一筆：輸入「刪除支出」，會列出近期紀錄讓你點選
 
 📊 快捷查詢（直接輸入或點選下方按鈕）：
 • 今日支出 / 本月支出 / 結算 / 旅程總覽
@@ -605,7 +624,11 @@ serve(async (req) => {
       // 但每次互動仍要看得出是誰做的。
       const speakerUserId: string | null = event.source.userId ?? null
       let memberName = "未知";
-      const needsMemberName = event.type === 'message' && (event.message?.type === 'text' || event.message?.type === 'image');
+      // postback 也要查：存檔確認訊息是在 postback 分支送出的，
+      // 少了這個就會顯示「由 未知 記錄」。
+      const needsMemberName =
+        (event.type === 'message' && (event.message?.type === 'text' || event.message?.type === 'image'))
+        || event.type === 'postback';
       if ((sourceType === "group" || sourceType === "room") && needsMemberName && speakerUserId) {
         const chatId = event.source.groupId || event.source.roomId
         const fetchedName = await getChatMemberName(sourceType, chatId, speakerUserId);
@@ -652,6 +675,42 @@ serve(async (req) => {
             }
           } else {
             await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可撤銷的記錄。' }], sourceId)
+          }
+          continue
+        }
+
+        // 從「刪除支出」清單點選的刪除
+        if (postbackData.act === 'del') {
+          const expenseId = postbackData.eid
+          if (!expenseId) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這筆支出。' }], sourceId)
+            continue
+          }
+          const { data: target } = await supabase.from('expenses')
+            .select('description, deleted_at').eq('id', expenseId).maybeSingle()
+
+          if (!target) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 這筆支出已不存在。' }], sourceId)
+            continue
+          }
+          if (target.deleted_at) {
+            await replyMessage(replyToken, [{
+              type: 'text', text: `ℹ️ 「${target.description}」先前已經刪除了。`, quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
+          const { error } = await supabase.from('expenses')
+            .update({ deleted_at: new Date().toISOString() }).eq('id', expenseId)
+          if (error) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 刪除失敗，請至網頁操作。' }], sourceId)
+          } else {
+            const by = speakerLabel ? `（由 ${speakerLabel} 刪除）` : ''
+            await replyMessage(replyToken, [{
+              type: 'text',
+              text: `🗑 已刪除：${target.description}${by}\n\n24 小時內可到網頁的垃圾桶還原。`,
+              quickReply: boundQR,
+            }], sourceId)
           }
           continue
         }
@@ -927,6 +986,14 @@ serve(async (req) => {
             // 幣別與日期的把關。以前這兩個欄位是 AI 講什麼就寫什麼，
             // 幻想出來的幣別會讓金額在統計時默默失真，錯誤的年份則會讓支出跑到別的月份去。
             const ocrCurrency = normalizeCurrency(expense.currency, trip)
+            if (ocrCurrency.reject) {
+              // 沒有匯率就存下去，統計會以 1:1 換算而失真，寧可先問清楚
+              await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
+              await replyMessage(replyToken, [{
+                type: 'text', text: ocrCurrency.reject, quickReply: boundQR,
+              }], sourceId)
+              continue
+            }
             expense.currency = ocrCurrency.currency
             const ocrDate = normalizeDate(expense.date, today)
             expense.date = ocrDate.date
@@ -1034,9 +1101,12 @@ serve(async (req) => {
       const isMentioned = event.message.mention?.mentionees?.some((m: any) => m.isSelf === true)
       const isIdCommand = userText.toUpperCase().startsWith('ID:') || userText.toUpperCase().startsWith('ID：')
       const QUICK_CMD_KEYWORDS = ['今日支出', '今天支出', '本週支出', '近期支出', '本月支出', '結算', '旅程總覽']
-      const isUndoKeyword = userText === '取消上一筆' || userText === '撤銷上一筆'
+      const UNDO_KEYWORDS = ['取消上一筆', '撤銷上一筆', '刪除上一筆', '刪掉上一筆', '移除上一筆']
+      const DELETE_LIST_KEYWORDS = ['刪除支出', '刪除紀錄', '刪除記錄', '管理支出', '刪除哪一筆']
+      const isUndoKeyword = UNDO_KEYWORDS.includes(userText)
+      const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(userText)
       const isToggleKeyword = userText === '模式:全回應模式' || userText === '模式:提及模式'
-      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程' || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword || isToggleKeyword
+      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程' || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword || isDeleteListKeyword || isToggleKeyword
 
       // 「耀西」必須出現在訊息開頭（去除 @mention 前綴後），避免誤觸
       const strippedForTrigger = userText.replace(/@\S+\s*/g, '').trimStart()
@@ -1070,9 +1140,24 @@ serve(async (req) => {
 
       const cleanText = userText.replace(/@\S+\s*/g, '').replace(/^耀西\s*/, '').trim()
 
-      // 0. 純喚醒詞「耀西」或「如何使用」按鈕 → 回傳自我介紹
-      if (cleanText === '' || cleanText === '耀西') {
+      // 0a. 明確想看使用說明 → 完整介紹
+      const HELP_KEYWORDS = ['使用說明', '說明', '教學', '怎麼用', '怎麼使用', '如何使用', 'help', 'HELP', 'Help', '功能']
+      if (HELP_KEYWORDS.includes(cleanText)) {
         await replyMessage(replyToken, [{ type: 'text', text: BOT_SELF_INTRODUCTION, quickReply: isBound ? boundQR : getQuickReply(false) }], sourceId)
+        continue
+      }
+
+      // 0b. 只是被叫到（純提及或只打「耀西」）→ 一句話 + 按鈕就好。
+      //     大多數時候使用者只是想看有哪些按鈕可以按，不是要讀整篇說明。
+      if (cleanText === '' || cleanText === '耀西') {
+        const shortMsg = isBound
+          ? 'Yoshi! 🥚 需要什麼？直接打「晚餐 300」就能記帳，或用下面的按鈕。'
+          : 'Yoshi! 🥚 請先輸入「ID:旅程代碼」來連結旅程。'
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: shortMsg,
+          quickReply: isBound ? boundQR : getQuickReply(false),
+        }], sourceId)
         continue
       }
 
@@ -1167,8 +1252,65 @@ serve(async (req) => {
       if (isBound) {
         const tripId = userState.current_trip_id
 
+        // 列出近期支出讓使用者點選刪除。
+        // 比「撤銷上一筆」好用：可以刪任何一筆，而不只是最後一筆。
+        if (DELETE_LIST_KEYWORDS.includes(cleanText)) {
+          const { data: recent } = await supabase.from('expenses')
+            .select('id, description, amount, currency, date')
+            .eq('trip_id', tripId)
+            .is('deleted_at', null)
+            .order('date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(8)
+
+          if (!recent || recent.length === 0) {
+            await replyMessage(replyToken, [{
+              type: 'text', text: '目前沒有可刪除的支出紀錄。', quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
+          // 每一列：左邊是描述與金額，右邊固定一顆小按鈕。
+          // 按鈕文字刻意固定為「🗑 刪除」—— 把描述放進按鈕會讓按鈕寬度爆掉。
+          const rows: any[] = []
+          recent.forEach((e: any, idx: number) => {
+            if (idx > 0) rows.push({ type: 'separator', margin: 'md' })
+            rows.push({
+              type: 'box', layout: 'horizontal', margin: 'md', spacing: 'sm', alignItems: 'center',
+              contents: [
+                {
+                  type: 'box', layout: 'vertical', flex: 5, contents: [
+                    { type: 'text', text: String(e.description), size: 'sm', weight: 'bold', wrap: true },
+                    { type: 'text', text: `${e.date} · ${e.amount} ${e.currency}`, size: 'xxs', color: '#aaaaaa', margin: 'xs' },
+                  ],
+                },
+                {
+                  type: 'button', flex: 2, style: 'secondary', height: 'sm',
+                  action: { type: 'postback', label: '🗑 刪除', data: JSON.stringify({ act: 'del', eid: e.id }) },
+                },
+              ],
+            })
+          })
+
+          await replyMessage(replyToken, [{
+            type: 'flex', altText: '選擇要刪除的支出',
+            contents: {
+              type: 'bubble', size: 'mega',
+              body: {
+                type: 'box', layout: 'vertical', contents: [
+                  { type: 'text', text: '🗑 選擇要刪除的支出', weight: 'bold', size: 'md' },
+                  { type: 'text', text: `最近 ${recent.length} 筆 · 刪除後 24 小時內可於網頁還原`, size: 'xxs', color: '#aaaaaa', margin: 'xs', wrap: true },
+                  { type: 'separator', margin: 'lg' },
+                  ...rows,
+                ],
+              },
+            },
+          }], sourceId)
+          continue
+        }
+
         // 撤銷上一筆（文字指令）
-        const isUndoText = cleanText === '取消上一筆' || cleanText === '撤銷上一筆'
+        const isUndoText = UNDO_KEYWORDS.includes(cleanText)
         if (isUndoText) {
           const { data: savedHistory } = await supabase.from('line_chat_history')
             .select('content')
@@ -1420,6 +1562,12 @@ ${expensesSummary || '（尚無支出）'}
 
             // 幣別與日期的把關，與 OCR 路徑相同
             const textCurrency = normalizeCurrency(expense.currency, trip)
+            if (textCurrency.reject) {
+              await replyMessage(replyToken, [{
+                type: 'text', text: textCurrency.reject, quickReply: boundQR,
+              }], sourceId)
+              continue
+            }
             expense.currency = textCurrency.currency
             const textDate = normalizeDate(expense.date, today)
             expense.date = textDate.date
