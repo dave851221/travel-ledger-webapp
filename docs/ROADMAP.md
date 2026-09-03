@@ -6,6 +6,21 @@
 
 ## 已知風險
 
+### 0. 前端與 Edge Function 是分開部署的（接手時先確認）
+
+**GitHub Pages 上的網頁不一定等於 `main` 的內容。** 前端要 push 到 `main` 才會部署，
+Edge Function 則是另外用 `npm run fn:deploy` —— 兩者完全獨立。
+
+排查「功能沒生效」時先分清楚問題在哪一邊：
+
+| 現象 | 屬於 |
+| :--- | :--- |
+| 網頁畫面、統計、快速記帳、垃圾桶 | 前端（需 push 到 main） |
+| **LIFF 編輯頁** | 前端（需 push 到 main） |
+| Bot 的文字／收據處理、驗證、Flex 卡片、發言者名稱 | Edge Function（`npm run fn:deploy`） |
+
+確認線上版本：MCP 的 `list_edge_functions`，或 Supabase Dashboard。
+
 ### 1. 前端身分驗證形同虛設（安全性，高）
 
 RLS 政策全部是 `FOR ALL USING (true)`（見 [`supabase/schema/05_policies.sql`](../supabase/schema/05_policies.sql)），
@@ -33,12 +48,24 @@ RLS 政策全部是 `FOR ALL USING (true)`（見 [`supabase/schema/05_policies.s
 **建議修法**：改由資料庫過濾（`deleted_at > NOW() - INTERVAL '24 hours'`），
 或建一個 view。
 
-### 3. 使用者身分快取
+### 3. anon key 曾外洩於 git 歷史（已決定接受此風險）
+
+`.env` 曾被 commit，`VITE_SUPABASE_ANON_KEY` 仍留在舊 commit 中。
+已與擁有者確認**暫不輪換** —— 這是私人親友使用的專案，repo 曝光度低。
+
+但要清楚這代表什麼：因為 RLS 全面開放（風險 1），拿到那把 key 的人可以讀寫
+**所有旅程與帳目**，不需要通行碼。不只是被看到，是可以寫入與刪除。
+
+觸發重新評估的條件：repo 轉為公開、帳目開始涉及不想被看到的資訊、
+或發現非預期的資料變動。屆時的做法是
+Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 GitHub Secrets。
+
+### 4. 使用者身分快取
 
 `currentUser` 存在 `localStorage`。清快取就會失去身分設定，需重新選擇。
 目前影響輕微，但沒有更好的替代方案（因為沒有帳號系統，見風險 1）。
 
-### 4. 結算的匯率換算兩邊不一致（低，但會算錯錢）
+### 5. 結算的匯率換算兩邊不一致（低，但會算錯錢）
 
 Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
 網頁端（`Dashboard.tsx`）是 `rates[...]`。若 `rates` 裡 base currency 的值不等於 1，
@@ -57,7 +84,7 @@ Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
 
 ### 短期
 
-- 修正上述已知風險 2 與 4。
+- 修正上述已知風險 2 與 5。
 - 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
 - Edge Function 模組化（目前仍是 1600 行單檔），並為 LINE webhook 事件與
   Gemini 回應補上真正的型別（那些 `any` 在 ESLint 是 warning，見 `eslint.config.js`）。

@@ -188,6 +188,19 @@ node_modules/.bin/supabase functions deploy line-webhook --no-verify-jwt   # 本
 寫入會失敗。解法是把 trigger 函式設為 `SECURITY DEFINER`，讓它以函式擁有者的權限執行，
 並確保目標表的 RLS 政策包含所需權限。
 
+### 環境變數要整個 VS Code 重開才生效
+
+`[Environment]::SetEnvironmentVariable(..., 'User')` 只會傳給設定之後才啟動的行程。
+Claude Code 是 VS Code 擴充套件，繼承 VS Code 的環境 —— 只重啟 Claude Code 沒有用。
+症狀是 MCP server 有起來但一直回 `Unauthorized`，看起來像權杖錯誤，其實是根本沒傳進去。
+詳見 [`docs/AI_TOOLING.md`](docs/AI_TOOLING.md)。
+
+### 排序加 limit 時要注意方向
+
+`ORDER BY created_at ASC LIMIT n` 取的是**最舊的 n 筆**，不是最近的 n 筆。
+LINE Bot 的對話歷史曾因此永遠停在最早的六筆，AI 完全看不到近期對話。
+要「最近 n 筆」一律用 descending 取完再反轉。
+
 ### Windows 環境
 
 `npm` / `npx` 容易遇到權限錯誤，必要時改用 `.cmd` 後綴。
@@ -202,8 +215,14 @@ node_modules/.bin/supabase functions deploy line-webhook --no-verify-jwt   # 本
 
 ## 部署
 
+⚠️ **前端與 Edge Function 是兩條完全獨立的部署路徑。**
+線上網頁不一定等於 `main` 的內容，排查「功能沒生效」時第一步就是分清楚問題在哪一邊
+（對照表見 [`docs/ROADMAP.md`](docs/ROADMAP.md) 開頭）。
+特別注意 **LIFF 編輯頁屬於前端**，改了要 push 才會生效。
+
 - **前端**：推送到 `main` 觸發 `.github/workflows/deploy.yml`，自動部署到 GitHub Pages。
   Repo Secrets 需要 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`。
+  （`VITE_LIFF_ID` 目前未設定，因此 LIFF 存檔後無法自動關閉視窗 —— 見 `.env.example`。）
 - **Edge Function**：`supabase functions deploy line-webhook --no-verify-jwt`，
   Webhook URL 須在 LINE Developer Console 登錄。
 - **環境變數**：本機 `.env`（見 `.env.example`）；Edge Function 密鑰用 `supabase secrets set`。
