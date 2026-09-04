@@ -180,17 +180,39 @@ export function applyParticipantDefaults(
  *
  * 要求同時出現動詞與受詞，避免「改天再說」「取消行程」這類誤判。
  */
-const RECORD_NOUN = /(支出|花費|帳|紀錄|記錄|這筆|那筆|上一筆|上上一筆)/
+// 受詞不只有「那筆」這種正式說法。真機測試回報「剛剛那個改250」（T1）——
+// 使用者講的是同一件事，卻因為說成「那個」而整句漏掉，被當成一筆全新的支出記進去。
+// 指示代名詞與時間指稱都要算受詞；把關的是下面的動詞，不是這裡。
+const RECORD_NOUN =
+  /(支出|花費|帳|紀錄|記錄|這筆|那筆|上一筆|上上一筆|那個|這個|剛剛|剛才|上一個|前一個|最後一筆|最近一筆|最新一筆)/
 const DELETE_VERB = /(刪除|刪掉|刪了|移除|拿掉|去掉)/
 // 「改 500」「改500」這種「改 + 數字」是最常見的說法，必須涵蓋。
-// 不收單獨的「改」，否則「這筆帳我改天再處理」會被誤判。
+// 不收單獨的「改」，否則「這筆帳我改天再處理」「剛剛那個改天再說」會被誤判。
 const EDIT_VERB = /(修改|編輯|更改|改成|改為|改到|改一下|改\s*\d)/
+/** 「這句話在講已經記過的東西不對」的其他說法 */
+const CORRECTION_HINT = /(不對|錯了|打錯|記錯|更正)/
 
 export function detectRecordIntent(text: string): 'delete' | 'edit' | null {
   if (!RECORD_NOUN.test(text)) return null
   if (DELETE_VERB.test(text)) return 'delete'
   if (EDIT_VERB.test(text)) return 'edit'
   return null
+}
+
+/**
+ * 「這句話聽起來是想改某筆東西」的寬鬆判斷 —— 不要求受詞。
+ *
+ * 用途與 detectRecordIntent 不同，是 P8 的第二道防線（T1）：
+ * AI 回了 type: expense，但如果現場沒有任何未確認的草稿、它也沒填 corrects_draft，
+ * 而使用者這句話明明是在講「改」，那它多半是把「剛剛那個改250」當成新支出了 ——
+ * 照著出卡片就會憑空多記一筆。這種時候改列編輯清單。
+ *
+ * 刻意比 detectRecordIntent 寬鬆（不需要受詞），因為到這一步已經知道
+ * 「沒有草稿可以修」，誤判的代價只是多看到一張清單，比重複記帳輕得多。
+ */
+export function mentionsEditingExisting(text: string): boolean {
+  if (!text) return false
+  return EDIT_VERB.test(text) || CORRECTION_HINT.test(text)
 }
 
 /**
@@ -236,6 +258,110 @@ export function summarizeHistoryEntry(role: string, content: string): string {
   } catch {
     return '（我先前提出過一筆記帳建議）'
   }
+}
+
+/**
+ * 把 AI 回的「#3」這種編號換回清單裡的那一筆。
+ *
+ * 為什麼是編號而不是網址（T4）：以前 tripContext 塞的是每筆支出的完整照片網址，
+ * 要 AI 逐字抄回來。網址又長又只差幾個字元，小模型常抄錯，或抄成上一輪對話裡
+ * 出現過的另一張 —— 使用者問「剛剛 Lawson 那筆」，分析的卻是別筆的收據。
+ * 改成只回編號，程式自己去陣列裡取，抄錯的空間就沒了。
+ *
+ * 只接受 `#3`、`＃3`、`3` 這種「整串就是一個編號」的寫法。
+ * 刻意不從長字串裡撈數字 —— 模型若還是照舊習慣回了一整串網址，
+ * 撈出來的數字會指到一筆毫不相干的支出，那正是 T4 要修掉的症狀。
+ * 超出範圍或格式不符都回 null，讓呼叫端走全庫搜尋。
+ */
+export function pickExpenseByRef<T>(ref: unknown, list: T[]): T | null {
+  const m = String(ref ?? '').trim().match(/^[#＃]?\s*(\d{1,3})$/)
+  if (!m) return null
+  const idx = parseInt(m[1], 10)
+  if (idx < 1 || idx > list.length) return null
+  return list[idx - 1]
+}
+
+/**
+ * 在程式端先用店名縮小範圍，再決定要不要麻煩 AI。
+ *
+ * 使用者問「剛剛 Lawson 那筆買了什麼」時，描述通常原封不動出現在問句裡；
+ * 命中唯一一筆就不必再叫一次模型（省 token，也少一次抄錯的機會）。
+ *
+ * 比對用 normalizeName()（忽略大小寫與空白），並額外拿「括號前的原文」當 key ——
+ * 描述格式是「Lawson (便利商店)」，整串是不會出現在問句裡的。
+ * 太短的 key（1 個字）不列入比對，避免整份清單都命中。
+ */
+export function matchExpensesByQuestion<T extends { description?: string | null }>(
+  question: string,
+  list: T[],
+): T[] {
+  const haystack = normalizeName(String(question ?? ''))
+  if (!haystack) return []
+  return list.filter(e => {
+    const desc = String(e.description ?? '')
+    const keys = [desc, desc.split(/[(（[【]/)[0]]
+    return keys.some(k => {
+      const n = normalizeName(k)
+      return n.length >= 2 && haystack.includes(n)
+    })
+  })
+}
+
+/**
+ * 「使用者的話裡真的出現幣別字眼了嗎」的判斷材料。
+ *
+ * 分三組是為了避免拉丁代碼在英文單字裡誤判：`NT` 若不加邊界，
+ * 「restaurant 300」會被當成使用者明講了台幣。CJK 詞與符號沒有這個問題。
+ */
+export const CURRENCY_HINTS: RegExp[] = [
+  /(日幣|日圓|日元|円|台幣|新台幣|美金|美元|韓元|歐元|港幣|泰銖|人民幣|新幣|馬幣|越南盾)/,
+  /[¥￥$＄€₩฿]/,
+  /(^|[^A-Za-z])(JPY|TWD|NT|USD|EUR|KRW|CNY|RMB|HKD|THB|MYR|VND|SGD)([^A-Za-z]|$)/i,
+]
+
+/** 文字裡有沒有出現任何幣別字眼或符號 */
+export function hasCurrencyHint(text: string | null | undefined): boolean {
+  if (!text) return false
+  return CURRENCY_HINTS.some(re => re.test(text))
+}
+
+/** AI 對「這個幣別是哪裡來的」的自我宣告 */
+export type CurrencySource = 'stated' | 'preference' | 'none'
+
+/**
+ * 決定該用哪個幣別 —— 由程式決定，不靠 prompt 的記性。
+ *
+ * 為什麼需要這一層（T3）：旅程主幣 TWD、記帳預設 JPY 時，使用者打「夾娃娃300」，
+ * 小模型常把 context 裡的「主幣：TWD」當成該填的值，出來的卡片幣別就錯了。
+ * 幣別的優先權原本只是 tripContext 裡的一行文字，模型記不住。
+ *
+ * 規則：
+ *   none       → 一律用旅程的記帳預設幣別，完全忽略 AI 填的值
+ *   stated     → 再用程式驗一次：文字裡真的有幣別字眼才採信，沒有就視同 none
+ *                （OCR 路徑沒有文字可驗，text 傳 null 代表直接信任）
+ *   preference → 採用 AI 的值（偏好是自由文字，程式驗不了）
+ *
+ * 認不得的 source（舊模型、schema 沒填）當成 stated 處理，行為與加這一層之前一致。
+ * 回傳值仍要再交給 normalizeCurrency() 做 rates／白名單檢查。
+ */
+export function resolveCurrencyByRule(
+  aiCurrency: unknown,
+  source: unknown,
+  text: string | null,
+  trip: { base_currency: string; default_currency?: string | null },
+): { currency: string; overrode: boolean } {
+  const raw = String(aiCurrency ?? '').trim().toUpperCase()
+  const fallback = trip.default_currency || trip.base_currency
+  const src = String(source ?? '').trim().toLowerCase()
+
+  // text === null 代表沒有文字可驗（OCR），此時 stated 直接採信
+  const statedIsCredible = text === null || hasCurrencyHint(text)
+  const useFallback = src === 'none' || (src !== 'preference' && !statedIsCredible)
+
+  if (useFallback) {
+    return { currency: fallback, overrode: !!raw && raw !== fallback }
+  }
+  return { currency: raw || fallback, overrode: false }
 }
 
 /** ISO 4217 常見幣別，用來擋掉 AI 幻想出來的代碼 */

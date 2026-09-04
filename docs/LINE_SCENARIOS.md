@@ -10,8 +10,8 @@
 
 以後改 Bot 邏輯前，先掃過相關章節；改完後逐條驗證。要加新功能，先在這裡加情境再動手。
 
-依據的程式版本：H1–H12 與第 12 章的 Feature F 都已實作完成（2026-09-04）。
-第 10.2 節的 M1–M19 維持未修，已抄進 [`ROADMAP.md`](ROADMAP.md)。
+依據的程式版本：H1–H12、第 12 章的 Feature F、第 13 章的 T1–T4 都已實作完成（2026-09-04）。
+第 10.2 節的 M1–M19 除了 **M2**（隨 T2 一起做掉）之外維持未修，已抄進 [`ROADMAP.md`](ROADMAP.md)。
 文中提到的行號來自修正前的 `index.ts`，現在已經漂移，請一律以函式名與註解關鍵字為準。
 
 純函式現在集中在 `supabase/functions/line-webhook/guards.ts`（由 `guards.test.ts` 看守），
@@ -115,15 +115,16 @@
 
 | # | 情境 | 範例輸入 | 預期行為 | 現況 | 進入點 |
 | :-- | :-- | :-- | :-- | :-- | :-- |
-| D1 | 明講幣別 | `3000 日幣`、`¥3000`、`US$20`、`台幣 500`、`3000 円` | 對應 ISO 代碼 | ✅ | P8 |
+| D1 | 明講幣別 | `3000 日幣`、`¥3000`、`US$20`、`台幣 500`、`3000 円` | 對應 ISO 代碼 | ✅ AI 回 `currency_source: stated`，程式再用 `CURRENCY_HINTS` 驗一次文字裡真的有幣別字眼才採信（T3） | P8、`resolveCurrencyByRule` |
 | D2 | 幣別在旅程 `rates` 內 | JPY 有匯率 | 直接放行 | ✅ | `normalizeCurrency` |
 | D3 | 合法幣別但旅程沒設匯率 | 旅程只有 TWD、JPY，說 `20 美金` | 拒絕存入，列出可用幣別並教去設定頁加匯率 | ✅ | `normalizeCurrency.reject` |
 | D4 | AI 幻想的幣別代碼 | AI 回 `YEN`、`NTD` | 退回旅程預設幣別並提醒 | ✅ | `normalizeCurrency.warning` |
-| D5 | 沒提幣別 | `晚餐 300` | 用 `default_currency`，沒設就用 `base_currency` | ✅ | `tripContext` 優先權 |
-| D6 | 偏好設定指定幣別 | `設定:預設用日幣` → `晚餐 300` | JPY | 🟡 靠 AI 讀設定 | P8 |
+| D5 | 沒提幣別 | `晚餐 300` | 用 `default_currency`，沒設就用 `base_currency` | ✅ 改由程式決定：`currency_source: none` 一律套預設，AI 填什麼都不算數（T3） | `resolveCurrencyByRule` |
+| D6 | 偏好設定指定幣別 | `設定:預設用日幣` → `晚餐 300` | JPY | 🟡 仍靠 AI 讀設定（回 `currency_source: preference` 時程式無從驗證，只能採信） | P8 |
 | D7 | 嚴禁自行換算 | `3000 日幣` 於主幣 TWD 旅程 | amount 3000、currency JPY，不可變成 TWD 660 | ✅ system instruction 明令 | `YOSHI_SYSTEM_INSTRUCTION` 規則 2 |
 | D8 | 金額精度 | JPY 給 `1200.5` | 依 `precision_config` 四捨五入到 0 位 | ✅ | `toDecimalPlaces(precision)` |
 | D9 | 主幣別本身沒在 `rates` | 舊旅程資料不完整 | 不該把主幣別當成「沒匯率」拒絕 | 🟡 `Home.tsx` 建旅程會放 `{base:1}`，舊資料未驗證 | `normalizeCurrency` |
+| D10 | 沒提幣別時一律用預設幣別，與主幣別不同也一樣 | 主幣 TWD、預設 JPY 的旅程說 `夾娃娃300` | 卡片幣別是 JPY，不是 TWD | ✅ T3 已修：幣別改由 `resolveCurrencyByRule()` 決定，`none` 與「宣稱 stated 但文字沒有幣別字眼」都退回記帳預設；`tripContext` 也把「記帳預設」與「結算主幣」分開講 | `guards.ts`、P2、P8 |
 
 ### 2.3 付款人與分攤
 
@@ -205,7 +206,7 @@
 | H2 | 連點兩次確認 | — | 第二次回「已於先前成功存入」 | ✅ nonce 鎖 | `line_processed_actions` |
 | H3 | 取消 | 按「❌ 取消」 | 失效 nonce，有照片就刪 | ✅ | P1 cancel |
 | H4 | 先取消再確認 | — | 回「此操作已處理過」 | ✅ | nonce 鎖 |
-| H5 | LIFF 編輯後存檔 | 按「✏️ 編輯」→ 改金額 → 存 | 佔用 nonce → INSERT → `liff-notify` 推播「已透過 LIFF 存入」 | ✅ | `ExpenseModal.handleSubmit`、`liff-notify` |
+| H5 | LIFF 編輯後存檔 | 按「✏️ 編輯」→ 改金額 → 存 | 佔用 nonce → INSERT → `liff-notify` 推播「已透過 LIFF 存入」 | ✅ 網址改為只帶 `n` 與 `u`，草稿內容由 `LiffEdit` 自己去 `pending` 列撈（T2）；nonce 已被處理過就直接說明，不開表單 | `ExpenseModal.handleSubmit`、`liff-notify`、`buildDraftLiffUrl` |
 | H6 | LIFF 存檔後再按確認 | — | 回「已處理過」，不重複寫入 | ✅ | nonce 鎖 |
 | H7 | 群組裡 B 確認 A 的卡片 | — | 允許（共用同一本帳），訊息標明「由 B 記錄」 | ✅ 刻意設計 | `speakerLabel` |
 | H8 | 兩張卡同時待確認 | 連續記兩筆 | 兩張都能確認 | ✅ 只有 AI 用 `corrects_draft` 指名的那一張會失效 | `supersedeDraft` |
@@ -224,7 +225,7 @@
 
 | # | 情境 | 範例輸入 | 預期行為 | 現況 | 進入點 |
 | :-- | :-- | :-- | :-- | :-- | :-- |
-| I1 | 改金額 | 卡片還沒確認 → `剛剛那筆改 500` | 出新卡 500，舊卡失效 | ✅ 有草稿時 edit 意圖直接進 AI，AI 用 `corrects_draft` 指名要修的那張 | P6 → P8 |
+| I1 | 改金額 | 卡片還沒確認 → `剛剛那筆改 500`、`剛剛那個改 250` | 出新卡 500，舊卡失效 | ✅ 有草稿時 edit 意圖直接進 AI，AI 用 `corrects_draft` 指名要修的那張；「那個」「剛剛」等說法也認得了（T1） | P6 → P8 |
 | I2 | 改付款人 | `改成小明付` | 新卡 | ✅（沒有「那筆」字眼就能到 AI） | P8 |
 | I3 | 改日期 | `日期改昨天` | 新卡 | ✅ | P8 |
 | I4 | 改幣別 | `不對，是日幣` | 新卡 JPY，金額不換算 | ✅ | P8 |
@@ -247,19 +248,21 @@
 | J2 | 連續兩次撤銷 | `取消上一筆` × 2 | 撤銷兩筆不同的支出 | ✅ 取最近 5 筆 `saved`，撤第一筆尚未刪除的 | P6 |
 | J3 | 撤銷群組裡別人記的 | B 說 `取消上一筆`，最近是 A 記的 | 允許，訊息標明「原由 A 記錄」 | ✅ 刻意設計 | P6 |
 | J4 | 刪除清單 | `刪除支出` | 列最近 8 筆，各一顆「🗑 刪除」 | ✅ | P6 `DELETE_LIST_KEYWORDS` |
-| J5 | 編輯清單 | `編輯支出` | 列最近 6 筆，各一顆 LIFF「✏️ 編輯」 | ✅ | P6 `EDIT_LIST_KEYWORDS` |
-| J6 | 自然語言刪除／修改已存檔 | `把昨天那筆刪掉`、`那筆帳改成 800` | 攔下並列清單，不進 AI | ✅ **沒有未確認草稿時**才攔（有草稿時走 I1／I6） | `detectRecordIntent` + `getOutstandingDrafts` |
+| J5 | 編輯清單 | `編輯支出` | 列最近 6 筆，各一顆 LIFF「✏️ 編輯」 | ✅ 網址改為只帶 `id` 與 `u`（T2） | P6 `EDIT_LIST_KEYWORDS`、`replyEditPicker` |
+| J6 | 自然語言刪除／修改已存檔 | `把昨天那筆刪掉`、`那筆帳改成 800`、`剛才那個刪掉` | 攔下並列清單，不進 AI | ✅ **沒有未確認草稿時**才攔（有草稿時走 I1／I6）；受詞已含「那個／這個／剛剛／剛才／上一個／最近一筆」（T1） | `detectRecordIntent` + `getOutstandingDrafts` |
 | J7 | AI 假稱已刪除 | AI 回「已經幫您刪除了」 | 換成誠實說明 | ✅ | `claimsCompletedAction` |
-| J8 | 要改的不在最近 6／8 筆 | 一週前的支出 | 能翻頁或搜尋 | ❌ 只能去網頁 | — |
+| J8 | 要改的不在最近 6／8 筆 | 一週前的支出 | 能翻頁或搜尋 | ❌ 只能去網頁。清單依日期與建立時間倒序，剛存的一定在第一列 | `replyEditPicker` |
 | J9 | 用描述定位 | `刪除昨天的拉麵` | 直接找到那筆 | ❌ 只會列清單 | — |
 | J10 | 清單裡出現結清紀錄 | 網頁結清後 `編輯支出` | 結清紀錄不該出現 | ✅ 兩個清單都加了 `.not('is_settlement','is',true)`；`ExpenseModal` 也改為沿用原值 | P6 查詢、`ExpenseModal` |
 | J11 | LIFF 編輯舊支出後說 `取消上一筆` | 編輯三天前的支出 → `取消上一筆` | 應撤最近「新增」的 | 🐛 M11 `liff-notify` 把更新也記成 `saved`，會刪掉剛編輯的舊支出；推播文字也寫「存入」 | `liff-notify` |
 | J12 | 刪除已刪除的 | 清單按兩次同一筆 | 第二次說「先前已經刪除了」 | ✅ | P1 del |
 | J13 | `saved` 紀錄沒寫進去 | Edge Runtime 提早結束 | 撤銷仍指向正確那筆 | ✅ 這一筆改為 `await`，其餘背景工作走 `runInBackground`（`EdgeRuntime.waitUntil`） | P1 save |
-| J14 | 編輯清單網址過長 | 多成員、多照片、長描述 | 清單正常送出 | 🐛 M2 LINE `uri` 上限 1000 字，超過整張清單發不出去 | `buildEditLiffUrl` |
+| J14 | 編輯清單網址過長 | 多成員、多照片、長描述 | 清單正常送出 | ✅ T2 已修（M2 提前做）：網址只剩 `tripId`／`id`／`u`，固定百餘字元，與支出內容無關 | `buildEditLiffUrl` |
 | J15 | 刪除清單裡的 LIFF 編輯已存支出 | 從清單開 LIFF 改金額 | UPDATE 而非 INSERT | ✅ payload 帶 `id` | `LiffEdit.decoded.id` |
 | J16 | 刪除後還原 | 網頁垃圾桶 | 24 小時內可還原 | ✅（垃圾桶時效依客戶端時間，ROADMAP #2） | 前端 |
 | J17 | 撤銷時支出已被網頁硬刪 | — | 回「找不到」而不是成功 | ✅ 兩處都先 SELECT 再決定回覆（查無 → 「找不到這筆支出」） | P1 undo、P6 |
+| J18 | 沒草稿時用「那個」「剛剛」指稱要改 | 存檔後 `剛剛那個改250` | 列編輯清單，**不可以**多記一筆 | ✅ T1 已修，兩層防線：①`detectRecordIntent` 的受詞加了指示代名詞，路由層就攔下；②真的進了 AI 且它回 `expense` 時，若沒有任何未確認草稿、沒填 `corrects_draft`、`mentionsEditingExisting()` 又為 true，改列清單並加註「如果其實是要新記一筆，請不要用『改』來描述」 | `guards.ts`、P6、P8、`replyEditPicker` |
+| J19 | 改完再按同一顆編輯看到新資料 | 從清單開 LIFF 改成 800 存檔 → 回 LINE 再按同一列的「✏️ 編輯」 | 表單顯示 800 | ✅ T2 已修：`LiffEdit` 每次開啟都用 `id` 直接查 DB。找不到或 `deleted_at` 非空就顯示「這筆支出已被刪除或不存在」 | `LiffEdit` |
 
 ---
 
@@ -281,14 +284,17 @@
 | K12 | 自由查詢：時間 | `昨天花多少`、`第一天花多少` | 正確 | 🟡 M6 | P8 |
 | K13 | 自由查詢：排名 | `誰付最多`、`最貴的一筆` | 正確 | 🟡 M6 | P8 |
 | K14 | 最近一筆 | `最近一筆是什麼` | 描述最新一筆 | ✅ 在 10 筆內 | P8 |
-| K15 | 追問收據明細 | `剛剛那張收據買了什麼` | `analyze_photo` 重新讀圖逐項翻譯 | ✅ | P8 `analyze_photo` |
-| K16 | 收據不在最近 10 筆 | `上週一蘭的收據有哪些品項` | 全庫列出有照片的支出讓 AI 挑 | ✅ | P8 全庫搜尋分支 |
+| K15 | 追問收據明細 | `剛剛那張收據買了什麼` | `analyze_photo` 重新讀圖逐項翻譯 | ✅ AI 只回編號（`expense_ref`），照片由程式從近期清單取（T4） | P8 `analyze_photo`、`pickExpenseByRef` |
+| K16 | 收據不在最近 10 筆 | `上週一蘭的收據有哪些品項` | 全庫列出有照片的支出讓 AI 挑 | ✅ 先在程式端用店名做子字串比對縮小範圍，唯一解就直接用；多筆或零筆才問 AI，且一樣只回編號（T4） | `matchExpensesByQuestion`、P8 |
 | K17 | 問旅程設定 | `匯率多少`、`有哪些成員`、`分類有哪些` | 從 context 回答 | ✅ | `tripContext` |
 | K18 | 結算與網頁不一致 | `rates[base] ≠ 1` 的旅程 | 兩邊相同 | 🟡 ROADMAP #5（M14） | P7 vs `useTripStats` |
 | K19 | 查詢排除結清紀錄 | 網頁做過結清 | 今日／本月／總覽不含結清；結算要含 | ✅ | `.not('is_settlement', 'is', true)` |
 | K20 | 查詢排除已刪除 | — | 不含 `deleted_at` 非空 | ✅ | `.is('deleted_at', null)` |
 | K21 | 旅程被刪除後打快捷指令 | — | 回「找不到旅程」 | ✅ 五個快捷指令都補上 null 檢查（AI 核心的 `trip` 仍是 M5） | P7 |
 | K22 | 查詢類回答格式 | — | 條列、簡短，適合手機 | ✅ | system instruction 規則 5 |
+| K23 | 剛剛那筆（不指名店名） | 傳完收據存檔後問 `剛剛那筆買了什麼` | 分析日期最近且有照片的那一筆，回覆開頭標明是哪一筆 | ✅ T4 已修：近期支出清單改成有編號、標 📷 的格式且**不再放網址**；system instruction 明講「說『剛剛』『最新』又沒指名店名時選日期最近且有 📷 的那一筆」 | P8、`tripContext` |
+| K24 | 多張照片的支出 | 長帳單拍兩張存成同一筆 → 追問品項 | 兩張都要看 | ✅ T4 已修：`analyzeReceiptPhoto(photoUrls[], question, expenseLabel)` 一次送出全部 `photo_urls`，prompt 開頭標明「這 N 張是同一筆支出的收據」。以前只看 `photo_urls[0]` | `analyzeReceiptPhoto` |
+| K25 | 指名店名但不在最近 10 筆 | `上週 Lawson 的收據有哪些品項` | 找到正確那一筆，不可以分析成別筆 | ✅ T4 已修：全庫搜尋先用 `normalizeName()` 把問句與各筆 description（含括號前的原文）做子字串比對，唯一命中就直接用，不必再問 AI | `matchExpensesByQuestion`、P8 |
 
 ---
 
@@ -338,8 +344,11 @@
 
 - **AI 沒有修改或刪除已存檔紀錄的能力**，只能提出新草稿、修正未存檔草稿、查詢。所有既有紀錄的異動都走清單按鈕或 LIFF。
 - **AI 只看得到最近 10 筆支出與最近 8 輪對話**（`CHAT_HISTORY_TURNS`），沒有彙總數字。
+  近期支出清單是**有編號、無網址**的格式（`#3 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`）；
+  `analyze_photo` 要 AI 回的是那個編號（`expense_ref`），照片一律由程式自己找。
 - **一句話只能產生一筆**（schema 是單一 `data` 物件）。
 - **Postback data 上限 300 bytes**；LINE `uri` action 上限 1000 字；文字訊息上限 5000 字（程式取 4900）。
+  LIFF 編輯網址已改為只帶 `id`／`n` 的間接法（T2），長度固定，不再受支出內容影響。
 - **reply token 只能用一次、時效約一分鐘**；之後只能 push（會計入推播額度）。
 - **群組共用一份綁定、對話歷史與草稿**；發言者只用來標記與餵 prompt。
 - **AI 記帳偏好是旅程層級的**（`trips.ai_preference`），一趟旅程只有一份，不分管道；
@@ -459,10 +468,12 @@
 
 ### 10.2 中低優先（只記錄，已同步到 [`ROADMAP.md`](ROADMAP.md)，本次不修）
 
+> **M2 已完成** —— 第 13 章的 T2 需要它，順手一起做掉了。其餘維持未修。
+
 | # | 問題 | 修法方向 |
 | :-- | :-- | :-- |
 | M1 | 群組綁定：輸入 `ID:` 當下 `current_trip_id` 就清空；等密碼期間群組每句話都被當密碼回「密碼錯誤」；沒有放棄指令。 | 驗證成功才切換旅程；加 `取消綁定`；`line_user_states` 加 `pending_at`，逾時 10 分鐘自動放棄（`last_active_at` 目前從未被更新，是死欄位，可順便處理）。 |
-| M2 | `buildEditLiffUrl()` 把整筆支出塞進 URL，LINE `uri` 上限 1000 字，多成員多照片會讓整張清單發不出去。 | 編輯既有支出只帶 `id`，`LiffEdit` 自行查 `expenses`；草稿則帶 nonce 與 sourceId 查 `line_chat_history` 的 pending 列。 |
+| ~~M2~~ | ~~`buildEditLiffUrl()` 把整筆支出塞進 URL，LINE `uri` 上限 1000 字，多成員多照片會讓整張清單發不出去。~~ | ✅ **已完成**（隨 T2 一起做，2026-09-04）：編輯既有支出只帶 `id`，`LiffEdit` 自行查 `expenses`；草稿帶 nonce 與 sourceId 查 `line_chat_history` 的 pending 列；舊的 `data=` 格式保留。 |
 | M3 | `isManagement` 用 `userText.startsWith('設定')`，群組「設定好了嗎」會被送進 AI。 | 改為只認 `設定:`、`設定：`、`設定?`、`設定？`。 |
 | M4 | `getTripTimezone()` 先看 `base_currency`，主幣 TWD 的日本旅程「今天」是台北時間。 | 旅程設定加時區欄位，或改為優先看非主幣別的 rates。 |
 | M5 | 今日／本週／本月／AI 核心在 `trip` 為 null 時直接存取欄位 → 500 → LINE 重送。 | 抽一個 `loadTripOrReply()`，沒有旅程就回「找不到旅程」並 `continue`。 |
@@ -603,6 +614,11 @@
 
 高優先修正（第 10.1 節）上線後，擁有者實測回報四個問題。都是**設計上的漏洞**而不是筆誤，
 修法寫得比較細，實作者請照做；行號以 commit `834bce5` 為準，仍以函式名為主。
+
+> **狀態（2026-09-04）**：T3 → T1 → T4 → T2 **已全部實作完成**，每個 T 都跑過
+> `lint / test / check:functions / build` 四關。下面的修法內容保留下來當作
+> 「為什麼要這樣寫」的紀錄。對應的情境列（含新增的 J18、J19、D10、K23、K24、K25）已更新。
+> ⚠️ **尚未部署**：T1／T3／T4 只動 Edge Function，T2 前端與 Edge Function 必須同時上線。
 
 ### T1　「剛剛那個改 250」沒有草稿時被當成新支出，重複記了一筆
 

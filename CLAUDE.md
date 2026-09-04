@@ -79,8 +79,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
 - **`SettingsModal.tsx`**：旅程設定（成員、匯率、精度、分類、預設值、CSV 匯出、LINE 短碼）。
   **所有旅程層級的寫入都在這裡**，Dashboard 只負責重新抓取。
-- **`LiffEdit.tsx`**：獨立頁面，透過 LIFF 嵌在 LINE App 的 WebView 中，
-  把 URL 裡 base64url 編碼的草稿餵給 `ExpenseModal` 重用整個編輯器。
+- **`LiffEdit.tsx`**：獨立頁面，透過 LIFF 嵌在 LINE App 的 WebView 中，把資料餵給
+  `ExpenseModal` 重用整個編輯器。三種進入方式，優先序 `id` > `n` > `data`：
+  `?id=<expenseId>` 直接查 DB（每次開啟都是最新內容）、`?n=<nonce>` 從
+  `line_chat_history` 的 `pending` 列取草稿、`?data=<base64url>` 是舊格式，
+  **必須保留**，已經發出去的 LINE 卡片還帶著它。
 - **`LiffPreference.tsx`**：同樣走 LIFF，編輯 `trips.ai_preference`
   （LINE Bot 解析文字與收據時參考的自由文字偏好，整趟旅程共用一份）。
   只覆寫單一欄位，不需要 nonce／postback。

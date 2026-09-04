@@ -7,7 +7,12 @@ import {
   extractJSON,
   normalizeCurrency,
   normalizeDate,
+  hasCurrencyHint,
+  matchExpensesByQuestion,
+  mentionsEditingExisting,
   normalizeExpenseAmountMaps,
+  pickExpenseByRef,
+  resolveCurrencyByRule,
   resolveExpenseMembers,
   resolveMember,
   summarizeHistoryEntry,
@@ -52,9 +57,45 @@ describe('detectRecordIntent', () => {
     expect(detectRecordIntent('取消上一筆')).toBeNull();
   });
 
+  it('指示代名詞與時間指稱也算受詞（T1）', () => {
+    // 真機回報：「那筆」認得、「那個」不認得，同一句話卻被當成新支出重複記了一筆
+    expect(detectRecordIntent('剛剛那個改250')).toBe('edit');
+    expect(detectRecordIntent('剛才那個刪掉')).toBe('delete');
+    expect(detectRecordIntent('最近一筆改成 800')).toBe('edit');
+    expect(detectRecordIntent('上一個改為 500')).toBe('edit');
+  });
+
+  it('加了新受詞之後「改天」仍然不能誤判', () => {
+    expect(detectRecordIntent('剛剛那個改天再說')).toBeNull();
+    expect(detectRecordIntent('這個改天再處理')).toBeNull();
+  });
+
   it('CANCEL_DRAFT_KEYWORDS 精確比對，不會吃到「取消上一筆」', () => {
     expect(CANCEL_DRAFT_KEYWORDS.includes('取消')).toBe(true);
     expect(CANCEL_DRAFT_KEYWORDS.includes('取消上一筆')).toBe(false);
+  });
+});
+
+describe('mentionsEditingExisting', () => {
+  it('有修改動詞就算', () => {
+    expect(mentionsEditingExisting('剛剛那個改250')).toBe(true);
+    expect(mentionsEditingExisting('改成小明付')).toBe(true);
+    expect(mentionsEditingExisting('金額改一下')).toBe(true);
+  });
+
+  it('「不對／錯了／打錯／記錯／更正」也算', () => {
+    expect(mentionsEditingExisting('不對，是 500')).toBe(true);
+    expect(mentionsEditingExisting('金額錯了')).toBe(true);
+    expect(mentionsEditingExisting('我打錯了')).toBe(true);
+    expect(mentionsEditingExisting('記錯店名')).toBe(true);
+    expect(mentionsEditingExisting('更正一下日期')).toBe(true);
+  });
+
+  it('單純記帳或閒聊不算', () => {
+    expect(mentionsEditingExisting('晚餐 300')).toBe(false);
+    expect(mentionsEditingExisting('今天好累')).toBe(false);
+    expect(mentionsEditingExisting('剛剛那個改天再說')).toBe(false);
+    expect(mentionsEditingExisting('')).toBe(false);
   });
 });
 
@@ -209,6 +250,133 @@ describe('normalizeCurrency', () => {
 
   it('default_currency 優先於 base_currency 當 fallback', () => {
     expect(normalizeCurrency('', { ...trip, default_currency: 'JPY' }).currency).toBe('JPY');
+  });
+});
+
+describe('resolveCurrencyByRule', () => {
+  // 旅程主幣 TWD、記帳預設 JPY —— T3 回報的那趟旅程
+  const trip = { base_currency: 'TWD', default_currency: 'JPY' };
+
+  it('source=none 一律用記帳預設幣別，忽略 AI 填的值', () => {
+    // 「夾娃娃300」沒提幣別，AI 卻抄了 context 裡的主幣 TWD
+    const res = resolveCurrencyByRule('TWD', 'none', '夾娃娃300', trip);
+    expect(res.currency).toBe('JPY');
+    expect(res.overrode).toBe(true);
+  });
+
+  it('source=stated 但文字裡沒有幣別字眼 → 視同 none，退回預設', () => {
+    const res = resolveCurrencyByRule('TWD', 'stated', '夾娃娃300', trip);
+    expect(res.currency).toBe('JPY');
+    expect(res.overrode).toBe(true);
+  });
+
+  it('source=stated 且文字有「日幣」→ 採用 AI 的值', () => {
+    const res = resolveCurrencyByRule('JPY', 'stated', '晚餐 3000 日幣', trip);
+    expect(res.currency).toBe('JPY');
+    expect(res.overrode).toBe(false);
+  });
+
+  it('明講台幣時就算與預設不同也照用', () => {
+    expect(resolveCurrencyByRule('TWD', 'stated', '機場接送 台幣 1200', trip).currency).toBe('TWD');
+    expect(resolveCurrencyByRule('USD', 'stated', '咖啡 US$4.5', trip).currency).toBe('USD');
+  });
+
+  it('source=preference 直接採用 AI 的值（程式驗不了自由文字）', () => {
+    const res = resolveCurrencyByRule('JPY', 'preference', '晚餐 300', trip);
+    expect(res.currency).toBe('JPY');
+    expect(res.overrode).toBe(false);
+  });
+
+  it('OCR 路徑（text 為 null）沒有文字可驗，stated 直接採信', () => {
+    expect(resolveCurrencyByRule('JPY', 'stated', null, trip).currency).toBe('JPY');
+    // 但收據上也看不出來時，none 仍然走預設
+    expect(resolveCurrencyByRule('TWD', 'none', null, trip).currency).toBe('JPY');
+  });
+
+  it('沒有 default_currency 時退回主幣別', () => {
+    const res = resolveCurrencyByRule('JPY', 'none', '晚餐 300', { base_currency: 'TWD' });
+    expect(res.currency).toBe('TWD');
+  });
+
+  it('認不得的 source 當成 stated 處理（舊模型不會壞掉）', () => {
+    expect(resolveCurrencyByRule('JPY', '', '3000円', trip).currency).toBe('JPY');
+    expect(resolveCurrencyByRule('TWD', undefined, '晚餐 300', trip).currency).toBe('JPY');
+  });
+
+  it('AI 沒填幣別時不會回空字串', () => {
+    expect(resolveCurrencyByRule('', 'stated', '3000 日幣', trip).currency).toBe('JPY');
+  });
+});
+
+describe('pickExpenseByRef', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+
+  it('「#3」取第三筆（1-based）', () => {
+    expect(pickExpenseByRef('#3', list)).toEqual({ id: 'c' });
+    expect(pickExpenseByRef('3', list)).toEqual({ id: 'c' });
+    expect(pickExpenseByRef('＃1', list)).toEqual({ id: 'a' });
+  });
+
+  it('超出範圍、空值或不是數字都回 null', () => {
+    expect(pickExpenseByRef('#4', list)).toBeNull();
+    expect(pickExpenseByRef('#0', list)).toBeNull();
+    expect(pickExpenseByRef('', list)).toBeNull();
+    expect(pickExpenseByRef(undefined, list)).toBeNull();
+    // 舊行為的殘留：模型如果還是抄了一整串網址，不能誤取到某一筆
+    expect(pickExpenseByRef('https://x.supabase.co/storage/v1/a.jpg', [{ id: 'a' }])).toBeNull();
+  });
+});
+
+describe('matchExpensesByQuestion', () => {
+  const list = [
+    { description: 'Lawson (便利商店)' },
+    { description: '一蘭ラーメン (拉麵)' },
+    { description: '計程車' },
+  ];
+
+  it('店名原封不動出現在問句裡就命中（忽略括號後的中文說明）', () => {
+    expect(matchExpensesByQuestion('剛剛 Lawson 那筆買了什麼', list))
+      .toEqual([{ description: 'Lawson (便利商店)' }]);
+    expect(matchExpensesByQuestion('lawson 的收據', list)).toHaveLength(1);
+  });
+
+  it('沒有命中就回空陣列，交給 AI 挑', () => {
+    expect(matchExpensesByQuestion('剛剛那張收據買了什麼', list)).toEqual([]);
+    expect(matchExpensesByQuestion('', list)).toEqual([]);
+  });
+
+  it('命中多筆時全部回傳（呼叫端再交給 AI 二選一）', () => {
+    const dupes = [{ description: '一蘭 (拉麵)' }, { description: '一蘭 (伴手禮)' }];
+    expect(matchExpensesByQuestion('一蘭那兩筆分別是什麼', dupes)).toHaveLength(2);
+  });
+
+  it('單字描述不會讓整份清單都命中', () => {
+    // 1 個字的 key 不列入比對
+    expect(matchExpensesByQuestion('那筆水多少錢', [{ description: '水' }])).toEqual([]);
+  });
+});
+
+describe('hasCurrencyHint', () => {
+  it('認得中文詞、符號與 ISO 代碼', () => {
+    expect(hasCurrencyHint('3000 日幣')).toBe(true);
+    expect(hasCurrencyHint('ラーメン 1200円')).toBe(true);
+    expect(hasCurrencyHint('¥3000')).toBe(true);
+    expect(hasCurrencyHint('US$20')).toBe(true);
+    expect(hasCurrencyHint('晚餐 500 twd')).toBe(true);
+    expect(hasCurrencyHint('NT 500')).toBe(true);
+  });
+
+  it('沒提到幣別就是沒提到', () => {
+    expect(hasCurrencyHint('夾娃娃300')).toBe(false);
+    expect(hasCurrencyHint('晚餐 300')).toBe(false);
+    expect(hasCurrencyHint('')).toBe(false);
+    expect(hasCurrencyHint(null)).toBe(false);
+  });
+
+  it('拉丁代碼要有邊界，不能被英文單字誤觸', () => {
+    // 「restaurant」含有 nt，沒有邊界的話會被當成使用者明講了台幣
+    expect(hasCurrencyHint('restaurant 300')).toBe(false);
+    expect(hasCurrencyHint('dinner 3000')).toBe(false);
   });
 });
 

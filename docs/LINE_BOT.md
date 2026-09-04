@@ -47,18 +47,55 @@
   - 點擊後會紀錄於 `line_processed_actions` 表，防止因連點或網路延遲產生的重複帳務。
 - **編輯與刪除既有支出**: 輸入「編輯支出」或「刪除支出」會列出近期紀錄，
   每列右側一顆固定文字的按鈕（描述放在左邊的文字列，不塞進按鈕，否則按鈕寬度會爆掉）。
-  編輯是 LIFF `uri` 按鈕，payload 帶真正的 expense id —— `LiffEdit` 讀 `decoded.id`、
-  `ExpenseModal` 看到 id 就走 UPDATE，少了它會變成新增一筆重複的。
+  編輯是 LIFF `uri` 按鈕，網址**只帶 expense id 與 sourceId**
+  （`?tripId=…&id=<expenseId>&u=<sourceId>`，`buildEditLiffUrl()`）——
+  `LiffEdit` 每次開啟都拿 id 直接查 DB，`ExpenseModal` 看到 id 就走 UPDATE，
+  少了它會變成新增一筆重複的。
+- **LIFF 編輯頁的三種進入方式**（`src/pages/LiffEdit.tsx`，優先序 `id` > `n` > `data`）:
+  1. `?tripId=…&id=<expenseId>&u=<sourceId>` —— 既有支出，直接
+     `select('*').eq('id', id)`，每次開啟都是最新內容；查無或 `deleted_at` 非空
+     就顯示「這筆支出已被刪除或不存在」。
+  2. `?tripId=…&n=<nonce>&u=<sourceId>` —— 尚未確認的草稿，從
+     `line_chat_history` 的 `pending` 列（最近 10 筆）找 `n` 相符的那一列；
+     同時檢查 `line_processed_actions`，已處理過就直接說明而不開表單。
+     RLS 對匿名完全開放，前端讀得到（`supabase/schema/05_policies.sql`）。
+  3. `?data=<base64>` —— **舊格式，必須保留**，已經發出去的卡片還帶著它。
+  ⚠️ 舊格式的問題正是要改掉它的原因：整筆資料在訊息送出的那一刻就凍結了，
+  從清單改完金額再按同一顆「編輯」看到的還是舊值；而且 LINE 的 `uri` action
+  上限 1000 字，多成員長描述時整張清單會直接發不出去。
+  ⚠️ **這是前端改動，要 push `main`；Edge Function 也要同時重新部署**，
+  否則新網址格式對不上（前端與 Edge Function 是兩條獨立的部署路徑）。
 - **用自然語言表達的刪除／修改意圖**（`detectRecordIntent`，位於 `guards.ts`）
   **在沒有待確認草稿時**會被攔下來，直接回傳上述選單而不進 AI ——
   因為 AI 沒有修改既有紀錄的能力，「把昨天那筆刪掉」交給它只會多記一筆重複的支出。
   有草稿時則走下面的「草稿的修正與取消」。
+  受詞除了「支出／花費／帳／紀錄／這筆／那筆／上一筆」，也包含指示代名詞與時間指稱
+  （`那個`／`這個`／`剛剛`／`剛才`／`上一個`／`前一個`／`最後一筆`／`最近一筆`／`最新一筆`）；
+  動詞仍要求「改＋數字」或「改成／改為／改到／改一下」，所以「剛剛那個改天再說」不會誤判。
+- **第二道防線：AI 回了 expense 但現場沒有草稿可修**（`mentionsEditingExisting`）。
+  路由層攔不到的說法（例如沒有受詞的「改成 250」）會進 AI，schema 又允許它回 `expense`，
+  結果就是憑空多記一筆。所以在產生卡片之前再判斷一次：
+  **沒有任何未確認草稿 + AI 沒填 `corrects_draft` + 這句話有「改／不對／錯了／打錯／記錯／更正」**
+  → 不出卡片，改列編輯清單（`replyEditPicker()`），並在標題下加一句
+  「看起來你想改已經存入的紀錄。如果其實是要新記一筆，請不要用『改』來描述。」
+  清單依日期與建立時間倒序，剛存的那一筆必定在第一列。
 - **編輯／刪除清單不含結清紀錄**（`.not('is_settlement', 'is', true)`）。
   結清是網頁「結算」功能寫進去的特殊紀錄，被當成一般支出編輯會讓統計失真。
 - **假完成宣稱的防線**: AI 仍可能回「已經幫您刪除了」。送出前以 `claimsCompletedAction`
   攔截並換成誠實的說明 —— 讓使用者以為帳已經改掉，比直說做不到更糟。
 - **嚴禁自行換算匯率**: 兩個 prompt 都明令 `amount` 與 `currency` 必須照抄收據／使用者的原始幣別。
   換算只在統計時由前端依 `trip.rates` 進行；AI 先換過會讓原始金額永久遺失。
+- **幣別由程式決定，不靠 prompt 記性**（`resolveCurrencyByRule`，位於 `guards.ts`）:
+  兩個 schema 都要求 AI 回一個 `currency_source`（`stated` / `preference` / `none`），
+  程式再據此決定真正要用的幣別 ——
+  `none` 一律套旅程的記帳預設幣別（完全忽略 AI 填的值）；
+  `stated` 還要文字裡真的出現幣別字眼或符號（`CURRENCY_HINTS`）才採信，沒有就視同 `none`；
+  `preference` 因為是自由文字驗不了，直接採用。OCR 沒有文字可驗，`stated` 直接採信。
+  結果仍會再過一次 `normalizeCurrency()` 的 rates／白名單檢查。
+  ⚠️ 原因：`tripContext` 同時有「主幣」與「預設」兩個數字時，小模型常把主幣當成該填的值，
+  主幣 TWD／預設 JPY 的旅程打「夾娃娃300」就會出一張 TWD 的卡片。
+  兩個 prompt 的幣別區塊因此也改寫成「記帳預設（沒明講就填這個）」與
+  「結算主幣（只用於統計，不要拿來當記帳幣別）」兩行，不再只給一個 rates 物件。
 - **外文店名的描述格式**: 保留原文並在括號補上簡短中文說明「這是什麼店」，
   例如「肉の匠家 (和牛燒肉店)」，而不是逐字直譯，也不是只留原文。
 - **草稿的修正與取消**: 「草稿」＝已送出 Flex 卡片但使用者還沒按確認或取消的那一筆，
@@ -94,8 +131,24 @@
   不會重新 UPDATE `deleted_at`（那會讓網頁垃圾桶的 24 小時保留期重算）。
   撤銷按鈕的 postback **只帶 `eid`**，描述由 `undo` 分支回查 —— 塞描述進去會超過 300 bytes。
 - **收據照片再分析 (`analyze_photo`)**: 若使用者針對某筆已有收據照片的支出追問細節（品項明細、外文翻譯等），
-  AI 會回傳 `analyze_photo` 指令，系統據此重新取回該照片交給 Gemini 逐項解析後作答。
-  若最近 10 筆支出中找不到對應，會再讓 AI 從全旅程含照片的支出中挑選。
+  AI 會回傳 `analyze_photo`，系統重新取回該筆的收據交給 Gemini 逐項解析後作答。
+  - **AI 只回編號，照片由程式自己找**：近期支出清單是有編號、標 📷 的格式
+    （`#3 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`），**不再放照片網址**。
+    AI 回的 `expense_ref`（例如 `#3`）由 `pickExpenseByRef()` 換回那一筆。
+    ⚠️ 以前是把完整網址塞進 context 要它逐字抄回來 —— 網址長又只差幾個字元，
+    小模型常抄錯或抄成上一輪對話裡的另一張，使用者問 A 店卻拿到 B 店的收據。
+    順帶也省掉每筆一長串網址的 token。
+  - **不在近期 10 筆時的全庫搜尋**：先在程式端用 `matchExpensesByQuestion()`
+    把問句與各筆 description（含「括號前的原文」，因為描述格式是「Lawson (便利商店)」）
+    做 `normalizeName()` 子字串比對；唯一命中就直接用，多筆或零筆才交給 AI 二選一，
+    而 AI 一樣只回編號。
+  - **一筆支出的所有照片一起分析**：`analyzeReceiptPhoto(photoUrls[], question, expenseLabel)`
+    會把該筆的每一張 `photo_urls` 都下載送進模型，prompt 開頭標明
+    「以下 N 張是同一筆支出『…』的收據」。以前只看 `photo_urls[0]`，
+    長帳單拍成兩張時第二張的品項永遠問不到。
+  - **回覆與歷史都標明是哪一筆**：回覆開頭是 `🔍 {日期} {描述} {金額} {幣別}`，
+    寫進 `line_chat_history` 的內容前面加 `[收據分析 #{id前8碼}]`，
+    下一輪追問（「那第二項是什麼」）才有指代對象。
 - **封存保護**: 機器人會檢查旅程的 `is_archived` 狀態。若已封存，則僅提供查詢與聊天功能，禁止新增支出。
 
 ## 2. 機器人自我介紹 (Self Introduction)
@@ -136,8 +189,9 @@ Yoshi! Yoshi!
 ## 3. 技術規格與實作細節 (`index.ts`)
 - **檔案分工**: 路由、DB 存取與 LINE API 呼叫在 `index.ts`；
   沒有副作用的純函式（`extractJSON`、`toAmountMap`、`resolveMember`、`resolveExpenseMembers`、
-  `normalizeCurrency`、`normalizeDate`、`detectRecordIntent`、`claimsCompletedAction`、
-  `summarizeHistoryEntry`、`applyParticipantDefaults`）在
+  `normalizeCurrency`、`resolveCurrencyByRule`、`normalizeDate`、`detectRecordIntent`、
+  `mentionsEditingExisting`、`claimsCompletedAction`、`summarizeHistoryEntry`、
+  `applyParticipantDefaults`、`pickExpenseByRef`、`matchExpensesByQuestion`）在
   [`guards.ts`](../supabase/functions/line-webhook/guards.ts)，由 `guards.test.ts` 看守。
   改這些行為請連同測試一起改。`check:functions` 只列 `index.ts`，`guards.ts` 透過 import 一起被檢查。
 - **狀態管理**: 透過 `line_user_states` 維護綁定狀態與群組觸發模式；
@@ -147,6 +201,7 @@ Yoshi! Yoshi!
 - **Payload 優化**: LINE Postback Data 上限為 300 bytes，程式碼用三層手法因應：
   1. JSON 鍵名極端縮寫（`d`=description、`a`=amount、`c`=currency、`dt`=date、`cat`=category、`p`=payer、`s`=split）。
      撤銷按鈕只帶 `{"act":"undo","eid":"<uuid>"}`，描述一律回查而不放進 payload。
+     LIFF 的 `uri` 按鈕同理，只帶 `id` 或 `n`（見上方「LIFF 編輯頁的三種進入方式」）。
   2. **真正的解法是 nonce 間接法**：postback 只帶 `{"act":"save","n":"<8碼>"}`（約 30 bytes），
      完整內容存在 `line_chat_history` 的 `pending` 列，點擊時再取回。
   3. 保留讀取舊格式內嵌欄位的相容分支，讓已發出的舊卡片仍可運作。
@@ -163,7 +218,9 @@ Yoshi! Yoshi!
 - **寫入前的驗證**: AI 回傳的內容不會直接落地。
   - **成員名稱**：`resolveMember()` 做正規化與部分比對，把暱稱、大小寫差異對應回正式名稱；
     只有唯一解才採用，有歧義或對不上就回訊息詢問，不硬猜。
-  - **幣別**：旅程 `rates` 內的最優先，其次是 ISO 白名單，都不符就退回旅程主幣別並提醒使用者。
+  - **幣別**：先由 `resolveCurrencyByRule()` 依 `currency_source` 決定該用哪一個（見上），
+    再交給 `normalizeCurrency()` —— 旅程 `rates` 內的最優先，其次是 ISO 白名單，
+    都不符就退回旅程預設幣別並提醒使用者。
   - **日期**：檢查 `YYYY-MM-DD` 格式、日期是否真的存在（`2026-02-30` 會被 `Date` 悄悄捲成 3/2）
     與「今天 ±1 年」的合理範圍，超出就退回今天並提醒。
   - **付款人與分攤**：AI 回空陣列時由 `applyParticipantDefaults()` 補上預設值

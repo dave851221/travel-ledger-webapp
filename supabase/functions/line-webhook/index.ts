@@ -17,9 +17,13 @@ import {
   claimsCompletedAction,
   detectRecordIntent,
   extractJSON,
+  matchExpensesByQuestion,
+  mentionsEditingExisting,
   normalizeCurrency,
   normalizeDate,
   normalizeExpenseAmountMaps,
+  pickExpenseByRef,
+  resolveCurrencyByRule,
   resolveExpenseMembers,
   summarizeHistoryEntry,
 } from "./guards.ts"
@@ -262,25 +266,104 @@ async function cancelDraft(
 /**
  * 產生「編輯既有支出」的 LIFF 網址。
  *
- * 關鍵是把真正的 expense id 放進 payload：LiffEdit 會讀 decoded.id，
- * ExpenseModal 判斷有 id 就執行 UPDATE。少了它就會變成新增一筆重複的。
+ * 只帶 expense id，內容由 LiffEdit 自己查 DB（T2／M2）。
+ * ExpenseModal 判斷有 id 就執行 UPDATE，少了它會變成新增一筆重複的。
+ *
+ * ⚠️ 以前是把整筆支出 base64 塞進網址。那有兩個問題：
+ *    ①訊息送出的那一刻資料就凍結了 —— 從清單改完金額再按同一顆「編輯」，
+ *      表單填的還是修改前的值；②LINE 的 uri action 上限 1000 字，
+ *      多成員、長描述、多照片時整張清單會直接發不出去（J14）。
+ *    舊格式 LiffEdit 仍然看得懂，已發出去的卡片不會壞。
  */
 function buildEditLiffUrl(expense: any, tripId: string, sourceId: string): string {
-  const payload = {
-    id: expense.id,
-    d: expense.description,
-    a: expense.amount,
-    c: expense.currency,
-    dt: expense.date,
-    cat: expense.category,
-    p: expense.payer_data ?? {},
-    s: expense.split_data ?? {},
-    pi: expense.photo_urls ?? [],
-    u: sourceId,
+  return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&id=${expense.id}&u=${encodeURIComponent(sourceId)}`
+}
+
+/**
+ * 產生「編輯尚未確認的草稿」的 LIFF 網址。
+ * 同樣只帶 nonce —— 完整內容已經存在 line_chat_history 的 pending 列，
+ * LiffEdit 自己去撈（順便就能發現這張卡片已經被確認或取消過了）。
+ */
+function buildDraftLiffUrl(tripId: string, nonce: string, sourceId: string): string {
+  return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&n=${nonce}&u=${encodeURIComponent(sourceId)}`
+}
+
+/**
+ * 列出近期支出讓使用者點選編輯（每列一顆 LIFF「✏️ 編輯」）。
+ *
+ * 兩個呼叫端：明確的「編輯支出」／`detectRecordIntent` 判定的修改意圖，
+ * 以及 P8 的第二道防線 —— AI 把「剛剛那個改250」當成新支出時（T1），
+ * 用 `notice` 補一句話說明為什麼看到的是清單而不是卡片。
+ *
+ * 清單本身依日期與建立時間倒序，剛存的那一筆一定在第一列，
+ * 所以不需要另外做「直接開最新一筆」。
+ */
+async function replyEditPicker(opts: {
+  tripId: string
+  sourceId: string
+  replyToken: string
+  boundQR: { items: any[] }
+  notice?: string
+}): Promise<void> {
+  const { tripId, sourceId, replyToken, boundQR, notice } = opts
+  const { data: recent } = await supabase.from('expenses')
+    .select('id, description, amount, currency, date, category, payer_data, split_data, photo_urls')
+    .eq('trip_id', tripId)
+    .is('deleted_at', null)
+    // 結清紀錄不是支出：讓它出現在清單裡，使用者用 LIFF 一存就變成一般支出，統計會失真（H4）
+    .not('is_settlement', 'is', true)
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(6)
+
+  if (!recent || recent.length === 0) {
+    await replyMessage(replyToken, [{
+      type: 'text',
+      text: notice ? `${notice}\n\n目前沒有可編輯的支出紀錄。` : '目前沒有可編輯的支出紀錄。',
+      quickReply: boundQR,
+    }], sourceId)
+    return
   }
-  const encoded = encodeBase64(new TextEncoder().encode(JSON.stringify(payload)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&data=${encoded}`
+
+  const rows: any[] = []
+  recent.forEach((e: any, idx: number) => {
+    if (idx > 0) rows.push({ type: 'separator', margin: 'md' })
+    rows.push({
+      type: 'box', layout: 'horizontal', margin: 'md', spacing: 'sm', alignItems: 'center',
+      contents: [
+        {
+          type: 'box', layout: 'vertical', flex: 5, contents: [
+            { type: 'text', text: String(e.description), size: 'sm', weight: 'bold', wrap: true },
+            { type: 'text', text: `${e.date} · ${e.amount} ${e.currency}`, size: 'xxs', color: '#aaaaaa', margin: 'xs' },
+          ],
+        },
+        {
+          type: 'button', flex: 2, style: 'primary', color: '#5AC8FA', height: 'sm',
+          action: { type: 'uri', label: '✏️ 編輯', uri: buildEditLiffUrl(e, tripId, sourceId) },
+        },
+      ],
+    })
+  })
+
+  const noticeRow = notice
+    ? [{ type: 'text', text: notice, size: 'xxs', color: '#E08A00', margin: 'sm', wrap: true }]
+    : []
+
+  await replyMessage(replyToken, [{
+    type: 'flex', altText: '選擇要編輯的支出',
+    contents: {
+      type: 'bubble', size: 'mega',
+      body: {
+        type: 'box', layout: 'vertical', contents: [
+          { type: 'text', text: '✏️ 選擇要編輯的支出', weight: 'bold', size: 'md' },
+          { type: 'text', text: `最近 ${recent.length} 筆 · 點選後會開啟編輯畫面`, size: 'xxs', color: '#aaaaaa', margin: 'xs', wrap: true },
+          ...noticeRow,
+          { type: 'separator', margin: 'lg' },
+          ...rows,
+        ],
+      },
+    },
+  }], sourceId)
 }
 
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
@@ -417,17 +500,32 @@ async function verifySignature(body: string, signature: string | null): Promise<
   return await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(body))
 }
 
-async function analyzeReceiptPhoto(photoUrl: string, question: string): Promise<string> {
-  const imgRes = await fetch(photoUrl)
-  if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.status}`)
-  const imgBuffer = await imgRes.arrayBuffer()
-  const base64Image = encodeBase64(new Uint8Array(imgBuffer))
-  const analyzePrompt = `請詳細分析這張收據照片，並以繁體中文回答問題。若收據為外文（日文、韓文等），請逐項翻譯。
+/**
+ * 重新閱讀某一筆支出的收據並回答問題。
+ *
+ * ⚠️ 一筆支出可能有多張收據照片（長帳單拍兩張），以前只分析 `photo_urls[0]`，
+ *    第二張上的品項使用者永遠問不到 —— 現在全部一起送進去（T4）。
+ *    prompt 開頭標明「這幾張是同一筆支出的收據」，模型才不會當成不相干的圖各自作答。
+ */
+async function analyzeReceiptPhoto(
+  photoUrls: string[],
+  question: string,
+  expenseLabel: string,
+): Promise<string> {
+  const parts: any[] = []
+  for (const url of photoUrls) {
+    const part = await fetchPhotoPart(url)
+    if (part) parts.push(part)
+  }
+  if (parts.length === 0) throw new Error('Failed to fetch any receipt photo')
+
+  const analyzePrompt = `以下 ${parts.length} 張是同一筆支出「${expenseLabel}」的收據${parts.length > 1 ? '（同一筆的不同頁／不同張，請合併判讀）' : ''}。
+請詳細分析並以繁體中文回答問題。若收據為外文（日文、韓文等），請逐項翻譯。
 使用者的問題：${question}
 回傳 JSON: {"type":"chat","content":"詳細的繁體中文回答，條列式呈現品項"}`
   const analysisText = await askGemini([{
     role: "user",
-    parts: [{ text: analyzePrompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }]
+    parts: [{ text: analyzePrompt }, ...parts],
   }], { useJsonMode: false, models: GEMINI_OCR_MODELS })
   try {
     const analysisRes = JSON.parse(extractJSON(analysisText))
@@ -495,13 +593,20 @@ const EXPENSE_DATA_SCHEMA = {
   properties: {
     description: { type: 'STRING', description: '品項或商店名稱。外文請保留原文並在括號附繁體中文' },
     amount: { type: 'NUMBER', description: '總金額' },
-    currency: { type: 'STRING', description: 'ISO 幣別代碼，例如 TWD / JPY / USD' },
+    currency: { type: 'STRING', description: 'ISO 幣別代碼，例如 TWD / JPY / USD。只在 currency_source 不是 none 時才有意義' },
+    // 幣別由程式決定而不是靠 prompt 記性（T3）：模型只需誠實回報「這個幣別是哪裡來的」，
+    // 真正要填哪一個由 resolveCurrencyByRule() 依規則決定。
+    currency_source: {
+      type: 'STRING',
+      enum: ['stated', 'preference', 'none'],
+      description: 'stated＝使用者這句話（或收據上）明確出現幣別字眼或符號；preference＝記帳偏好指定；none＝都沒有',
+    },
     date: { type: 'STRING', description: 'YYYY-MM-DD' },
     category: { type: 'STRING', description: '從分類清單中挑一個' },
     payer_data: AMOUNT_LIST_SCHEMA,
     split_details: AMOUNT_LIST_SCHEMA,
   },
-  required: ['description', 'amount', 'currency', 'date', 'category', 'payer_data', 'split_details'],
+  required: ['description', 'amount', 'currency', 'currency_source', 'date', 'category', 'payer_data', 'split_details'],
 }
 
 /** 文字對話：可能是記帳、聊天／查詢，或請系統重新分析某張收據 */
@@ -511,7 +616,11 @@ const TEXT_RESPONSE_SCHEMA = {
     type: { type: 'STRING', enum: ['expense', 'chat', 'analyze_photo'] },
     data: EXPENSE_DATA_SCHEMA,
     content: { type: 'STRING', description: 'type 為 chat 時的回覆內容' },
-    url: { type: 'STRING', description: 'type 為 analyze_photo 時的收據照片網址' },
+    // 只回編號，不要網址：要模型逐字抄回長網址，它常抄成上一輪對話裡的另一張（T4）
+    expense_ref: {
+      type: 'STRING',
+      description: 'analyze_photo 時填近期支出的編號，例如 #3；不在清單裡就留空字串',
+    },
     question: { type: 'STRING', description: 'type 為 analyze_photo 時使用者的問題' },
     corrects_draft: {
       type: 'STRING',
@@ -545,6 +654,8 @@ const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪�
 2. 金額盡量不帶小數，但 payer_data 與 split_details 的各自總和都必須完全等於 amount。
    🚫 **嚴禁換算匯率。** 使用者說「3000 日幣」就填 amount: 3000、currency: "JPY"，
    不可以自行換成旅程的主幣別。換算由系統在統計時處理。
+   訊息裡**沒有出現幣別字眼**（日幣／円／¥／台幣／NT／美金／$ 之類）時，
+   currency_source 填 "none"，currency 填旅程的**記帳預設幣別**（不是結算主幣別）。
 3. 旅程已封存時，一律不可回傳 expense，改用 chat 說明無法記帳。
 4. 歷史支出僅供查詢參考，不要把既有的支出重複記一次。
 5. 查詢類的回答用條列式、簡短，適合在手機上閱讀。
@@ -552,7 +663,10 @@ const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪�
    絕對不可以說「已經幫你刪除了」「我已經改好了」這類話 —— 那是假的。
    使用者想刪除或修改既有紀錄時，請回覆：請輸入「刪除支出」或「編輯支出」，
    系統會列出近期紀錄讓他點選。
-   （你能做的只有：提出新的記帳建議、修正尚未存檔的草稿、以及查詢。）`
+   （你能做的只有：提出新的記帳建議、修正尚未存檔的草稿、以及查詢。）
+7. analyze_photo 的 expense_ref 只填近期支出清單上的編號（例如 "#3"），不要填網址或店名。
+   使用者說「剛剛」「最新」又沒指名店名時，選清單裡日期最近且有 📷 的那一筆。
+   問的那筆不在清單上就把 expense_ref 留空字串，系統會自己去全庫找。`
 
 // For text tasks: start with the thinking model (better reasoning)
 const GEMINI_FALLBACK_MODELS = [
@@ -1063,7 +1177,8 @@ serve(async (req) => {
 - 旅程：${trip.name} (網址: ${WEBAPP_URL}/#/trip/${tripId}/dashboard)
 - 成員清單(僅能從中選擇成員)：${trip.members.join(', ')}
 - 分類：${trip.categories.join(', ')} (預設: ${trip.default_category || '無'})
-- 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
+- 記帳預設幣別：${trip.default_currency || trip.base_currency}（收據上看不出幣別時填這個）
+- 結算主幣別：${trip.base_currency}（只用於統計，不要拿來當記帳幣別）；可用幣別：${Object.keys(trip.rates ?? {}).join(', ') || '（尚未設定）'}
 - 今日：${today}
 - 封存狀態：${trip.is_archived ? '已封存 (唯讀)' : '進行中'}
 - 記帳偏好(整趟旅程共用)：${trip.ai_preference || '無'}
@@ -1078,7 +1193,10 @@ serve(async (req) => {
      **絕對不可以**幫忙換成台幣，也不可以因為旅程的主幣別是 TWD 就改寫金額。
      換算是系統在統計時自己會做的事，你只要忠實照抄。
    - 幣別從符號、地址或語系判斷 (¥/JPY、$/USD、NT/TWD、€/EUR、₩/KRW、฿/THB)。
-   - 收據上真的看不出幣別時，才依序參考：記帳偏好提及的幣別 → 背景資訊的預設幣別。
+   - 收據上真的看不出幣別時，才依序參考：記帳偏好提及的幣別 → 背景資訊的記帳預設幣別。
+   - currency_source 要誠實回報幣別是哪裡來的：收據上看得出來填 "stated"、
+     只能靠記帳偏好推斷填 "preference"、兩者都沒有填 "none"
+     （填 none 時系統會自動改用記帳預設幣別，不必勉強猜）。
 2. 辨識「日期」。若收據上無明確日期，請使用今日。
 3. 辨識「品項描述」。提取商店名稱或主要品項。
    - 外文店名請保留原文，並在括號內補上簡短的繁體中文說明，讓人看得懂那是什麼店，
@@ -1143,6 +1261,13 @@ serve(async (req) => {
 
             // 幣別與日期的把關。以前這兩個欄位是 AI 講什麼就寫什麼，
             // 幻想出來的幣別會讓金額在統計時默默失真，錯誤的年份則會讓支出跑到別的月份去。
+            // 幣別先走規則（T3）：AI 說 none 就一律用旅程的記帳預設幣別。
+            // OCR 沒有使用者文字可以驗證 stated，所以 text 傳 null 代表直接採信。
+            const ocrRule = resolveCurrencyByRule(expense.currency, expense.currency_source, null, trip)
+            if (ocrRule.overrode) {
+              console.log(`[CURRENCY] OCR said ${expense.currency} (source=${expense.currency_source}), using ${ocrRule.currency}`)
+            }
+            expense.currency = ocrRule.currency
             const ocrCurrency = normalizeCurrency(expense.currency, trip)
             if (ocrCurrency.reject) {
               // 沒有匯率就存下去，統計會以 1:1 換算而失真，寧可先問清楚
@@ -1192,9 +1317,8 @@ serve(async (req) => {
             runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary }))
 
             const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
-            const liffData = encodeBase64(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
-              .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
+            // 草稿卡片的「✏️ 編輯」只帶 nonce，完整內容 LiffEdit 自己去 pending 列撈（T2）
+            const liffUrl = buildDraftLiffUrl(trip.id, nonce, sourceId)
 
             // 幣別或日期被修正過就一併告知，不要默默改掉使用者看不到的東西
             const ocrWarningMsg = ocrWarnings.length > 0
@@ -1501,57 +1625,7 @@ serve(async (req) => {
         // 「剛剛那筆改 500」交給 AI 會變成再記一筆重複的支出 ——
         // 它只會產生新的草稿，沒有能力修改已存檔的紀錄。
         if (isEditListIntent) {
-          const { data: recent } = await supabase.from('expenses')
-            .select('id, description, amount, currency, date, category, payer_data, split_data, photo_urls')
-            .eq('trip_id', tripId)
-            .is('deleted_at', null)
-            // 結清紀錄不是支出：讓它出現在清單裡，使用者用 LIFF 一存就變成一般支出，統計會失真（H4）
-            .not('is_settlement', 'is', true)
-            .order('date', { ascending: false })
-            .order('created_at', { ascending: false })
-            .limit(6)
-
-          if (!recent || recent.length === 0) {
-            await replyMessage(replyToken, [{
-              type: 'text', text: '目前沒有可編輯的支出紀錄。', quickReply: boundQR,
-            }], sourceId)
-            continue
-          }
-
-          const rows: any[] = []
-          recent.forEach((e: any, idx: number) => {
-            if (idx > 0) rows.push({ type: 'separator', margin: 'md' })
-            rows.push({
-              type: 'box', layout: 'horizontal', margin: 'md', spacing: 'sm', alignItems: 'center',
-              contents: [
-                {
-                  type: 'box', layout: 'vertical', flex: 5, contents: [
-                    { type: 'text', text: String(e.description), size: 'sm', weight: 'bold', wrap: true },
-                    { type: 'text', text: `${e.date} · ${e.amount} ${e.currency}`, size: 'xxs', color: '#aaaaaa', margin: 'xs' },
-                  ],
-                },
-                {
-                  type: 'button', flex: 2, style: 'primary', color: '#5AC8FA', height: 'sm',
-                  action: { type: 'uri', label: '✏️ 編輯', uri: buildEditLiffUrl(e, tripId, sourceId) },
-                },
-              ],
-            })
-          })
-
-          await replyMessage(replyToken, [{
-            type: 'flex', altText: '選擇要編輯的支出',
-            contents: {
-              type: 'bubble', size: 'mega',
-              body: {
-                type: 'box', layout: 'vertical', contents: [
-                  { type: 'text', text: '✏️ 選擇要編輯的支出', weight: 'bold', size: 'md' },
-                  { type: 'text', text: `最近 ${recent.length} 筆 · 點選後會開啟編輯畫面`, size: 'xxs', color: '#aaaaaa', margin: 'xs', wrap: true },
-                  { type: 'separator', margin: 'lg' },
-                  ...rows,
-                ],
-              },
-            },
-          }], sourceId)
+          await replyEditPicker({ tripId, sourceId, replyToken, boundQR })
           continue
         }
 
@@ -1820,7 +1894,8 @@ serve(async (req) => {
         const [{ data: trip }, { data: expenses }, { data: history }] = await Promise.all([
           supabase.from('trips').select('*').eq('id', tripId).single(),
           supabase.from('expenses')
-            .select('description, amount, currency, category, date, photo_urls')
+            // id 是給 analyze_photo 的歷史標記用的（`[收據分析 #xxxxxxxx]`）
+            .select('id, description, amount, currency, category, date, photo_urls')
             .eq('trip_id', tripId)
             .is('deleted_at', null)
             .not('is_settlement', 'is', true)
@@ -1845,13 +1920,12 @@ serve(async (req) => {
 
         const today = getTodayString(getTripTimezone(trip))
 
-        const expensesSummary = (expenses ?? []).map((e: any) => {
-          const base = `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}]`
-          if (e.photo_urls?.length > 0) {
-            const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(e.photo_urls[0])
-            return `${base} [收據照片: ${publicUrl}]`
-          }
-          return base
+        // 有編號、沒有網址。編號是 analyze_photo 唯一要 AI 回的東西 ——
+        // 網址長又相似，小模型抄不準，還白白吃掉一堆 token（T4）。
+        const contextPrecision = (trip.precision_config ?? {}) as Record<string, number>
+        const expensesSummary = (expenses ?? []).map((e: any, idx: number) => {
+          const photo = e.photo_urls?.length > 0 ? ` 📷×${e.photo_urls.length}` : ''
+          return `#${idx + 1} ${e.date} ${e.description} ${formatAmount(e.amount, e.currency, contextPrecision)} ${e.currency} [${e.category}]${photo}`
         }).join('\n')
 
         // 還等在聊天室裡、使用者既沒確認也沒取消的草稿。
@@ -1869,7 +1943,7 @@ serve(async (req) => {
         // 只放「這次對話的當下狀態」。人設與不可變規則已在 YOSHI_SYSTEM_INSTRUCTION，
         // 輸出格式則交給 TEXT_RESPONSE_SCHEMA，不必再用文字描述一次。
         const tripContext = `【旅程】${trip.name}｜成員：${trip.members.join('、')}｜分類：${trip.categories.join('、')}（預設：${trip.default_category || '無'}）
-【幣別】${JSON.stringify(trip.rates)}，主幣：${trip.base_currency}，預設：${trip.default_currency || '無'}
+【幣別】記帳預設：${trip.default_currency || trip.base_currency}（使用者沒明講就填這個）｜結算主幣：${trip.base_currency}（只用於統計，不要拿來當記帳幣別）｜可用：${Object.keys(trip.rates ?? {}).join('、') || '（尚未設定）'}
 【今日】${today}｜${trip.is_archived ? '⚠️ 已封存（唯讀，禁止記帳）' : '進行中'}
 【記帳偏好（整趟旅程共用）】${trip.ai_preference || '無'}｜傳訊者：${memberName}
 【旅程預設付款人】${trip.default_payer?.length ? trip.default_payer.join('、') : '無'}｜預設分攤：${trip.default_split_members?.length ? trip.default_split_members.join('、') : '全員'}
@@ -1877,7 +1951,8 @@ serve(async (req) => {
 【判斷優先權】
 - payer_data（墊付）：①旅程預設付款人 ②記帳偏好 ③傳訊者對應的成員 ④成員第一位
 - split_details（分攤）：①旅程預設分攤 ②記帳偏好 ③全員均分
-- 幣別：使用者明講 > 記帳偏好 > 旅程預設幣別
+- 幣別：使用者明講（currency_source: stated）> 記帳偏好（preference）> 都沒有就填 none，
+  currency 一律用上面的「記帳預設」；系統會再驗一次，說謊沒有好處
 ${memberAliasHint(trip.members)}
 【近期支出（最近10筆，僅供查詢參考）】
 ${expensesSummary || '（尚無支出）'}
@@ -1890,7 +1965,8 @@ ${draftSummary || '（沒有等待確認的草稿）'}
 - 想修正上面某一張「尚未確認的草稿」→ type: expense，帶上**完整**的修正後內容，
   並把 corrects_draft 填成那張草稿的 nonce（沒指名的話系統只會多出一張卡片，舊的不會消失）
 - 詢問某筆有收據照片的支出細節（品項明細、外文翻譯等）→ type: analyze_photo，
-  url 填近期支出中對應的照片網址（找不到就填空字串，系統會自動全庫搜尋），question 填使用者的問題
+  expense_ref 填上面那筆的編號（例如 "#3"，只有標了 📷 的才有照片可分析；
+  不在清單裡就填空字串，系統會自動全庫搜尋），question 填使用者的問題
 - 其他聊天或查詢 → type: chat`
 
         // 反轉回時間順序，並丟掉結尾沒有得到回覆的 user 訊息。
@@ -1963,6 +2039,23 @@ ${draftSummary || '（沒有等待確認的草稿）'}
           if (res.type === 'expense') {
             const expense = res.data
 
+            // 第二道防線（T1）：使用者說的是「改」，現場卻沒有任何可以修的草稿，
+            // AI 也沒指名 corrects_draft —— 那它是把「剛剛那個改250」誤當成新支出了，
+            // 照著出卡片會憑空多記一筆。改列已存檔紀錄的編輯清單。
+            // 第一道防線是 detectRecordIntent（路由層，訊息還沒進 AI 就攔下）。
+            if (
+              outstandingDrafts.length === 0
+              && !String(res.corrects_draft ?? '').trim()
+              && mentionsEditingExisting(cleanText)
+            ) {
+              console.log(`[GUARD] AI returned expense for an edit-sounding message with no draft: "${cleanText}"`)
+              await replyEditPicker({
+                tripId, sourceId, replyToken, boundQR,
+                notice: '看起來你想改已經存入的紀錄。如果其實是要新記一筆，請不要用「改」來描述。',
+              })
+              continue
+            }
+
             normalizeExpenseAmountMaps(expense)
 
             // 同上：先試著把暱稱對應回正式名稱
@@ -1977,7 +2070,15 @@ ${draftSummary || '（沒有等待確認的草稿）'}
               continue
             }
 
-            // 幣別與日期的把關，與 OCR 路徑相同
+            // 幣別與日期的把關，與 OCR 路徑相同。
+            // 幣別先走規則（T3）：小模型常把 context 裡的「結算主幣」當成該填的值，
+            // 「夾娃娃300」在主幣 TWD／預設 JPY 的旅程就會出 TWD 的卡片。
+            // 這裡不信 AI 的判斷 —— stated 還要文字裡真的有幣別字眼才算數。
+            const textRule = resolveCurrencyByRule(expense.currency, expense.currency_source, cleanText, trip)
+            if (textRule.overrode) {
+              console.log(`[CURRENCY] AI said ${expense.currency} (source=${expense.currency_source}) but "${cleanText}" has no currency hint, using ${textRule.currency}`)
+            }
+            expense.currency = textRule.currency
             const textCurrency = normalizeCurrency(expense.currency, trip)
             if (textCurrency.reject) {
               await replyMessage(replyToken, [{
@@ -2039,9 +2140,8 @@ ${draftSummary || '（沒有等待確認的草稿）'}
             }
 
             const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
-            const liffData = encodeBase64(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
-              .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            const liffUrl = `${WEBAPP_URL}/#/liff/edit?tripId=${trip.id}&data=${liffData}`
+            // 草稿卡片的「✏️ 編輯」只帶 nonce，完整內容 LiffEdit 自己去 pending 列撈（T2）
+            const liffUrl = buildDraftLiffUrl(trip.id, nonce, sourceId)
 
             // 幣別或日期被修正過就一併告知，不要默默改掉使用者看不到的東西
             const textWarningMsg = textWarnings.length > 0
@@ -2097,26 +2197,47 @@ ${draftSummary || '（沒有等待確認的草稿）'}
               }], sourceId)
             ])
           } else if (res.type === 'analyze_photo') {
-            const photoUrl = res.url as string | undefined
             const question = res.question || '請詳細描述此收據的所有品項與金額'
 
-            if (photoUrl) {
-              // URL 已在近期10筆中，直接分析
+            // AI 只回編號，照片由程式自己找（T4）。
+            // 以前是把完整網址塞進 context 要它逐字抄回來 —— 網址長又只差幾個字元，
+            // 小模型常抄錯，或抄成上一輪對話裡出現過的另一張，
+            // 使用者問「剛剛 Lawson 那筆」，回的卻是別筆收據的內容。
+            const label = (e: any) =>
+              `${e.description} ${formatAmount(e.amount, e.currency, contextPrecision)} ${e.currency}`
+
+            /** 把選定的那一筆的**所有**收據照片一起送去分析並回覆 */
+            const analyzeChosen = async (chosen: any) => {
+              const urls: string[] = (chosen.photo_urls ?? []).map((path: string) => photoPublicUrl(path, tripId))
+              const content = await analyzeReceiptPhoto(urls, question, label(chosen))
+              // 開頭標明分析的是哪一筆，使用者才看得出有沒有挑錯
+              const answer = `🔍 ${chosen.date} ${label(chosen)}\n\n${content}`
+              // 歷史加上支出標記，下一輪追問（「那第二項是什麼」）才有指代對象
+              runInBackground(supabase.from('line_chat_history').insert({
+                line_user_id: sourceId, role: 'model',
+                content: `[收據分析 #${String(chosen.id ?? '').substring(0, 8)}] ${content}`,
+              }))
+              await pushMessage(sourceId, [{ type: 'text', text: answer.substring(0, 4900), quickReply: boundQR }])
+            }
+
+            // ① 先用編號在剛剛查出的近期 10 筆裡找（同一次查詢的結果，不重查）
+            const refPick = pickExpenseByRef(res.expense_ref, expenses ?? [])
+            const recentPick = refPick && (refPick as any).photo_urls?.length > 0 ? refPick : null
+
+            if (recentPick) {
               await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在重新分析收據照片，請稍候...' }], sourceId)
               try {
-                const content = await analyzeReceiptPhoto(photoUrl, question)
-                runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }))
-                await pushMessage(sourceId, [{ type: 'text', text: content, quickReply: boundQR }])
+                await analyzeChosen(recentPick)
               } catch (photoErr) {
                 console.error('[ANALYZE_PHOTO_ERROR]', photoErr)
                 await pushMessage(sourceId, [{ type: 'text', text: '😵 無法重新分析照片，請稍後再試。', quickReply: boundQR }])
               }
             } else {
-              // URL 不在近期10筆中，全庫搜尋有照片的支出
+              // ② 不在近期 10 筆裡 → 全庫找有照片的支出
               await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在查詢符合描述的支出紀錄...' }], sourceId)
               try {
                 const { data: allExpenses } = await supabase.from('expenses')
-                  .select('description, amount, currency, category, date, photo_urls')
+                  .select('id, description, amount, currency, category, date, photo_urls')
                   .eq('trip_id', tripId)
                   .is('deleted_at', null)
                   .not('is_settlement', 'is', true)
@@ -2126,36 +2247,46 @@ ${draftSummary || '（沒有等待確認的草稿）'}
 
                 if (withPhotos.length === 0) {
                   await pushMessage(sourceId, [{ type: 'text', text: '😅 此旅程中找不到任何帶有收據照片的支出紀錄。', quickReply: boundQR }])
-                } else {
-                  const expenseList = withPhotos.map((e: any) => {
-                    const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(e.photo_urls[0])
-                    return `${e.date} ${e.description} ${e.amount}${e.currency} [${e.category}] [照片: ${publicUrl}]`
-                  }).join('\n')
+                  continue
+                }
 
-                  const selectPrompt = `以下是旅程中所有附有收據照片的支出記錄：
+                // 先在程式端縮小範圍：店名多半原封不動出現在問句裡。
+                // 命中唯一一筆就不必再叫一次模型（省一次呼叫，也少一次挑錯的機會）。
+                // 連原句一起比對：AI 轉述的 question 可能把店名丟掉（「詳細是買了什麼」）
+                const narrowed = matchExpensesByQuestion(`${cleanText} ${question}`, withPhotos)
+                let chosen: any = narrowed.length === 1 ? narrowed[0] : null
+
+                if (!chosen) {
+                  const pool = narrowed.length > 1 ? narrowed : withPhotos
+                  const expenseList = pool.map((e: any, idx: number) =>
+                    `#${idx + 1} ${e.date} ${e.description} ${formatAmount(e.amount, e.currency, contextPrecision)} ${e.currency} [${e.category}] 📷×${e.photo_urls.length}`
+                  ).join('\n')
+
+                  // 這裡同樣只要編號，不要網址
+                  const selectPrompt = `以下是這趟旅程中附有收據照片的支出記錄：
 ${expenseList}
 
 使用者問題：${question}
 
 請找出最符合使用者描述的那一筆，回傳 JSON：
-若找到 → {"found": true, "url": "完整照片網址", "description": "支出描述"}
-若找不到 → {"found": false}`
+若找到 → {"found": true, "ref": "#編號"}
+若找不到 → {"found": false}
+使用者說「剛剛」「最新」又沒指名店名時，選日期最近的那一筆。`
 
                   const selectText = await askGemini([{ role: "user", parts: [{ text: selectPrompt }] }])
                   const selectRes = JSON.parse(extractJSON(selectText))
+                  chosen = selectRes.found ? pickExpenseByRef(selectRes.ref, pool) : null
+                }
 
-                  if (!selectRes.found) {
-                    await pushMessage(sourceId, [{ type: 'text', text: '😅 找不到符合描述的收據照片，請試著描述得更詳細一點，例如加上日期、店名或金額。', quickReply: boundQR }])
-                  } else {
-                    await pushMessage(sourceId, [{ type: 'text', text: `✅ 找到了！正在分析「${selectRes.description}」的收據照片...` }])
-                    try {
-                      const content = await analyzeReceiptPhoto(selectRes.url, question)
-                      runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }))
-                      await pushMessage(sourceId, [{ type: 'text', text: content, quickReply: boundQR }])
-                    } catch (analyzeErr) {
-                      console.error('[ANALYZE_PHOTO_AFTER_SEARCH_ERROR]', analyzeErr)
-                      await pushMessage(sourceId, [{ type: 'text', text: '😵 照片分析失敗，請稍後再試。', quickReply: boundQR }])
-                    }
+                if (!chosen) {
+                  await pushMessage(sourceId, [{ type: 'text', text: '😅 找不到符合描述的收據照片，請試著描述得更詳細一點，例如加上日期、店名或金額。', quickReply: boundQR }])
+                } else {
+                  await pushMessage(sourceId, [{ type: 'text', text: `✅ 找到了！正在分析「${chosen.description}」的收據照片...` }])
+                  try {
+                    await analyzeChosen(chosen)
+                  } catch (analyzeErr) {
+                    console.error('[ANALYZE_PHOTO_AFTER_SEARCH_ERROR]', analyzeErr)
+                    await pushMessage(sourceId, [{ type: 'text', text: '😵 照片分析失敗，請稍後再試。', quickReply: boundQR }])
                   }
                 }
               } catch (searchErr) {

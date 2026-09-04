@@ -78,24 +78,78 @@ const LiffEdit: React.FC = () => {
           }
         }
 
+        // --- 2. 決定資料來源 ---
+        // 三種進入方式，優先序 id > n > data：
+        //   ?id=<expenseId>  既有支出：每次開啟都直接查 DB，拿到的一定是最新內容
+        //   ?n=<nonce>       尚未確認的草稿：從 line_chat_history 的 pending 列取回
+        //   ?data=<base64>   舊格式，整筆資料凍結在網址裡
+        //
+        // ⚠️ 舊格式**必須保留**：已經發出去的 LINE 卡片與清單訊息還帶著 data=，
+        //    拿掉的話那些按鈕會全部壞掉。
+        //    改用 id/n 的原因是 data= 的內容在訊息送出的那一刻就凍結了 ——
+        //    從清單改完金額再按同一顆「編輯」，表單填的還是修改前的值；
+        //    而且 LINE 的 uri action 上限 1000 字，多成員長描述時整張清單會發不出去。
         const tripId = searchParams.get('tripId');
+        const expenseId = searchParams.get('id');
+        const nonce = searchParams.get('n');
+        const sourceId = searchParams.get('u');
         const dataStr = searchParams.get('data');
-        if (!tripId || !dataStr) throw new Error('缺少必要參數');
-
-        // 2. 解碼 (Base64 -> JSON)
-        let base64 = dataStr.replace(/-/g, '+').replace(/_/g, '/');
-        while (base64.length % 4) base64 += '=';
-        const binaryStr = atob(base64);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        const decodedStr = new TextDecoder().decode(bytes);
-        const decoded = JSON.parse(decodedStr);
+        if (!tripId) throw new Error('缺少必要參數');
+        if (!expenseId && !nonce && !dataStr) throw new Error('缺少必要參數');
 
         // 3. 獲取旅程
         const { data: tripData, error: tripErr } = await supabase.from('trips').select('*').eq('id', tripId).single();
         if (tripErr) throw tripErr;
         if (!tripData.precision_config) tripData.precision_config = {};
         setTrip(tripData);
+
+        // 把各種來源整理成同一份 payload（欄位縮寫與草稿卡片一致），
+        // 下面的欄位對應對三種來源共用
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let decoded: any;
+
+        if (expenseId) {
+          const { data: row, error: expErr } = await supabase.from('expenses')
+            .select('*').eq('id', expenseId).maybeSingle();
+          if (expErr) throw expErr;
+          if (!row || row.deleted_at) throw new Error('這筆支出已被刪除或不存在。');
+          decoded = { ...row, u: sourceId ?? undefined };
+        } else if (nonce) {
+          // 草稿：內容存在 line_chat_history 的 pending 列，卡片只帶 nonce。
+          // RLS 對匿名完全開放（見 supabase/schema/05_policies.sql），前端讀得到。
+          const [{ data: used }, { data: rows }] = await Promise.all([
+            supabase.from('line_processed_actions').select('nonce').eq('nonce', nonce).maybeSingle(),
+            supabase.from('line_chat_history')
+              .select('content')
+              .eq('line_user_id', sourceId ?? '')
+              .eq('role', 'pending')
+              .order('created_at', { ascending: false })
+              .limit(10),
+          ]);
+          // 已按過確認／取消，或被更新的建議取代 —— 不要讓表單開起來重複寫入
+          if (used) throw new Error('這張卡片已處理過。');
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let draft: any = null;
+          for (const row of rows ?? []) {
+            try {
+              const parsed = JSON.parse(row.content);
+              if (parsed?.n === nonce) { draft = parsed; break; }
+            } catch { /* skip malformed */ }
+          }
+          if (!draft) throw new Error('這張卡片已過期，請重新記帳。');
+          // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, tid }
+          decoded = { ...draft.exp, pi: draft.p, n: draft.n, u: sourceId ?? undefined };
+        } else {
+          // 舊格式：Base64 -> JSON
+          if (!dataStr) throw new Error('缺少必要參數');
+          let base64 = dataStr.replace(/-/g, '+').replace(/_/g, '/');
+          while (base64.length % 4) base64 += '=';
+          const binaryStr = atob(base64);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+          decoded = JSON.parse(new TextDecoder().decode(bytes));
+        }
 
         // 4. 處理照片（提取相對路徑）
         const rawIds = decoded.pi || decoded.photo_ids || decoded.photo_urls || [];
