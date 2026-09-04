@@ -4,6 +4,7 @@ import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encodi
 import { Decimal } from "../_shared/deps.ts"
 import {
   calculateDistribution,
+  calculateMemberBalances,
   calculateSettlements,
   DEFAULT_PRECISION,
   formatAmount,
@@ -543,12 +544,35 @@ const CURRENCY_TIMEZONE: Record<string, string> = {
   USD: 'America/New_York', CAD: 'America/Toronto',
 }
 
+/**
+ * 這趟旅程的「今天」該用哪個時區。
+ *
+ * 優先讀 `trips.timezone`（網頁的設定頁可選，M4）。幣別本來就不等於所在地：
+ * 主幣別是「結算時折算成哪一種錢」，跟人在哪裡沒有關係 ——
+ * 主幣 TWD 的日本旅程在日本時間 23:30 記帳，用台北時間會記到前一天去（情境 F4）。
+ *
+ * 沒設定時才退回舊的猜法（先主幣別、再 rates 裡的其他幣別），行為與以前相同。
+ */
 function getTripTimezone(trip: any): string {
-  const candidates = [trip.base_currency, ...Object.keys(trip.rates || {})]
+  const explicit = String(trip?.timezone ?? '').trim()
+  // 只接受 Intl 認得的字串：欄位是自由文字，存了錯的值會讓 DateTimeFormat 直接丟例外
+  if (explicit && isValidTimezone(explicit)) return explicit
+  if (explicit) console.warn(`[TZ] Ignoring invalid trip timezone: ${explicit}`)
+
+  const candidates = [trip?.base_currency, ...Object.keys(trip?.rates || {})]
   for (const cur of candidates) {
     if (CURRENCY_TIMEZONE[cur]) return CURRENCY_TIMEZONE[cur]
   }
   return 'UTC'
+}
+
+function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
 }
 
 function getTodayString(timezone = 'Asia/Taipei'): string {
@@ -636,6 +660,46 @@ async function analyzeReceiptPhoto(
   } catch {
     return analysisText.substring(0, 4900)
   }
+}
+
+/**
+ * LINE 語音訊息的格式固定是 m4a（AAC）。
+ * Gemini 的 inlineData 吃得下，不需要自己轉檔。
+ */
+const AUDIO_MIME = 'audio/m4a'
+/** 語音訊息通常只有幾秒鐘；超過這個大小多半是出了什麼問題，不要浪費額度 */
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
+/**
+ * 把語音訊息轉成文字（M15）。
+ *
+ * ⚠️ 刻意「先轉文字、再走原本的文字流程」，而不是把音檔直接丟給記帳的 schema：
+ *    這樣快捷指令（「今日支出」）、草稿修正（「剛剛那筆改 500」）、
+ *    取消、編輯清單……全部都能用語音講，而不是只有記帳。
+ *    代價是多一次 Gemini 呼叫。
+ */
+async function transcribeAudio(messageId: string): Promise<string> {
+  const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+    headers: { 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+  })
+  if (!res.ok) throw new Error(`Failed to download audio from LINE: ${res.status}`)
+  const buf = await res.arrayBuffer()
+  if (buf.byteLength > MAX_AUDIO_BYTES) throw new Error('AUDIO_TOO_LARGE')
+
+  const prompt = `請把這段語音**逐字**轉成繁體中文文字。
+只輸出聽到的內容本身，不要加上任何說明、引號或前後綴。
+聽不清楚、沒有人聲或只有雜音時，輸出空字串。`
+
+  const text = await askGemini([{
+    role: 'user',
+    parts: [
+      { text: prompt },
+      { inlineData: { mimeType: AUDIO_MIME, data: encodeBase64(new Uint8Array(buf)) } },
+    ],
+  }], { useJsonMode: false, models: GEMINI_OCR_MODELS, temperature: 0 })
+
+  // 模型偶爾會自己加引號包住整句
+  return text.trim().replace(/^["'「『]+|["'」』]+$/g, '').trim()
 }
 
 async function pushMessage(to: string, messages: any[]) {
@@ -770,7 +834,8 @@ const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪�
 7. 🚫 **金額類的問題不要自己做算術。** 訊息裡的【全趟彙總】是伺服器用 Decimal 算好的
    精確數字（總額、每人已付／應付／淨額、各分類、筆數、日期範圍），直接引用即可。
    【近期支出】只有最近 10 筆，把它們加起來當成總額一定是錯的。
-   彙總裡沒有的切片（例如「第一天花多少」）就照實說目前算不出來，請他到網頁看，不要硬湊。
+   彙總裡已經有逐日合計與「金額最大的幾筆」，日期類與排名類的問題也直接引用。
+   真的沒被涵蓋到的（例如被標為「省略」的那幾天）就照實說算不出來，請他到網頁看，不要硬湊。
 8. analyze_photo 的 expense_ref 只填近期支出清單上的編號（例如 "#3"），不要填網址或店名。
    使用者說「剛剛」「最新」又沒指名店名時，選清單裡日期最近且有 📷 的那一筆。
    問的那筆不在清單上就把 expense_ref 留空字串，系統會自己去全庫找。`
@@ -938,8 +1003,11 @@ serve(async (req) => {
       let memberName = "未知";
       // postback 也要查：存檔確認訊息是在 postback 分支送出的，
       // 少了這個就會顯示「由 未知 記錄」。
+      // 語音也要查（M15）：轉錄出來的文字會走完整的記帳流程，
+      // 「我付的晚餐 300」一樣要對得到人。
       const needsMemberName =
-        (event.type === 'message' && (event.message?.type === 'text' || event.message?.type === 'image'))
+        (event.type === 'message'
+          && (event.message?.type === 'text' || event.message?.type === 'image' || event.message?.type === 'audio'))
         || event.type === 'postback';
       if (needsMemberName && speakerUserId) {
         const chatId = event.source.groupId || event.source.roomId || speakerUserId
@@ -1644,15 +1712,55 @@ serve(async (req) => {
         continue
       }
 
-      // --- 非文字訊息則跳過處理 ---
-      if (event.type !== 'message' || event.message.type !== 'text') {
+      // --- 語音訊息（M15）---
+      //
+      // 先轉成文字，接著完全走打字的那條路 —— 快捷指令、草稿修正、取消、
+      // 編輯清單、AI 記帳全部都能用語音講，而不是只有記帳。
+      //
+      // ⚠️ 群組的提及模式**不處理語音**：語音沒辦法 @提及機器人，
+      //    要嘛每則語音都下載＋轉錄（群組裡語音很多，額度撐不住），
+      //    要嘛就是現在這樣跳過。想在群組用語音請切「模式:全回應模式」。
+      let transcript: string | null = null
+      if (isBound && event.type === 'message' && event.message.type === 'audio') {
+        if (isGroup && mentionRequired) {
+          console.log('[AUDIO] Group in mention mode, skipping voice message.')
+          continue
+        }
+        try {
+          transcript = await transcribeAudio(event.message.id)
+        } catch (err) {
+          console.error('[AUDIO_ERROR]', err)
+          const msg = isRateLimit(err)
+            ? RATE_LIMIT_MSG
+            : String((err as Error)?.message) === 'AUDIO_TOO_LARGE'
+              ? '😅 這段語音太長了，請講短一點（或直接打字）。'
+              : '😵 語音處理時發生錯誤，請稍後再試，或直接打字。'
+          await replyMessage(replyToken, [{ type: 'text', text: msg, quickReply: boundQR }], sourceId)
+          continue
+        }
+        console.log(`[AUDIO] Transcript: "${transcript}"`)
+        if (!transcript) {
+          await replyMessage(replyToken, [{
+            type: 'text',
+            text: '🎤 我聽不太清楚這段語音，可以再說一次，或直接打字嗎？',
+            quickReply: boundQR,
+          }], sourceId)
+          continue
+        }
+      }
+
+      // --- 其餘非文字訊息則跳過處理 ---
+      if (transcript === null && (event.type !== 'message' || event.message.type !== 'text')) {
         console.log(`[SKIP] Not a text message event.`)
         continue
       }
 
       // ⚠️ mentionees 的 index 是相對於**原始未 trim 的** text，切 mention 要用原文（M16）
-      const rawText: string = event.message.text
-      const mentionees = event.message.mention?.mentionees as any[] | undefined
+      //    語音沒有 mention 資料，轉錄出來的文字直接當原文用。
+      const rawText: string = transcript ?? event.message.text
+      const mentionees = transcript === null
+        ? (event.message.mention?.mentionees as any[] | undefined)
+        : undefined
       const userText = rawText.trim()
       console.log(`[USER_TEXT] "${userText}"`)
 
@@ -2188,28 +2296,28 @@ serve(async (req) => {
           const { data: allExp } = await supabase.from('expenses')
             .select('amount, currency, payer_data, split_data')
             .eq('trip_id', tripId).is('deleted_at', null)
-          const rates = trip.rates || {}
           const baseCurrency = trip.base_currency
-          const grandTotal: Record<string, Decimal> = {}
-          trip.members.forEach((m: string) => { grandTotal[m] = new Decimal(0) })
-          // 所有紀錄（含結清）都要計入餘額，用來計算誰該給誰多少錢
-          ;(allExp || []).forEach((e: any) => {
-            const rate = e.currency === baseCurrency ? 1 : (rates[e.currency] || 1)
-            trip.members.forEach((m: string) => {
-              const net = new Decimal(e.payer_data?.[m] || 0).minus(new Decimal(e.split_data?.[m] || 0))
-              grandTotal[m] = grandTotal[m].plus(net.times(rate))
-            })
-          })
-          const grandTotalNum: Record<string, number> = {}
-          Object.entries(grandTotal).forEach(([m, v]) => { grandTotalNum[m] = v.toNumber() })
-          const settlements = calculateSettlements(grandTotalNum)
+          // 餘額與匯率換算走 _shared/finance.ts 的共用實作（M14）——
+          // 網頁的 useTripStats 呼叫的是同一支的前端版本，兩份由契約測試比對。
+          // 以前兩邊各寫各的 rate 判斷（這裡是 `currency === base ? 1 : rates[...]`，
+          // 前端是 `rates[...] || 1`），rates[base] 不等於 1 時會算出不同的結算結果。
+          // 所有紀錄（含結清）都要計入餘額，所以上面的查詢刻意沒有濾掉 is_settlement。
+          const { grandTotal, missingRateCurrencies } = calculateMemberBalances(
+            allExp ?? [], trip.members, trip.rates, baseCurrency,
+          )
+          const settlements = calculateSettlements(grandTotal)
+          // 有幣別被當成 1:1 換算時要講出來，否則結算金額默默失真
+          const rateWarning = missingRateCurrencies.length > 0
+            ? `\n\n⚠️ ${missingRateCurrencies.join('、')} 沒有設定匯率，已當成 1:1 折算，結果會失真。`
+              + `\n請到網頁的「設定 → 匯率精度」補上。`
+            : ''
           if (settlements.length === 0) {
-            await replyMessage(replyToken, [{ type: 'text', text: '✅ 目前一切已結清，無需轉帳！', quickReply: boundQR }], sourceId)
+            await replyMessage(replyToken, [{ type: 'text', text: `✅ 目前一切已結清，無需轉帳！${rateWarning}`, quickReply: boundQR }], sourceId)
           } else {
             // Math.round 會把 12.50 USD 顯示成 13 —— 一律依旅程的 precision_config 格式化（H5）
             const settlePrecision = (trip.precision_config ?? {}) as Record<string, number>
             const lines = settlements.map(s => `${s.from} → ${s.to}  ${formatAmount(s.amount, baseCurrency, settlePrecision)} ${baseCurrency}`)
-            await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算建議（折合 ${baseCurrency}）\n\n${lines.join('\n')}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
+            await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算建議（折合 ${baseCurrency}）\n\n${lines.join('\n')}${rateWarning}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
           }
           continue
         }
@@ -2255,7 +2363,8 @@ serve(async (req) => {
           // 「這趟總共花多少」若只看得到一部分，答出來的數字是錯的，比不答更糟。
           // 結清紀錄也要撈進來 —— summarizeTripExpenses 會自己決定哪些數字該含它。
           supabase.from('expenses')
-            .select('amount, currency, category, date, is_settlement, payer_data, split_data')
+            // description 是給「金額最大的幾筆」用的（K13）
+            .select('amount, currency, description, category, date, is_settlement, payer_data, split_data')
             .eq('trip_id', tripId)
             .is('deleted_at', null),
         ])
@@ -2285,7 +2394,11 @@ serve(async (req) => {
         // 網址長又相似，小模型抄不準，還白白吃掉一堆 token（T4）。
         const contextPrecision = (trip.precision_config ?? {}) as Record<string, number>
         // 全趟的精確彙總。AI 只看得到最近 10 筆，自由查詢（K8–K13）過去一律答錯（M6）。
-        const tripSummary = summarizeTripExpenses(allForSummary ?? [], trip.members ?? [], contextPrecision)
+        // rates 與主幣別是用來排序「金額最大的幾筆」的：跨幣別不折算就比不出大小
+        const tripSummary = summarizeTripExpenses(
+          allForSummary ?? [], trip.members ?? [], contextPrecision,
+          { rates: trip.rates, baseCurrency: trip.base_currency },
+        )
         const expensesSummary = (expenses ?? []).map((e: any, idx: number) => {
           const photo = e.photo_urls?.length > 0 ? ` 📷×${e.photo_urls.length}` : ''
           return `#${idx + 1} ${e.date} ${e.description} ${formatAmount(e.amount, e.currency, contextPrecision)} ${e.currency} [${e.category}]${photo}`

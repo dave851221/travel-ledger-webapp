@@ -95,12 +95,18 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 結清演算法在 `src/utils/settlement.ts`（`calculateSettlements`）。
 
+**匯率換算與餘額彙總**在 `getRate()` / `convertToBase()` / `calculateMemberBalances()`。
+⚠️ **主幣別對自己的匯率一律是 1**，不管 `rates` 裡寫什麼 —— 這是網頁的 `useTripStats`
+與 Bot 的「結算」算出相同金額的前提（以前兩邊各寫各的判斷，`rates[base] ≠ 1` 時會差一截）。
+漏設匯率的幣別會被當成 1:1 並回報給呼叫端提醒使用者。
+
 ⚠️ **這兩套邏輯各有兩份實作**：前端在 `src/utils/`，LINE Bot 在
 `supabase/functions/_shared/finance.ts`。無法直接共用同一個檔案 ——
 前端走 npm 的 decimal.js，Edge Function 走 esm.sh 的 URL import。
 
 **改任何一邊都必須同步另一邊**，但現在有 `src/utils/finance.parity.test.ts`
-這支契約測試會用大量隨機輸入比對兩份實作，漂移會直接讓 CI 失敗。
+這支契約測試會用大量隨機輸入比對兩份實作（`calculateDistribution`、`calculateSettlements`、
+`calculateMemberBalances`、`getRate`、`sumByCurrency`），漂移會直接讓 CI 失敗。
 `_shared/deps.ts` 那層間接就是為了讓測試能在 Node 下載入 Deno 的模組。
 
 ### 行程登錄檔模式
@@ -150,6 +156,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
    10 分鐘沒動作或輸入「取消綁定」就放棄；綁定／斷開成功都會 `supersedeAllDrafts()`
 3. **文字訊息**：先比對快捷指令（直接查 DB），其餘交給 Gemini 回傳結構化 JSON
 4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片
+4b. **語音訊息**：下載 m4a → Gemini 逐字轉錄 → **當成使用者打的字**走上面第 3 點的流程
+   （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
 5. **Postback**：按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
    但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著
@@ -166,7 +174,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 幣別由 `resolveCurrencyByRule` 依 `currency_source` 決定後再比對旅程 `rates` 與 ISO 白名單、
 分類比對旅程的分類清單、日期檢查格式與合理範圍。
 金額類的查詢不靠 AI 算術：`summarizeTripExpenses` 在伺服器端用 Decimal 算好
-各幣別合計、每人已付／應付／淨額、各分類合計，以【全趟彙總】放進 context。
+各幣別合計、每人已付／應付／淨額、各分類合計、逐日合計與金額最大的 3 筆，
+以【全趟彙總】放進 context。
 付款人與分攤為空時補上與前端 `quickAdd` 一致的預設值。
 任何被修正的欄位都會告知使用者，不會默默改掉。細節見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)，
 使用情境與回歸檢查表見 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md)。
@@ -182,6 +191,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 - **幣別精確度**：每個旅程存 `precision_config`，格式 `{ "TWD": 0, "JPY": 0, "USD": 2 }`。
   一律使用 `finance.ts` 的 `formatAmount()`，不要直接呼叫 `.toFixed()`。
+- **旅程時區**：`trips.timezone` 存 IANA 字串（例如 `Asia/Tokyo`），網頁設定頁可選。
+  LINE Bot 判斷「今天」優先讀它；NULL 才退回從幣別推測（會猜錯，見 `docs/LINE_SCENARIOS.md` 的 F4）。
 - **JSONB 欄位**：`payer_data` 與 `split_data` 是 `{ 成員名稱: 金額 }`，
   key 是**純字串顯示名稱**（例如 `"代杰"`）而非 ID。因此改成員名稱時必須把所有支出的
   JSONB 一起改寫（`SettingsModal.tsx` 已有實作）。

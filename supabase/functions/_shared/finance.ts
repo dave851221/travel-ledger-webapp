@@ -29,8 +29,7 @@ export function formatAmount(
  * USD 旅程的合計會出現 `0.30000000000000004` 這種尾數 ——
  * 違反 CLAUDE.md「金額運算一律走 decimal.js」。
  *
- * ⚠️ 這支目前只有 Bot 端使用，前端的彙總還散在 `useTripStats` 裡。
- *    把兩邊的彙總收斂到這裡並納入契約測試是 ROADMAP 的 M14。
+ * ⚠️ 前端 src/utils/finance.ts 有完全對應的一份，由契約測試比對（M14）。
  */
 export function sumByCurrency(
   rows: { amount: number | string; currency: string }[],
@@ -43,6 +42,121 @@ export function sumByCurrency(
     totals[currency] = totals[currency] ? totals[currency].plus(amount) : amount;
   }
   return totals;
+}
+
+/**
+ * 某個幣別要折算成主幣別時該乘的匯率。
+ *
+ * ⚠️ **主幣別一律是 1**，不管 `rates` 裡寫了什麼。
+ *    幣別對自己的匯率就是 1，這是定義，不是設定值。
+ *
+ * 這一條規則正是 ROADMAP「已知風險 5」／M14 的核心：
+ * 以前 Edge Function 寫成 `e.currency === base ? 1 : rates[...]`，
+ * 前端寫成 `rates[...] || 1` —— 只要 `rates[base]` 不等於 1（舊資料或手動改壞），
+ * 網頁與機器人就會算出**不同的結算結果**，而且兩邊看起來都很合理。
+ *
+ * 沒有設定匯率的幣別退回 1（等於不換算）並由呼叫端回報給使用者 ——
+ * 直接當 0 會讓那筆支出從結算裡消失，比 1:1 失真更糟。
+ */
+export function getRate(
+  currency: string,
+  rates: Record<string, number> | null | undefined,
+  baseCurrency: string,
+): number {
+  if (currency === baseCurrency) return 1;
+  const rate = (rates ?? {})[currency];
+  return typeof rate === 'number' && isFinite(rate) ? rate : 1;
+}
+
+/** 把某幣別的金額折算成主幣別。回傳 Decimal，呼叫端自行決定何時 toNumber()。 */
+export function convertToBase(
+  amount: number | string,
+  currency: string,
+  rates: Record<string, number> | null | undefined,
+  baseCurrency: string,
+): InstanceType<typeof Decimal> {
+  return new Decimal(amount || 0).times(getRate(currency, rates, baseCurrency));
+}
+
+/** 算餘額只需要這幾個欄位；`amount` 用不到，因為餘額只看付款與分攤。 */
+export interface BalanceRow {
+  currency: string;
+  payer_data?: Record<string, unknown> | null;
+  split_data?: Record<string, unknown> | null;
+}
+
+export interface BalanceSummary {
+  /** 每人折合主幣別後的淨結餘。正數＝應收，負數＝應付。 */
+  grandTotal: Record<string, number>;
+  /** 每人在各幣別的原幣淨結餘，`{ 幣別: { 成員: 金額 } }` */
+  byCurrency: Record<string, Record<string, number>>;
+  /** 有支出用到、但旅程 rates 沒設定的幣別（已被當成 1:1，需提醒使用者） */
+  missingRateCurrencies: string[];
+}
+
+/**
+ * 每人的淨結餘（付款 − 分攤），全程走 Decimal。
+ *
+ * ⚠️ **結清紀錄（is_settlement）要一起傳進來**：結清就是「誰把錢還給誰」，
+ *    不計入的話結清完帳面上還是欠著。呼叫端不要先濾掉。
+ *    （反過來說，「總支出」「分類統計」則必須排除結清紀錄 —— 那是另一回事。）
+ *
+ * 只統計 `members` 清單裡的人。已被移除的成員留在舊支出的 JSONB 裡，
+ * 把他們算進來會多出永遠結不掉的餘額。
+ */
+export function calculateMemberBalances(
+  rows: BalanceRow[],
+  members: string[],
+  rates: Record<string, number> | null | undefined,
+  baseCurrency: string,
+): BalanceSummary {
+  const memberList = members ?? [];
+  const grand: Record<string, InstanceType<typeof Decimal>> = {};
+  const byCurrency: Record<string, Record<string, InstanceType<typeof Decimal>>> = {};
+  const missing = new Set<string>();
+
+  memberList.forEach((m) => { grand[m] = new Decimal(0); });
+
+  for (const row of rows ?? []) {
+    const currency = row?.currency;
+    if (!currency) continue;
+
+    // 主幣別不算「沒設匯率」—— 它的匯率是定義出來的 1（情境 D9）
+    if (currency !== baseCurrency && (rates ?? {})[currency] === undefined) {
+      missing.add(currency);
+    }
+    const rate = getRate(currency, rates, baseCurrency);
+
+    if (!byCurrency[currency]) {
+      byCurrency[currency] = {};
+      memberList.forEach((m) => { byCurrency[currency][m] = new Decimal(0); });
+    }
+
+    for (const m of memberList) {
+      const paid = new Decimal(Number(row.payer_data?.[m]) || 0);
+      const owed = new Decimal(Number(row.split_data?.[m]) || 0);
+      const net = paid.minus(owed);
+      byCurrency[currency][m] = byCurrency[currency][m].plus(net);
+      grand[m] = grand[m].plus(net.times(rate));
+    }
+  }
+
+  const grandTotal: Record<string, number> = {};
+  Object.keys(grand).forEach((m) => { grandTotal[m] = grand[m].toNumber(); });
+
+  const byCurrencyNum: Record<string, Record<string, number>> = {};
+  Object.keys(byCurrency).forEach((c) => {
+    byCurrencyNum[c] = {};
+    Object.keys(byCurrency[c]).forEach((m) => {
+      byCurrencyNum[c][m] = byCurrency[c][m].toNumber();
+    });
+  });
+
+  return {
+    grandTotal,
+    byCurrency: byCurrencyNum,
+    missingRateCurrencies: Array.from(missing),
+  };
 }
 
 /**

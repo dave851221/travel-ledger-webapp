@@ -11,8 +11,8 @@
 以後改 Bot 邏輯前，先掃過相關章節；改完後逐條驗證。要加新功能，先在這裡加情境再動手。
 
 依據的程式版本：H1–H12、第 12 章的 Feature F、第 13 章的 T1–T4 都已實作完成（2026-09-04），
-第 10.2 節的 **M1–M3、M5–M8、M10–M13、M16–M19 也已完成**（M2 隨 T2；其餘 2026-09-05）。
-**只剩 M4、M14、M15 未修**，留在 [`ROADMAP.md`](ROADMAP.md)。
+第 10.2 節的 **M1–M19 已全部完成**（M2 隨 T2；M1/M3/M5–M8/M10–M13/M16–M19 於 2026-09-05；
+M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 文中提到的行號來自修正前的 `index.ts`，現在已經漂移，請一律以函式名與註解關鍵字為準。
 
 純函式現在集中在 `supabase/functions/line-webhook/guards.ts`（由 `guards.test.ts` 看守），
@@ -37,6 +37,7 @@
 | P0.5 | 被加進群組／聊天室 | `join` event → `BOT_SELF_INTRODUCTION` |
 | P1 | Postback（已綁定才處理） | `act: undo / del / save / cancel / cur` |
 | P2 | 圖片訊息（已綁定才處理） | `ocrPrompt`、`OCR_RESPONSE_SCHEMA` |
+| P2.5 | 語音訊息（已綁定才處理；群組提及模式跳過） | `transcribeAudio` → 轉成文字後往下走 |
 | P3 | 群組觸發判斷 | `shouldProcess`、`isManagement`、`startsWithYoshi` |
 | P4 | 說明、純呼叫 | `HELP_KEYWORDS`、`cleanText === ''` |
 | P5 | 綁定與管理指令 | `ID:`、`取消綁定`、`斷開`、`模式:`、`設定?`、`設定:`、密碼驗證 |
@@ -128,7 +129,7 @@
 | D6 | 偏好設定指定幣別 | `設定:預設用日幣` → `晚餐 300` | JPY | 🟡 仍靠 AI 讀設定（回 `currency_source: preference` 時程式無從驗證，只能採信） | P8 |
 | D7 | 嚴禁自行換算 | `3000 日幣` 於主幣 TWD 旅程 | amount 3000、currency JPY，不可變成 TWD 660 | ✅ system instruction 明令 | `YOSHI_SYSTEM_INSTRUCTION` 規則 2 |
 | D8 | 金額精度 | JPY 給 `1200.5` | 依 `precision_config` 四捨五入到 0 位 | ✅ | `toDecimalPlaces(precision)` |
-| D9 | 主幣別本身沒在 `rates` | 舊旅程資料不完整 | 不該把主幣別當成「沒匯率」拒絕 | 🟡 `Home.tsx` 建旅程會放 `{base:1}`，舊資料未驗證 | `normalizeCurrency` |
+| D9 | 主幣別本身沒在 `rates` | 舊旅程資料不完整 | 不該把主幣別當成「沒匯率」拒絕 | ✅ 換算端已修（M14）：`getRate()` 對主幣別一律回 1，`calculateMemberBalances()` 也不會把主幣別列進「漏設匯率」。記帳端的 `normalizeCurrency` 仍以 `rates` 為準，建旅程時 `Home.tsx` 會放 `{base:1}` | `getRate`、`normalizeCurrency` |
 | D10 | 沒提幣別時一律用預設幣別，與主幣別不同也一樣 | 主幣 TWD、預設 JPY 的旅程說 `夾娃娃300` | 卡片幣別是 JPY，不是 TWD | ✅ T3 已修：幣別改由 `resolveCurrencyByRule()` 決定，`none` 與「宣稱 stated 但文字沒有幣別字眼」都退回記帳預設；`tripContext` 也把「記帳預設」與「結算主幣」分開講 | `guards.ts`、P2、P8 |
 
 ### 2.3 付款人與分攤
@@ -164,7 +165,7 @@
 | F1 | 相對日期 | `昨天的晚餐 300`、`前天`、`9/2` | 以旅程時區的今天推算 | ✅ | `tripContext【今日】` |
 | F2 | 日期超過今天前後一年 | AI 算錯年份 | 退回今天並提醒 | ✅ | `normalizeDate` |
 | F3 | 日期格式壞掉 | AI 回 `2026/9/2` | 退回今天並提醒 | ✅ | `normalizeDate` |
-| F4 | 旅程所在地與主幣別不同 | 日本旅程、主幣 TWD、日本時間 23:30 記帳 | 「今天」應是日本日期 | 🐛 M4 時區取主幣別 → 台北時間，跨日一小時內會差一天 | `getTripTimezone` |
+| F4 | 旅程所在地與主幣別不同 | 日本旅程、主幣 TWD、日本時間 23:30 記帳 | 「今天」應是日本日期 | ✅ M4 已修：`trips.timezone` 欄位（網頁「設定 → 基本設定」可選），`getTripTimezone()` 優先讀它並用 `Intl` 驗證；沒設定才退回舊的從幣別推測 | `getTripTimezone`、`SettingsModal` |
 | F5 | 明講分類 | `分類交通 計程車 300` | 採用 | ✅ | P8 |
 | F6 | 沒提分類 | `拉麵 300` | AI 依描述挑，不確定用預設分類或「其他」 | ✅ | prompt 規則 4 |
 | F7 | AI 給了清單外的分類 | AI 回「美食」但旅程只有「餐飲」 | 應對回清單或退回預設 | ✅ M18 已修：`resolveCategory()` 比照 `resolveMember` 做正規化與唯一子字串比對，對不上就退回旅程預設分類 →「其他」→ 清單第一個，並回一則提醒 | `guards.ts`、P2、P8 |
@@ -286,13 +287,13 @@
 | K9 | 自由查詢：個人 | `我付了多少`、`我還欠多少` | 正確 | ✅ M6 已修：彙總含每人「已付／應付／淨額」，且淨額有計入結清紀錄 | `summarizeTripExpenses` |
 | K10 | 自由查詢：對象 | `小明欠我多少` | 正確 | ✅ M6 已修：兩人的淨額都在彙總裡；精確的「誰給誰」仍建議用快捷指令「結算」 | `summarizeTripExpenses` |
 | K11 | 自由查詢：分類 | `交通花了多少`、`吃飯佔多少` | 正確 | ✅ M6 已修：彙總含各分類合計（分幣別） | `summarizeTripExpenses` |
-| K12 | 自由查詢：時間 | `昨天花多少`、`第一天花多少` | 🟡 彙總只有日期範圍與筆數，沒有逐日切片；system instruction 已要求「彙總裡沒有的切片就照實說算不出來」，不再硬湊 | P8 |
-| K13 | 自由查詢：排名 | `誰付最多`、`最貴的一筆` | 🟡 「誰付最多」可由彙總的每人已付看出來；「最貴的一筆」仍受限於近期 10 筆 | P8 |
+| K12 | 自由查詢：時間 | `昨天花多少`、`第一天花多少` | 正確 | ✅ 彙總加了「逐日合計」（分幣別）。超過 30 天的旅程只留最早一天與最近 29 天，中間明講省略了幾天 | `summarizeTripExpenses` |
+| K13 | 自由查詢：排名 | `誰付最多`、`最貴的一筆` | 正確 | ✅ 「誰付最多」看彙總的每人已付；「最貴的一筆」加了「金額最大的 3 筆」，跨幣別先用 `getRate()` 折合主幣別再排序 | `summarizeTripExpenses` |
 | K14 | 最近一筆 | `最近一筆是什麼` | 描述最新一筆 | ✅ 在 10 筆內 | P8 |
 | K15 | 追問收據明細 | `剛剛那張收據買了什麼` | `analyze_photo` 重新讀圖逐項翻譯 | ✅ AI 只回編號（`expense_ref`），照片由程式從近期清單取（T4） | P8 `analyze_photo`、`pickExpenseByRef` |
 | K16 | 收據不在最近 10 筆 | `上週一蘭的收據有哪些品項` | 全庫列出有照片的支出讓 AI 挑 | ✅ 先在程式端用店名做子字串比對縮小範圍，唯一解就直接用；多筆或零筆才問 AI，且一樣只回編號（T4） | `matchExpensesByQuestion`、P8 |
 | K17 | 問旅程設定 | `匯率多少`、`有哪些成員`、`分類有哪些` | 從 context 回答 | ✅ | `tripContext` |
-| K18 | 結算與網頁不一致 | `rates[base] ≠ 1` 的旅程 | 兩邊相同 | 🟡 ROADMAP #5（M14） | P7 vs `useTripStats` |
+| K18 | 結算與網頁不一致 | `rates[base] ≠ 1` 的旅程 | 兩邊相同 | ✅ M14 已修：餘額彙總與匯率換算收進 `finance.ts`（前後端各一份、由契約測試比對），主幣別一律以 1 換算。漏設匯率的幣別會在結算訊息裡明講被當成 1:1 | `calculateMemberBalances` |
 | K19 | 查詢排除結清紀錄 | 網頁做過結清 | 今日／本月／總覽不含結清；結算要含 | ✅ | `.not('is_settlement', 'is', true)` |
 | K20 | 查詢排除已刪除 | — | 不含 `deleted_at` 非空 | ✅ | `.is('deleted_at', null)` |
 | K21 | 旅程被刪除後打快捷指令 | — | 回「找不到旅程」 | ✅ 五個快捷指令與 AI 核心都有 null 檢查（M5 已修：以前 AI 核心會丟例外 → 500 → LINE 重送同一則訊息） | P7、P8 |
@@ -334,7 +335,9 @@
 | N3 | Gemini 回空內容 | 安全機制擋下 | 換模型 | ✅ | `askGemini` |
 | N4 | AI 回的 JSON 壞掉 | — | 回「AI 處理時發生錯誤」 | ✅ | P8 catch |
 | N5 | reply token 過期 | 處理超過 1 分鐘 | 改 push | 🟡 只 push 錯誤文字，原訊息丟失 | `replyMessage` |
-| N6 | 貼圖、語音、位置、檔案、影片 | — | 跳過不回 | ✅（語音記帳 ❌ 未來可做，見 M15） | P2 之後 `[SKIP]` |
+| N6 | 貼圖、位置、檔案、影片 | — | 跳過不回 | ✅ | P2.5 之後 `[SKIP]` |
+| N14 | 語音記帳 | 對機器人講「晚餐三百」 | 轉成文字後走與打字完全相同的流程 | ✅ M15 已修：下載 m4a → `inlineData` 交給 Gemini 逐字轉錄 → 當成使用者打的字往下走，所以快捷指令、草稿修正、取消也都能用講的。🟡 **群組的提及模式不處理語音**（語音無法 @提及，全部轉錄會吃掉額度），要用請切「模式:全回應模式」 | P2.5 `transcribeAudio` |
+| N15 | 語音聽不清楚或太長 | 雜音、空白錄音、超過 10MB | 回一句提示而不是靜默 | ✅ 空轉錄回「我聽不太清楚」；超過 10MB 回「這段語音太長了」；額度用盡回 `RATE_LIMIT_MSG` | P2.5 |
 | N7 | 簽章錯誤 | 非 LINE 來源 | 401 | ✅ | `verifySignature` |
 | N8 | 同一 webhook 多個 events | LINE 合併送 | 逐一處理，一個壞不影響其他 | 🟡 單一 event 未捕捉的例外會讓整批回 500 | `serve` 外層 try |
 | N9 | 缺 `--no-verify-jwt` 部署 | — | 全部 401 | 已記錄於 CLAUDE.md | 部署 |
@@ -352,8 +355,15 @@
   近期支出清單是**有編號、無網址**的格式（`#3 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`）；
   `analyze_photo` 要 AI 回的是那個編號（`expense_ref`），照片一律由程式自己找。
 - **金額類的問題不靠 AI 算術**：`summarizeTripExpenses()` 在伺服器端用 Decimal 算好
-  各幣別合計、每人已付／應付／淨額、各分類合計、筆數與日期範圍，以【全趟彙總】放進 context（M6）。
-  但**沒有逐日切片，也沒有排名**（K12、K13 仍有缺口）。
+  各幣別合計、每人已付／應付／淨額、各分類合計、筆數、日期範圍、
+  **逐日合計（最多 30 天，超過只留頭尾）**與**金額最大的 3 筆**，
+  以【全趟彙總】放進 context（M6、K12、K13）。
+- **餘額彙總與匯率換算只有一份規則**（`calculateMemberBalances` / `getRate`，
+  前端與 Edge Function 各一份實作、由契約測試比對）。**主幣別一律以 1 換算**，
+  不管 `rates` 裡寫什麼 —— 這是網頁與機器人結算金額一致的前提（M14）。
+- **旅程時區存在 `trips.timezone`**（IANA 字串）。沒設定才從幣別推測 ——
+  幣別不等於所在地，主幣 TWD 的日本旅程猜出來是台北時間（M4）。
+- **語音先轉文字再走原本的流程**（M15）。群組的提及模式不處理語音。
 - **一句話只能產生一筆**（schema 是單一 `data` 物件）。
 - **Postback data 上限 300 bytes**；LINE `uri` action 上限 1000 字；文字訊息上限 5000 字（程式取 4900）。
   LIFF 編輯網址已改為只帶 `id`／`n` 的間接法（T2），長度固定，不再受支出內容影響。
@@ -479,16 +489,15 @@
 
 ### 10.2 中低優先
 
-> **狀態（2026-09-05）**：M1–M3、M5–M8、M10–M13、M16–M19 **已全部完成**
-> （M2 隨第 13 章的 T2 一起做掉）。完成內容留在下表當作「為什麼要這樣寫」的紀錄。
-> **只剩 M4（旅程時區）、M14（結算彙總收斂）、M15（語音記帳）**，仍在 [`ROADMAP.md`](ROADMAP.md)。
+> **狀態（2026-09-06）**：**M1–M19 已全部完成**（M9 不存在）。
+> 下表保留下來當作「為什麼要這樣寫」的紀錄，每一條都對應到程式裡的註解。
 
 | # | 問題 | 修法方向 |
 | :-- | :-- | :-- |
 | ~~M1~~ | ~~群組綁定：輸入 `ID:` 當下 `current_trip_id` 就清空；等密碼期間群組每句話都被當密碼回「密碼錯誤」；沒有放棄指令。~~ | ✅ **已完成**（2026-09-05）：驗證成功才切換；新增「取消綁定」；`pending_at` 逾時 10 分鐘自動放棄（migration `20260905_line_pending_bind.sql`）；群組閒聊不再收到「密碼錯誤」；`last_active_at` 改為每次事件背景更新。 |
 | ~~M2~~ | ~~`buildEditLiffUrl()` 把整筆支出塞進 URL，LINE `uri` 上限 1000 字，多成員多照片會讓整張清單發不出去。~~ | ✅ **已完成**（隨 T2 一起做，2026-09-04）：編輯既有支出只帶 `id`，`LiffEdit` 自行查 `expenses`；草稿帶 nonce 與 sourceId 查 `line_chat_history` 的 pending 列；舊的 `data=` 格式保留。 |
 | ~~M3~~ | ~~`isManagement` 用 `userText.startsWith('設定')`，群組「設定好了嗎」會被送進 AI。~~ | ✅ **已完成**（2026-09-05）：改為 `/^設定[:：]/` 加上 `設定?`／`設定？` 的精確比對。 |
-| M4 | `getTripTimezone()` 先看 `base_currency`，主幣 TWD 的日本旅程「今天」是台北時間。 | 旅程設定加時區欄位，或改為優先看非主幣別的 rates。 |
+| ~~M4~~ | ~~`getTripTimezone()` 先看 `base_currency`，主幣 TWD 的日本旅程「今天」是台北時間。~~ | ✅ **已完成**（2026-09-06）：`trips.timezone` 欄位（migration `20260906_trip_timezone.sql`），`SettingsModal` 的「基本設定」可選，`getTripTimezone()` 優先讀它並用 `Intl` 驗證；沒設定才退回舊的猜法。 |
 | ~~M5~~ | ~~AI 核心在 `trip` 為 null 時直接存取欄位 → 500 → LINE 重送。~~ | ✅ **已完成**（2026-09-05）：AI 核心查完旅程就先檢查 null，回「找不到這個旅程」並 `continue`。 |
 | ~~M6~~ | ~~AI context 只有最近 10 筆，自由查詢（K8–K13）會答錯。~~ | ✅ **已完成**（2026-09-05）：`summarizeTripExpenses()` 在伺服器端用 Decimal 算好各幣別合計、每人已付／應付／淨額、各分類合計、筆數、日期範圍，放進 `tripContext` 的【全趟彙總】；system instruction 明令不得自己加總。逐日切片（K12）與「最貴的一筆」（K13）仍未涵蓋，長期改 function calling（見 `MCP_SERVER_DESIGN.md`）。 |
 | ~~M7~~ | ~~OCR prompt 把「截圖」列為 not_receipt，行動支付與信用卡通知截圖記不了。~~ | ✅ **已完成**（2026-09-05）：規則 7 改為「與消費無關的截圖」，並明列付款完成畫面、信用卡消費通知、轉帳成功、電子發票、訂單確認頁一律視為收據。 |
@@ -497,8 +506,8 @@
 | ~~M11~~ | ~~`liff-notify` 把 LIFF 的 UPDATE 也記成 `saved`，`取消上一筆` 會刪掉剛編輯的舊支出；推播文字寫「存入」。~~ | ✅ **已完成**（2026-09-05）：`ExpenseModal` 帶 `mode`，`liff-notify` 只有 insert 才寫 `saved`，更新的推播改「✏️ 已透過 LIFF 更新」且不附撤銷按鈕。 |
 | ~~M12~~ | ~~確認時成員已被移除，`calculateDistribution` 把該人份額默默加給調整成員。~~ | ✅ **已完成**（2026-09-05）：存檔前比對出已不在成員清單的名字就拒絕存入並列出來；同時 `releaseNonce()` 放掉剛佔用的 nonce，卡片的「✏️ 編輯」才不會跟著失效。 |
 | ~~M13~~ | ~~綁定、斷開、切換旅程時舊草稿沒失效。~~ | ✅ **已完成**（2026-09-05）：A1／A2／A7 三條成功路徑都呼叫 `supersedeAllDrafts(sourceId)`。 |
-| M14 | ROADMAP #5：結算匯率換算兩邊不一致。 | 把餘額彙總收進 `_shared/finance.ts`，納入契約測試。 |
-| M15 | 語音訊息不支援。 | Gemini 可直接吃音訊：下載 `audio/m4a` 後走與文字相同的 schema。 |
+| ~~M14~~ | ~~ROADMAP #5：結算匯率換算兩邊不一致。~~ | ✅ **已完成**（2026-09-06）：`getRate` / `convertToBase` / `calculateMemberBalances` / `sumByCurrency` 前後端各一份，`useTripStats` 與 Bot 的「結算」都改用它，並納入契約測試。主幣別一律以 1 換算。 |
+| ~~M15~~ | ~~語音訊息不支援。~~ | ✅ **已完成**（2026-09-06）：`transcribeAudio()` 下載 m4a 以 `inlineData` 交給 Gemini 逐字轉錄，轉出來的文字走與打字完全相同的流程（含 `TEXT_RESPONSE_SCHEMA`）。群組的提及模式不處理語音。 |
 | ~~M16~~ | ~~`cleanText` 的 `@\S+` 會把 `@小明` 也刪掉（L14），AI 看不到付款人。~~ | ✅ **已完成**（2026-09-05）：`stripSelfMentions()` 依 `mentionees[].index/length` 只切 `isSelf` 的那幾段（由後往前刪避免錯位）；沒有 mention 資料時原樣回傳。 |
 | ~~M17~~ | ~~對話歷史沒把發言者帶進 prompt（L15）。~~ | ✅ **已完成**（2026-09-05）：歷史查詢一併撈 `speaker_name`，`summarizeHistoryEntry()` 對 user 訊息加上「發言者：」前綴。 |
 | ~~M18~~ | ~~AI 回的分類不驗證（F7），會存進旅程裡不存在的分類。~~ | ✅ **已完成**（2026-09-05）：`resolveCategory()`（`guards.ts` 並有測試），對不上退回旅程預設 →「其他」→ 清單第一個並提醒。 |

@@ -65,36 +65,28 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
 `currentUser` 存在 `localStorage`。清快取就會失去身分設定，需重新選擇。
 目前影響輕微，但沒有更好的替代方案（因為沒有帳號系統，見風險 1）。
 
-### 5. 結算的匯率換算兩邊不一致（低，但會算錯錢）
+### 5. ~~結算的匯率換算兩邊不一致~~（已解決，2026-09-06）
 
-Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
-網頁端（`Dashboard.tsx`）是 `rates[...]`。若 `rates` 裡 base currency 的值不等於 1，
-兩邊會算出不同的結算結果。
+**已修**：餘額彙總與匯率換算收進 `getRate()` / `convertToBase()` /
+`calculateMemberBalances()`，前端（`src/utils/finance.ts`）與 Edge Function
+（`supabase/functions/_shared/finance.ts`）各一份，由 `finance.parity.test.ts` 比對。
+`useTripStats` 與 Bot 的「結算」都改呼叫它，**主幣別一律以 1 換算**
+（幣別對自己的匯率是定義，不是設定值）。漏設匯率的幣別會被回報出來，
+網頁顯示提醒、Bot 的結算訊息也會明講「已當成 1:1 折算」。
 
-這一段不在契約測試的涵蓋範圍內（測試比對的是 `calculateDistribution` 與
-`calculateSettlements` 兩支純函式，不是呼叫端如何準備 balance）。
-修法是把餘額彙總也收進 `_shared/` —— 見下方的 M14。
-
-> 演算法本身的重複已由 `src/utils/finance.parity.test.ts` 的契約測試看守，
+> 演算法與彙總的重複都由 `src/utils/finance.parity.test.ts` 的契約測試看守，
 > 改一邊忘了另一邊會讓 CI 失敗。
 
 ---
 
-## LINE Bot 的中低優先 bug（剩下的 M4、M14、M15）
+## LINE Bot 的中低優先 bug（M1–M19）—— 已全部完成
 
 來源是 [`LINE_SCENARIOS.md`](LINE_SCENARIOS.md) 第 10.2 節。
-**M1–M3、M5–M8、M10–M13、M16–M19 都已經修完**（M2 隨 T2，其餘於 2026-09-05），
-完成內容留在 `LINE_SCENARIOS.md` 第 10.2 節當作紀錄。
-下面三條刻意留著：M4 要先決定旅程時區怎麼存、M14 牽涉前後端彙總邏輯的收斂、
-M15 是新功能而不是 bug。動手前請先看 `LINE_SCENARIOS.md` 對應的情境編號，改完逐條回歸。
+**M1–M19 已於 2026-09-04 ~ 09-06 分批修完**（M9 不存在），
+每一條的現象、修法與完成日期留在 `LINE_SCENARIOS.md` 第 10.2 節，
+當作「為什麼要這樣寫」的紀錄。這裡不再重複列出。
 
-| # | 問題 | 修法方向 |
-| :-- | :-- | :-- |
-| M4 | `getTripTimezone()` 先看 `base_currency`，主幣 TWD 的日本旅程「今天」是台北時間。 | 旅程設定加時區欄位，或改為優先看非主幣別的 rates。 |
-| M14 | 結算匯率換算兩邊不一致（同下方「已知風險 5」）。 | 把餘額彙總收進 `_shared/finance.ts`（`sumByCurrency` 已經先搬進去了），納入契約測試。 |
-| M15 | 語音訊息不支援。 | Gemini 可直接吃音訊：下載 `audio/m4a` 後走與文字相同的 schema。 |
-
-（編號沿用 `LINE_SCENARIOS.md`，M9 不存在。）
+要加新功能或改 Bot 邏輯前，先掃過 `LINE_SCENARIOS.md` 的情境表；改完逐條回歸。
 
 ---
 
@@ -102,17 +94,20 @@ M15 是新功能而不是 bug。動手前請先看 `LINE_SCENARIOS.md` 對應的
 
 ### 短期
 
-- 修正上述已知風險 2 與 5。
+- 修正上述已知風險 2（垃圾桶的 24 小時判斷依賴客戶端時間）。
 - 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
 - Edge Function 模組化：純函式已抽到 `line-webhook/guards.ts` 並有測試，
   但 `index.ts` 仍是兩千行的路由單檔。並為 LINE webhook 事件與
   Gemini 回應補上真正的型別（那些 `any` 在 ESLint 是 warning，見 `eslint.config.js`）。
-- LINE Bot 尚未支援：以自然語言直接定位並修改／刪除既有支出（只能走清單按鈕或撤銷最近一筆）、多品項收據拆帳、
-  自由條件的支出查詢（目前只有今日／本週／本月／結算幾個固定指令，
-  其餘交給 AI 但它只看得到最近 10 筆）。
+- LINE Bot 尚未支援：以自然語言直接定位並修改／刪除既有支出（只能走清單按鈕或撤銷最近一筆）、
+  多品項收據拆帳、任意條件的支出查詢。
+  查詢已經好很多 —— 【全趟彙總】把總額、每人收支、各分類、逐日合計與最大金額
+  都先算好餵給 AI（M6、K12、K13）—— 但仍是「事先算好固定幾種切片」，
+  問到沒被涵蓋的角度（例如「某兩人之間的交易」）還是答不出來。
   這些適合改用 Gemini function calling 一次解決，並與
   [`MCP_SERVER_DESIGN.md`](MCP_SERVER_DESIGN.md) 的工具清單共用同一層實作。
-- Webhook 目前整條同步處理到底，OCR 路徑有超過 LINE replyToken 時效的風險。
+- Webhook 目前整條同步處理到底，OCR 與**語音**路徑有超過 LINE replyToken 時效的風險
+  （語音會先呼叫一次 Gemini 轉錄，再呼叫一次解析，是目前最慢的一條路）。
 
 ### 中期
 

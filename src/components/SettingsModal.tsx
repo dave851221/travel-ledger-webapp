@@ -19,12 +19,43 @@ import {
   Copy,
   Check,
   MessageCircle,
-  Bot
+  Bot,
+  Clock
 } from 'lucide-react';
 import Modal from './Modal';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV } from '../utils/finance';
+
+/**
+ * 旅程時區的候選清單（M4）。
+ *
+ * 刻意只列常去的地方而不是完整的 IANA 清單 —— 幾百個選項在手機上根本選不到。
+ * 需要別的時區時可以直接改資料庫，Edge Function 會驗證字串是不是 Intl 認得的。
+ */
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Asia/Taipei', label: '台北 (Asia/Taipei)' },
+  { value: 'Asia/Tokyo', label: '東京 (Asia/Tokyo)' },
+  { value: 'Asia/Seoul', label: '首爾 (Asia/Seoul)' },
+  { value: 'Asia/Hong_Kong', label: '香港 (Asia/Hong_Kong)' },
+  { value: 'Asia/Shanghai', label: '上海 (Asia/Shanghai)' },
+  { value: 'Asia/Singapore', label: '新加坡 (Asia/Singapore)' },
+  { value: 'Asia/Bangkok', label: '曼谷 (Asia/Bangkok)' },
+  { value: 'Asia/Kuala_Lumpur', label: '吉隆坡 (Asia/Kuala_Lumpur)' },
+  { value: 'Asia/Ho_Chi_Minh', label: '胡志明市 (Asia/Ho_Chi_Minh)' },
+  { value: 'Asia/Jakarta', label: '雅加達 (Asia/Jakarta)' },
+  { value: 'Asia/Manila', label: '馬尼拉 (Asia/Manila)' },
+  { value: 'Asia/Dubai', label: '杜拜 (Asia/Dubai)' },
+  { value: 'Australia/Sydney', label: '雪梨 (Australia/Sydney)' },
+  { value: 'Pacific/Auckland', label: '奧克蘭 (Pacific/Auckland)' },
+  { value: 'Europe/London', label: '倫敦 (Europe/London)' },
+  { value: 'Europe/Paris', label: '巴黎 (Europe/Paris)' },
+  { value: 'Europe/Zurich', label: '蘇黎世 (Europe/Zurich)' },
+  { value: 'America/New_York', label: '紐約 (America/New_York)' },
+  { value: 'America/Los_Angeles', label: '洛杉磯 (America/Los_Angeles)' },
+  { value: 'America/Toronto', label: '多倫多 (America/Toronto)' },
+  { value: 'UTC', label: 'UTC' },
+];
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -59,6 +90,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [ratesStr, setRatesStr] = useState<Record<string, string>>({});
   const [precisionStr, setPrecisionStr] = useState<Record<string, string>>({});
   const [baseCurrency, setBaseCurrency] = useState(trip.base_currency);
+  const [timezone, setTimezone] = useState(trip.timezone || '');
   const [defaultCurrency, setDefaultCurrency] = useState(trip.default_currency || trip.base_currency);
   const [defaultCategory, setDefaultCategory] = useState(trip.default_category || trip.categories[0] || '');
   const [defaultPayer, setDefaultPayer] = useState<string[]>(trip.default_payer || []);
@@ -85,6 +117,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setTripCategory(trip.category || '');
       setAiPreference(trip.ai_preference || '');
       setBaseCurrency(trip.base_currency);
+      setTimezone(trip.timezone || '');
       setDefaultCurrency(trip.default_currency || trip.base_currency);
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
       setDefaultPayer(trip.default_payer || []);
@@ -221,6 +254,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           rates: finalRates,
           precision_config: finalPrecision,
           base_currency: baseCurrency,
+          // 留空 = 自動（依幣別推測）；與 access_code 同樣的正規化慣例，統一存成 NULL
+          timezone: timezone.trim() || null,
           default_currency: defaultCurrency,
           default_category: defaultCategory,
           default_payer: defaultPayer,
@@ -403,6 +438,32 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   </datalist>
                 </div>
                 <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">同名分類的旅程會在首頁分組顯示，方便按家族／朋友／出差等情境分類管理。</p>
+              </div>
+
+              {/* 旅程時區：LINE Bot 判斷「今天」用的就是它（M4）。
+                  幣別不等於所在地 —— 主幣 TWD 的日本旅程用台北時間，
+                  日本時間 23:30 記帳會被記到前一天去。 */}
+              <div className="space-y-2">
+                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">
+                  旅程時區 <span className="text-[9px] font-normal opacity-60 ml-2">(選填)</span>
+                </label>
+                <div className="relative">
+                  <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
+                  <select
+                    className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base appearance-none"
+                    value={timezone}
+                    onChange={e => setTimezone(e.target.value)}
+                  >
+                    <option value="">自動（依幣別推測）</option>
+                    {TIMEZONE_OPTIONS.map(tz => (
+                      <option key={tz.value} value={tz.value}>{tz.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">
+                  LINE Bot 判斷「今天」用的時區。留「自動」時會從幣別推測 ——
+                  主幣別是台幣的日本旅程會猜成台北時間，深夜記帳容易差一天，建議直接指定。
+                </p>
               </div>
 
               {/* AI 記帳偏好：LINE Bot 解析文字與收據時的參考，整趟旅程共用一份 */}

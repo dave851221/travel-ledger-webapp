@@ -10,6 +10,9 @@
 --   ai_preference   ：LINE Bot 解析自然語言與收據時參考的自由文字偏好。
 --                     整趟旅程共用一份（不分 LINE 綁定、不分管道），網頁設定頁與
 --                     LIFF 偏好頁編輯的都是這個欄位。空字串一律存成 NULL。
+--   timezone   ：IANA 時區字串（例如 Asia/Tokyo）。LINE Bot 判斷「今天」用的就是它。
+--                NULL 代表沒設，Bot 會退回舊的「從幣別猜」邏輯（主幣 TWD 的日本旅程
+--                因此會猜成台北時間 —— 那正是加這個欄位的原因，見 ROADMAP 的 M4）。
 CREATE TABLE IF NOT EXISTS public.trips (
     id                    UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                  TEXT        NOT NULL,
@@ -19,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.trips (
     categories            TEXT[]      NOT NULL,
     category              TEXT,
     base_currency         TEXT        NOT NULL,
+    timezone              TEXT,
     rates                 JSONB       NOT NULL DEFAULT '{}'::jsonb,
     precision_config      JSONB       NOT NULL DEFAULT '{}'::jsonb,
     is_archived           BOOLEAN     DEFAULT FALSE,

@@ -7,6 +7,11 @@ export interface Trip {
   categories: string[];
   category?: string | null;
   base_currency: string;
+  /**
+   * IANA 時區字串（例如 Asia/Tokyo）。LINE Bot 判斷「今天」用的就是它。
+   * NULL／undefined 代表沒設，Bot 會退回從幣別推測（主幣 TWD 的日本旅程會猜錯，M4）。
+   */
+  timezone?: string | null;
   default_currency?: string;
   default_category?: string;
   default_payer?: string[];

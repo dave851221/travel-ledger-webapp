@@ -448,6 +448,86 @@ describe('summarizeTripExpenses', () => {
     expect(text).not.toContain('0.30000000000000004');
   });
 
+  it('逐日合計讓「第一天花多少」答得出來（K12）', () => {
+    const text = summarizeTripExpenses(rows, members, precision);
+    expect(text).toContain('逐日合計：2026-09-01 900 TWD｜2026-09-02 100 TWD｜2026-09-03 3000 JPY');
+  });
+
+  it('同一天多筆會合併，且同一天的不同幣別分開列', () => {
+    const sameDay = [
+      { amount: 100, currency: 'TWD', category: '餐飲', date: '2026-09-01', payer_data: { 代杰: 100 }, split_data: { 代杰: 100 } },
+      { amount: 200, currency: 'TWD', category: '餐飲', date: '2026-09-01', payer_data: { 代杰: 200 }, split_data: { 代杰: 200 } },
+      { amount: 500, currency: 'JPY', category: '交通', date: '2026-09-01', payer_data: { 代杰: 500 }, split_data: { 代杰: 500 } },
+    ];
+    const text = summarizeTripExpenses(sameDay, ['代杰'], precision);
+    expect(text).toContain('逐日合計：2026-09-01 500 JPY・300 TWD');
+  });
+
+  it('超過 30 天只留頭尾，中間明講省略了幾天', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      amount: 10, currency: 'TWD', category: '餐飲',
+      date: `2026-09-${String(i + 1).padStart(2, '0')}`.replace('2026-09-3', '2026-10-0').slice(0, 10),
+      payer_data: { 代杰: 10 }, split_data: { 代杰: 10 },
+    }));
+    // 保證產生 40 個不同日期
+    const uniqueDays = new Set(many.map(r => r.date));
+    expect(uniqueDays.size).toBeGreaterThan(30);
+
+    const text = summarizeTripExpenses(many, ['代杰'], precision);
+    expect(text).toContain('天省略');
+    // 頭尾都還在
+    const sorted = [...uniqueDays].sort();
+    expect(text).toContain(sorted[0]);
+    expect(text).toContain(sorted[sorted.length - 1]);
+  });
+
+  it('金額最大的 3 筆依折合主幣別排序（K13）', () => {
+    // JPY 0.22：3000 JPY = 660 TWD，比 900 TWD 小
+    const text = summarizeTripExpenses(
+      rows.map((r, i) => ({ ...r, description: `第${i + 1}筆` })),
+      members, precision,
+      { rates: { TWD: 1, JPY: 0.22 }, baseCurrency: 'TWD' },
+    );
+    expect(text).toContain('金額最大的 3 筆（依折合 TWD 排序）：');
+    expect(text).toContain('1. 2026-09-01 第1筆 900 TWD [餐飲]');
+    expect(text).toContain('2. 2026-09-03 第2筆 3000 JPY（折合 660 TWD） [交通]');
+    expect(text).toContain('3. 2026-09-02 第3筆 100 TWD [餐飲]');
+  });
+
+  it('沒給主幣別時退回用原始金額排序，且不加折合括號', () => {
+    const text = summarizeTripExpenses(
+      rows.map((r, i) => ({ ...r, description: `第${i + 1}筆` })),
+      members, precision,
+    );
+    expect(text).toContain('金額最大的 3 筆：');
+    // 沒折算的話 3000 JPY 就是最大的
+    expect(text).toContain('1. 2026-09-03 第2筆 3000 JPY [交通]');
+    expect(text).not.toContain('折合');
+  });
+
+  it('結清紀錄不會出現在逐日合計與最大金額裡', () => {
+    const withSettlement = [
+      ...rows,
+      {
+        amount: 99999, currency: 'TWD', description: '結清', category: '結清', date: '2026-09-04',
+        is_settlement: true, payer_data: { Amy: 99999 }, split_data: { 代杰: 99999 },
+      },
+    ];
+    const text = summarizeTripExpenses(withSettlement, members, precision, { baseCurrency: 'TWD' });
+    expect(text).not.toContain('2026-09-04 99999 TWD');
+    expect(text).not.toContain('99999 TWD [結清]');
+  });
+
+  it('支出少於 3 筆時標題跟著縮', () => {
+    const text = summarizeTripExpenses([rows[0]], members, precision, { baseCurrency: 'TWD' });
+    expect(text).toContain('金額最大的 1 筆');
+  });
+
+  it('沒有描述的支出標成「（無描述）」', () => {
+    const text = summarizeTripExpenses([rows[0]], members, precision, { baseCurrency: 'TWD' });
+    expect(text).toContain('（無描述）');
+  });
+
   it('沒有支出時給一句話，不是一堆空欄位', () => {
     expect(summarizeTripExpenses([], members, precision)).toBe('（這趟旅程還沒有任何支出）');
   });

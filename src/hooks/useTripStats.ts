@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Trip, Expense } from '../types';
+import { calculateMemberBalances, getRate } from '../utils/finance';
 
 export interface CurrencyTotals {
   total: number;
@@ -25,7 +26,10 @@ export interface TripStats {
    * key 是幣別，另有一個 'GRAND_TOTAL' 是全部折算回主幣別的版本。
    */
   balances: Record<string, Record<string, number>>;
-  /** 有支出用了旅程未設定匯率的幣別，會被當成 1:1 換算，需提醒使用者 */
+  /**
+   * 有支出用了旅程未設定匯率的幣別，會被當成 1:1 換算，需提醒使用者。
+   * 主幣別不會出現在這裡 —— 它對自己的匯率依定義就是 1（情境 D9）。
+   */
   missingRateCurrencies: string[];
 }
 
@@ -56,23 +60,27 @@ export const useTripStats = (
   const grandBase: CurrencyTotals = { total: 0, paidByMe: 0, owedByMe: 0 };
   const categoryMap: Record<string, number> = {};
   const memberDetails: Record<string, MemberDetail> = {};
-  const balances: Record<string, Record<string, number>> = { GRAND_TOTAL: {} };
-  const missingRateCurrencies = new Set<string>();
 
   trip.members.forEach((m) => {
     memberDetails[m] = { totalOwed: 0, categories: {} };
-    balances.GRAND_TOTAL[m] = 0;
   });
 
+  // 餘額與匯率換算走共用實作（M14）。
+  // ⚠️ 以前這裡自己寫 `rates[e.currency] || 1`，Edge Function 寫
+  //    `e.currency === base ? 1 : rates[...]` —— rates[base] 不等於 1 時
+  //    網頁與機器人會算出不同的結算結果（ROADMAP 舊「已知風險 5」）。
+  //    現在兩邊都呼叫 calculateMemberBalances，且由契約測試看守。
+  //    結清紀錄要一起傳進去：不然結清完帳面上還是欠著。
+  const balanceSummary = calculateMemberBalances(
+    expenses, trip.members, trip.rates, trip.base_currency,
+  );
+
   expenses.forEach((e) => {
-    if (trip.rates[e.currency] === undefined) missingRateCurrencies.add(e.currency);
-    const rate = trip.rates[e.currency] || 1;
-    const amountInBase = e.amount * rate;
+    const rate = getRate(e.currency, trip.rates, trip.base_currency);
+    const amountInBase = (Number(e.amount) || 0) * rate;
 
     if (!byCurrency[e.currency]) {
       byCurrency[e.currency] = { total: 0, paidByMe: 0, owedByMe: 0 };
-      balances[e.currency] = {};
-      trip.members.forEach((m) => { balances[e.currency][m] = 0; });
     }
 
     const pMe = currentUser ? (Number(e.payer_data[currentUser]) || 0) : 0;
@@ -96,14 +104,6 @@ export const useTripStats = (
           (memberDetails[m].categories[e.category] || 0) + owedInBase;
       });
     }
-
-    // 所有紀錄（含結清）都要計入結餘，用來算出誰該給誰多少錢
-    trip.members.forEach((m) => {
-      const paid = Number(e.payer_data[m]) || 0;
-      const owed = Number(e.split_data[m]) || 0;
-      balances[e.currency][m] += paid - owed;
-      balances.GRAND_TOTAL[m] += (paid - owed) * rate;
-    });
   });
 
   const categoryData = Object.entries(categoryMap)
@@ -115,7 +115,7 @@ export const useTripStats = (
     grandBase,
     categoryData,
     memberDetails,
-    balances,
-    missingRateCurrencies: Array.from(missingRateCurrencies),
+    balances: { GRAND_TOTAL: balanceSummary.grandTotal, ...balanceSummary.byCurrency },
+    missingRateCurrencies: balanceSummary.missingRateCurrencies,
   };
 }, [expenses, trip, currentUser]);
