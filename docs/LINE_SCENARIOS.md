@@ -596,3 +596,100 @@
 4. `設定?` 顯示旅程層級內容並附按鈕。
 5. 升級前用 `設定:` 存過的旅程，升級後 `設定?` 仍看得到原本內容（migration 搬資料）。
 6. `npm run lint && npm test && npm run check:functions && npm run build`。
+
+---
+
+## 13. 第一輪真機測試發現的 bug（T1–T4）與修法
+
+高優先修正（第 10.1 節）上線後，擁有者實測回報四個問題。都是**設計上的漏洞**而不是筆誤，
+修法寫得比較細，實作者請照做；行號以 commit `834bce5` 為準，仍以函式名為主。
+
+### T1　「剛剛那個改 250」沒有草稿時被當成新支出，重複記了一筆
+
+- **現象**：`剛剛那筆改 235`（有「那筆」）正確列出編輯清單；`剛剛那個改250`（「那個」）直接進 AI，
+  AI 回了一張「計程車 250」的新卡片。使用者要的是：有草稿 → 修草稿；沒草稿 → 編輯清單。
+- **原因**：兩層都漏了。
+  1. `detectRecordIntent()` 的 `RECORD_NOUN` 只認「支出／花費／帳／紀錄／這筆／那筆／上一筆」，「那個」「這個」「剛剛」「剛才」都不算受詞。
+  2. 進了 AI 之後沒有第二道防線：system instruction 只用文字叫它「回 chat 請使用者輸入編輯支出」，
+     但 schema 允許它回 `expense`，它就回了。
+- **修法**（兩層都做）：
+  1. `guards.ts`：`RECORD_NOUN` 加 `那個|這個|剛剛|剛才|剛才那|上一個|前一個|最後一筆|最近一筆|最新一筆`。
+     `EDIT_VERB` 維持要「改＋數字」或「改成／改為／改到／改一下」，所以「剛剛那個改天再說」仍不會誤判。
+     `guards.test.ts` 加：`剛剛那個改250` → `edit`、`剛才那個刪掉` → `delete`、`剛剛那個改天再說` → `null`。
+  2. 新增純函式 `mentionsEditingExisting(text)`：只要出現 `EDIT_VERB` 或 `不對|錯了|打錯|記錯|更正`，就回 true。
+     在 P8 收到 AI 的 `expense` 回覆後、產生卡片之前加一道判斷：
+     **沒有任何未確認草稿、AI 沒填 `corrects_draft`、且 `mentionsEditingExisting(cleanText)` 為 true** →
+     不出卡片，改列編輯清單（重用既有清單程式碼，抽成 `replyEditPicker()`），並在清單標題下加一句
+     「看起來你想改已經存入的紀錄。如果其實是要新記一筆，請不要用『改』來描述」。
+  3. 編輯清單本身已依日期與建立時間倒序，剛存的那筆會在第一列，不必另做「直接開最新一筆」。
+- **驗證**：情境 I1、J6、J8；新增 J18「沒草稿時用『那個』『剛剛』指稱要改」。
+
+### T2　從編輯清單改完再按同一顆「編輯」，LIFF 顯示的還是舊資料
+
+- **現象**：LIFF 存檔成功，網頁看到新金額，但回到 LINE 再按清單上同一列的「✏️ 編輯」，表單填的是修改前的值。
+- **原因**：就是第 10.2 節的 **M2**。`buildEditLiffUrl()` 把整筆支出 base64 塞進網址，清單訊息發出去的那一刻資料就凍結了。
+  同時也是 LINE `uri` 上限 1000 字的隱患。
+- **修法**（把 M2 提前做）：
+  1. `LiffEdit.tsx` 支援三種進入方式，優先順序：
+     - `?tripId=…&id=<expenseId>&u=<sourceId>`：直接 `supabase.from('expenses').select('*').eq('id', id).single()`，
+       每次開啟都拿到最新內容。找不到或 `deleted_at` 非空就顯示「這筆支出已被刪除或不存在」。
+     - `?tripId=…&n=<nonce>&u=<sourceId>`：草稿。查 `line_chat_history` where `line_user_id = u` and `role = 'pending'`
+       （RLS 對匿名開放，見 `05_policies.sql`），取最近 10 列在前端 parse `content`，找 `n` 相符的那一列，
+       欄位對應與現在 `decoded` 的 `d/a/c/dt/cat/p/s/pi` 相同。找不到就提示「這張卡片已過期，請重新記帳」。
+       另外查 `line_processed_actions` 是否已有這個 nonce，有的話直接顯示「這張卡片已處理過」，不要開表單。
+     - `?data=<base64>`：舊格式，保留給已經發出去的卡片，行為不變。
+  2. `index.ts`：`buildEditLiffUrl()` 改為只組 `id` 與 `u`；兩個草稿卡片（OCR 與文字路徑）的「✏️ 編輯」網址改為只帶 `n` 與 `u`。
+     `liffData` 那兩段 base64 編碼可以整段刪除。
+  3. `ExpenseModal` 不用改：它已經靠 `editData.id` 決定 UPDATE，靠 `nonce`／`line_user_id` 決定鎖與通知。
+  4. 這是**前端**改動，要 push `main`；Edge Function 也要重新部署，兩邊要一起上，否則舊網址格式對不上。
+- **驗證**：情境 J5、J14、H5；新增 J19「改完再按同一顆編輯看到新資料」。
+
+### T3　「夾娃娃300」預設幣別是 JPY，卻出了 TWD 的卡片
+
+- **現象**：旅程主幣 TWD、預設幣別 JPY。使用者沒提幣別，AI 有時填 JPY、有時填 TWD。
+- **原因**：幣別完全交給 AI 決定。`tripContext` 同時給了「主幣：TWD」與「預設：JPY」，判斷優先權只是一行文字，
+  小模型（`gemini-*-flash-lite`）常把「主幣」當成該填的值。`normalizeCurrency()` 只擋「不存在」的幣別，TWD 在 rates 裡所以放行。
+- **修法**（改成程式決定，不靠 prompt 記性）：
+  1. `TEXT_RESPONSE_SCHEMA` 與 `OCR_RESPONSE_SCHEMA` 的 `data` 加欄位
+     `currency_source: { type: 'STRING', enum: ['stated', 'preference', 'none'] }`：
+     `stated` ＝ 使用者這句話（或收據上）明確出現幣別字眼或符號；`preference` ＝ 記帳偏好指定；`none` ＝ 都沒有。
+     `currency` 的 description 改為「只在 currency_source 不是 none 時才有意義」。
+  2. `guards.ts` 新增 `resolveCurrencyByRule(aiCurrency, source, text, trip)`：
+     - `source === 'none'` → 一律回 `trip.default_currency || trip.base_currency`，忽略 AI 填的值。
+     - `source === 'stated'` → 再用程式驗一次：文字裡有沒有幣別字眼（新常數 `CURRENCY_HINTS`：
+       `日幣|日圓|円|¥|JPY|台幣|新台幣|NT|TWD|美金|美元|USD|\$|韓元|₩|KRW|歐元|€|EUR|港幣|HKD|泰銖|฿|THB|人民幣|RMB|CNY|新幣|SGD|馬幣|MYR|越南盾|VND`）。
+       有 → 採 AI 的值；沒有 → 視同 `none`（AI 說謊），並記 log。OCR 路徑沒有文字可驗，直接信 `stated`。
+     - `source === 'preference'` → 採 AI 的值（偏好是自由文字，程式驗不了）。
+     - 回傳值再交給既有的 `normalizeCurrency()` 做 rates／白名單檢查，流程不變。
+  3. `tripContext` 的【幣別】那行改寫成：
+     `【幣別】記帳預設：JPY（使用者沒明講就填這個）｜結算主幣：TWD（只用於統計，不要拿來當記帳幣別）｜可用：{rates}`。
+     `YOSHI_SYSTEM_INSTRUCTION` 規則 2 補一句：「沒有出現幣別字眼時 currency_source 填 none，currency 填旅程的記帳預設幣別」。
+  4. `guards.test.ts`：`none` 強制預設、`stated` 但文字沒有幣別字眼退回預設、`stated` 且有「日幣」採 JPY、`preference` 照用。
+- **驗證**：情境 D1、D5、D6；新增 D10「沒提幣別時一律用預設幣別，與主幣別不同也一樣」。
+
+### T4　問「剛剛 Lawson 那筆買了什麼」，分析的是另一張收據
+
+- **現象**：AI 回 `analyze_photo`，但 `url` 指到之前另一筆的照片，回答內容完全不對。
+- **原因**：現在是把最近 10 筆的**完整照片網址**塞進 `tripContext`，要 AI 逐字抄回來。網址長、只差幾個數字，
+  小模型抄錯或抄成上一輪對話裡出現過的那個。全庫搜尋那條路也是同樣做法。此外只分析 `photo_urls[0]`，多張收據只看第一張。
+- **修法**（AI 只回「編號」，程式自己找照片）：
+  1. `expensesSummary` 改成有編號的清單：`#3 2026-09-04 Lawson (便利商店) 1,280 JPY [餐飲] 📷×2`。**不再放網址**（也省 token）。
+  2. `TEXT_RESPONSE_SCHEMA` 移除 `url`，改為 `expense_ref: { type: 'STRING', description: 'analyze_photo 時填近期支出的編號，例如 #3；不在清單裡就留空字串' }`。
+     `question` 維持。system instruction 加一句：「使用者說『剛剛』『最新』又沒指名店名時，選清單裡日期最近且有 📷 的那一筆」。
+  3. P8 的 `analyze_photo` 分支改為：
+     - 先用 `expense_ref` 在剛剛查出的 `expenses` 陣列裡找（同一次查詢的結果，不要再查一次）。
+     - 找不到 → 全庫查 `photo_urls` 非空的支出（已有這段），**先在程式端縮小範圍**：把 `question` 與各支出的 `description`
+       用 `normalizeName()` 做子字串比對，命中一筆就直接用；命中多筆或零筆才交給 AI，但 AI 一樣只回編號
+       （`selectPrompt` 改成帶 `#n` 的清單，回 `{ found, ref }`）。
+     - 決定了那一筆之後，把它**所有** `photo_urls` 都下載（重用 `fetchPhotoPart`），一次交給 `analyzeReceiptPhoto()`。
+       函式簽章改為 `analyzeReceiptPhoto(photoUrls: string[], question, expenseLabel)`，prompt 開頭標明
+       「以下 N 張是同一筆支出『{description} {amount} {currency}』的收據」。
+  4. 回覆訊息開頭附上是哪一筆：`🔍 {date} {description} {amount} {currency}` 再接分析內容；
+     寫進 `line_chat_history` 的 model 內容前面加 `[收據分析 #{id前8碼}]`，下一輪追問（「那第二項是什麼」）才有指代對象。
+  5. `getPublicUrl` 那些在 context 組網址的程式碼可以刪掉。
+- **驗證**：情境 K15、K16；新增 K23「剛剛那筆（不指名）」、K24「多張照片的支出」、K25「指名店名但不在最近 10 筆」。
+
+### 建議順序
+
+T3 → T1 → T4 → T2。前三個只動 Edge Function，可以一起部署驗證；T2 牽涉前端與 Edge Function 要同時上線，最後做。
+每個 T 做完都要把本文件對應的情境列更新（現況欄與新增的情境），並跑四關。
