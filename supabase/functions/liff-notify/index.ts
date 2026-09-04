@@ -44,7 +44,9 @@ serve(async (req) => {
     if (expense_id) {
       quickReplyItems.push({
         type: "action",
-        action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: expense_id, d: description }) }
+        // postback 只帶 eid：描述放進來的話，長店名很容易超過 LINE 的 300 bytes
+        // 上限，整則推播會發送失敗。line-webhook 的 undo 分支會自行回查描述。
+        action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: expense_id }) }
       })
     }
     quickReplyItems.push(

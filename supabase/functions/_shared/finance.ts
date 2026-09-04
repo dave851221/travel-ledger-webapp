@@ -23,6 +23,29 @@ export function formatAmount(
 }
 
 /**
+ * 依幣別加總一批支出。
+ *
+ * 快捷查詢（今日／本月／旅程總覽）以前是用原生的 `totals[c] += e.amount` 累加，
+ * USD 旅程的合計會出現 `0.30000000000000004` 這種尾數 ——
+ * 違反 CLAUDE.md「金額運算一律走 decimal.js」。
+ *
+ * ⚠️ 這支目前只有 Bot 端使用，前端的彙總還散在 `useTripStats` 裡。
+ *    把兩邊的彙總收斂到這裡並納入契約測試是 ROADMAP 的 M14。
+ */
+export function sumByCurrency(
+  rows: { amount: number | string; currency: string }[],
+): Record<string, InstanceType<typeof Decimal>> {
+  const totals: Record<string, InstanceType<typeof Decimal>> = {};
+  for (const row of rows ?? []) {
+    const currency = row?.currency;
+    if (!currency) continue;
+    const amount = new Decimal(row.amount || 0);
+    totals[currency] = totals[currency] ? totals[currency].plus(amount) : amount;
+  }
+  return totals;
+}
+
+/**
  * 把總額分配給成員，並公平處理除不盡的餘數。
  *
  * - lockedData 裡的成員金額固定不動，只有其餘成員參與均分

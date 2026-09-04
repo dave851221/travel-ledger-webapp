@@ -2,7 +2,27 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { Decimal } from "../_shared/deps.ts"
-import { calculateDistribution, calculateSettlements, DEFAULT_PRECISION } from "../_shared/finance.ts"
+import {
+  calculateDistribution,
+  calculateSettlements,
+  DEFAULT_PRECISION,
+  formatAmount,
+  sumByCurrency,
+} from "../_shared/finance.ts"
+// 純函式（AI 回傳內容的驗證、路由的意圖判斷）集中在 guards.ts，
+// 由 guards.test.ts 看守。改這些行為請連同測試一起改。
+import {
+  applyParticipantDefaults,
+  CANCEL_DRAFT_KEYWORDS,
+  claimsCompletedAction,
+  detectRecordIntent,
+  extractJSON,
+  normalizeCurrency,
+  normalizeDate,
+  normalizeExpenseAmountMaps,
+  resolveExpenseMembers,
+  summarizeHistoryEntry,
+} from "./guards.ts"
 
 const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
 const LINE_CHANNEL_SECRET = Deno.env.get('LINE_CHANNEL_SECRET') || ''
@@ -22,7 +42,34 @@ const isRateLimit = (e: any) => String(e?.message).startsWith('RATE_LIMIT:')
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-function getQuickReply(bound: boolean, showGroupToggle = false, mentionRequired = true) {
+/** 編輯「旅程 AI 記帳偏好」的 LIFF 頁網址（Feature F） */
+function preferenceLiffUrl(tripId: string): string {
+  return `${WEBAPP_URL}/#/liff/preference?tripId=${tripId}`
+}
+
+/**
+ * 「設定?」「設定:」的回覆用：把「記帳偏好」按鈕排到第一顆。
+ * 一般的 boundQR 也有這顆，但排在最後 —— 使用者正在講偏好，那顆該最顯眼。
+ */
+function preferenceQuickReply(tripId: string, showGroupToggle: boolean, mentionRequired: boolean) {
+  // 不傳 tripId 給 getQuickReply，避免同一顆按鈕出現兩次
+  const base = getQuickReply(true, showGroupToggle, mentionRequired)
+  return { items: [preferenceQuickReplyItem(tripId), ...base.items] }
+}
+
+function preferenceQuickReplyItem(tripId: string) {
+  return {
+    type: "action",
+    action: { type: "uri", label: "⚙️ 記帳偏好", uri: preferenceLiffUrl(tripId) },
+  }
+}
+
+function getQuickReply(
+  bound: boolean,
+  showGroupToggle = false,
+  mentionRequired = true,
+  tripId?: string | null,
+) {
   if (!bound) {
     return {
       items: [
@@ -39,6 +86,8 @@ function getQuickReply(bound: boolean, showGroupToggle = false, mentionRequired 
     { type: "action", action: { type: "message", label: "✏️ 編輯支出", text: "編輯支出" } },
     { type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } },
   ]
+  // 偏好是旅程層級的，沒有旅程就沒有東西可編輯
+  if (tripId) items.push(preferenceQuickReplyItem(tripId))
   if (showGroupToggle) {
     items.push(mentionRequired
       ? { type: "action", action: { type: "message", label: "📣開啟全回應模式", text: "模式:全回應模式" } }
@@ -47,18 +96,6 @@ function getQuickReply(bound: boolean, showGroupToggle = false, mentionRequired 
   }
   return { items }
 }
-
-// Gemini 偶爾會用 markdown code block 包裝 JSON，此函式負責安全提取
-function extractJSON(text: string): string {
-  const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (codeBlock) return codeBlock[1].trim()
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start !== -1 && end !== -1 && end > start) return text.substring(start, end + 1)
-  return text.trim()
-}
-
-// 收集 expense 中提到但不在旅程成員清單內的名字，回傳去重後的陣列
 
 /**
  * 給 AI 的成員別名提示。
@@ -76,72 +113,66 @@ function memberAliasHint(members: string[]): string {
 }
 
 /**
- * 把 AI 回傳的金額欄位統一成 { 成員: 金額 }。
+ * 讓非同步工作在回應送出後仍跑得完。
  *
- * 接受兩種形式：
- *   - [{ member, amount }]  ← response_schema 產生的陣列
- *   - { 成員: 金額 }         ← 舊版草稿與沒有 schema 的模型可能仍回這種
+ * Supabase Edge Runtime 會在 Response 回傳後隨時中止函式，
+ * 過去那些 `.then(() => {})` 的「射後不理」寫法因此可能整個消失 ——
+ * 對話歷史掉了只是可惜，`saved` 紀錄掉了會讓「取消上一筆」撤到更早的一筆。
+ * 真正依賴結果的（例如 saved）請直接 await，其餘交給這裡。
  */
-function toAmountMap(value: unknown): Record<string, number> {
-  const out: Record<string, number> = {}
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const member = String((entry as any)?.member ?? '').trim()
-      if (!member) continue
-      out[member] = (out[member] ?? 0) + (Number((entry as any)?.amount) || 0)
-    }
-    return out
+function runInBackground(work: PromiseLike<unknown>): void {
+  const runtime = (globalThis as any).EdgeRuntime
+  const promise = Promise.resolve(work).catch((err) => console.error('[BG_TASK]', err))
+  if (runtime && typeof runtime.waitUntil === 'function') {
+    runtime.waitUntil(promise)
   }
-  if (value && typeof value === 'object') {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = Number(v) || 0
-    }
-  }
-  return out
 }
 
-/** 就地把 expense 的金額欄位正規化成 map */
-function normalizeExpenseAmountMaps(expense: any): void {
-  if (!expense) return
-  expense.payer_data = toAmountMap(expense.payer_data)
-  expense.split_details = toAmountMap(expense.split_details ?? expense.split_data)
+/** 一張還等在聊天室裡、使用者既沒確認也沒取消的記帳草稿 */
+interface OutstandingDraft {
+  nonce: string
+  exp: any
+  photoIds: string[]
+  tripId: string
 }
 
 /**
- * 取出這個聊天目前「還沒被處理」且帶有收據照片的記帳草稿。
+ * 取出這個聊天目前「還沒被處理」的記帳草稿（最新的在前，最多 5 張）。
  *
  * 「還沒被處理」＝ nonce 不在 line_processed_actions 裡，
  * 也就是使用者既沒按確認存入、也沒按取消，那張卡片還等在聊天室裡。
+ *
+ * 以前只找「有收據照片」的那一張，因為唯一的用途是逐項重新分帳。
+ * 現在還要用來判斷「剛剛那筆改 500」「取消」指的是哪一張卡片，
+ * 所以一律回傳，帶不帶照片由呼叫端自己篩。
  */
-async function getOutstandingPhotoDraft(
-  sourceId: string,
-): Promise<{ nonce: string; exp: any; photoIds: string[]; tripId: string } | null> {
+async function getOutstandingDrafts(sourceId: string): Promise<OutstandingDraft[]> {
   const { data: rows } = await supabase.from('line_chat_history')
     .select('content')
     .eq('line_user_id', sourceId)
     .eq('role', 'pending')
     .order('created_at', { ascending: false })
     .limit(5)
-  if (!rows || rows.length === 0) return null
+  if (!rows || rows.length === 0) return []
 
-  const candidates: { nonce: string; exp: any; photoIds: string[]; tripId: string }[] = []
+  const candidates: OutstandingDraft[] = []
   for (const row of rows) {
     try {
       const parsed = JSON.parse(row.content)
-      const photoIds = parsed.p ?? []
-      if (parsed.n && Array.isArray(photoIds) && photoIds.length > 0) {
+      const photoIds = Array.isArray(parsed.p) ? parsed.p : []
+      if (parsed.n) {
         candidates.push({ nonce: parsed.n, exp: parsed.exp, photoIds, tripId: parsed.tid })
       }
     } catch { /* skip malformed */ }
   }
-  if (candidates.length === 0) return null
+  if (candidates.length === 0) return []
 
   const { data: used } = await supabase.from('line_processed_actions')
     .select('nonce')
     .in('nonce', candidates.map(c => c.nonce))
   const usedSet = new Set((used ?? []).map((u: any) => u.nonce))
 
-  return candidates.find(c => !usedSet.has(c.nonce)) ?? null
+  return candidates.filter(c => !usedSet.has(c.nonce))
 }
 
 /** 由 photo id 或路徑組出 Storage 的公開網址 */
@@ -168,33 +199,15 @@ async function fetchPhotoPart(photoUrl: string): Promise<any | null> {
 }
 
 /**
- * 讓這個聊天先前未處理的記帳草稿失效。
+ * 讓指定的幾張草稿卡片失效。
  *
- * 修正一筆草稿時（例如「剛剛那筆改 500」）會送出一張新的 Flex 卡片，
- * 但舊卡片還留在聊天室裡，按下去仍會存入未修正的內容。
- *
- * 做法是把舊 nonce 直接塞進 line_processed_actions ——
+ * 做法是把 nonce 直接塞進 line_processed_actions ——
  * 那正是防重複點擊用的鎖，所以舊按鈕會走到既有的「此操作已處理過」分支，
- * 不必另外設計一套失效機制。
+ * 不必另外設計一套失效機制。`action_type` 記成 `superseded`，
+ * 好讓 postback 分支能分辨「被取代」與「你剛剛已經按過了」。
  */
-async function supersedePendingDrafts(sourceId: string, keepNonce: string): Promise<void> {
-  const { data } = await supabase.from('line_chat_history')
-    .select('content')
-    .eq('line_user_id', sourceId)
-    .eq('role', 'pending')
-    .order('created_at', { ascending: false })
-    .limit(10)
-  if (!data || data.length === 0) return
-
-  const nonces: string[] = []
-  for (const row of data) {
-    try {
-      const n = JSON.parse(row.content)?.n
-      if (n && n !== keepNonce) nonces.push(n)
-    } catch { /* skip malformed */ }
-  }
+async function markDraftsSuperseded(sourceId: string, nonces: string[]): Promise<void> {
   if (nonces.length === 0) return
-
   // 已存在的 nonce 會衝突，忽略即可（代表那張卡片早就處理過了）
   await supabase.from('line_processed_actions')
     .upsert(
@@ -204,37 +217,46 @@ async function supersedePendingDrafts(sourceId: string, keepNonce: string): Prom
 }
 
 /**
- * 判斷使用者是不是想刪除或修改「已經存檔」的支出。
+ * 只讓「被修正的那一張」草稿失效。
  *
- * 這件事必須在進 AI 之前攔下來：AI 沒有刪除或修改既有紀錄的能力，
- * 交給它的話，修改會變成再記一筆重複的支出，刪除則會得到一句
- * 「已經幫您刪除了」的假話。
- *
- * 要求同時出現動詞與受詞，避免「改天再說」「取消行程」這類誤判。
+ * ⚠️ 這裡刻意不是「讓所有舊草稿失效」。原本每送一張新卡片就把先前全部作廢，
+ *    結果「晚餐 300」接著「計程車 200」時第一張卡就按不動了，
+ *    群組裡兩個人同時記帳也會互相蓋掉（見 docs/LINE_SCENARIOS.md 的 H1）。
+ *    只有 AI 明確回報 corrects_draft 時，才該讓那一張失效。
  */
-const RECORD_NOUN = /(支出|花費|帳|紀錄|記錄|這筆|那筆|上一筆|上上一筆)/
-const DELETE_VERB = /(刪除|刪掉|刪了|移除|拿掉|去掉)/
-// 「改 500」「改500」這種「改 + 數字」是最常見的說法，必須涵蓋。
-// 不收單獨的「改」，否則「這筆帳我改天再處理」會被誤判。
-const EDIT_VERB = /(修改|編輯|更改|改成|改為|改到|改一下|改\s*\d)/
-
-function detectRecordIntent(text: string): 'delete' | 'edit' | null {
-  if (!RECORD_NOUN.test(text)) return null
-  if (DELETE_VERB.test(text)) return 'delete'
-  if (EDIT_VERB.test(text)) return 'edit'
-  return null
+async function supersedeDraft(sourceId: string, nonce: string): Promise<void> {
+  await markDraftsSuperseded(sourceId, [nonce])
 }
 
 /**
- * AI 有時會回「已經幫您刪除了」「我已經修改好了」，但它根本做不到 ——
- * 這種假訊息比沒有功能更糟，使用者會以為帳已經改掉了。
- * 送出前先攔下來。
+ * 讓這個聊天所有未處理的草稿失效。
+ * 綁定／斷開／切換旅程時該用它（ROADMAP 的 M13），一般記帳流程不要呼叫。
+ * 目前還沒有呼叫端 —— M13 會接上去，先 export 以免被當成死碼刪掉。
  */
-const FALSE_ACTION_CLAIM =
-  /(已經?(幫[你您])?(刪除|刪掉|移除|修改|更改|編輯|更新)|(刪除|刪掉|移除|修改|更改|編輯|更新)(好|完|了)|幫[你您](刪|改))/
+export async function supersedeAllDrafts(sourceId: string): Promise<void> {
+  const drafts = await getOutstandingDrafts(sourceId)
+  await markDraftsSuperseded(sourceId, drafts.map(d => d.nonce))
+}
 
-function claimsCompletedAction(text: string): boolean {
-  return FALSE_ACTION_CLAIM.test(text)
+/**
+ * 取消一張草稿：讓卡片失效，並把已上傳的收據照片清掉。
+ *
+ * 卡片上的「❌ 取消」按鈕與文字指令「取消」都走這裡，兩邊行為才會一致。
+ */
+async function cancelDraft(
+  sourceId: string,
+  draft: { nonce: string; photoIds: string[]; tripId: string },
+): Promise<void> {
+  await supabase.from('line_processed_actions')
+    .upsert(
+      [{ nonce: draft.nonce, line_user_id: sourceId, action_type: 'cancel' }],
+      { onConflict: 'nonce', ignoreDuplicates: true },
+    )
+  if (draft.photoIds.length > 0 && draft.tripId) {
+    const urls = draft.photoIds.map((id: string) => id.includes('/') ? id : `expenses/${draft.tripId}/${id}.jpg`)
+    console.log(`[PHOTO] Remove photo URL: ${urls}`)
+    await supabase.storage.from(RECEIPTS_BUCKET).remove(urls)
+  }
 }
 
 /**
@@ -264,165 +286,6 @@ function buildEditLiffUrl(expense: any, tripId: string, sourceId: string): strin
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
 const CHAT_HISTORY_TURNS = 8
 
-/**
- * 把歷史紀錄壓成適合當對話輪次的內容。
- *
- * 存進 line_chat_history 的 model 訊息是 `[記帳建議] {整包 JSON}`。
- * 直接把那串 JSON 當成模型自己說過的話餵回去，它很容易改去修那筆舊草稿
- * 而不是回應使用者當下這句話 —— 尤其在有 response_schema 約束的情況下。
- * 壓成一行摘要，既保留「剛剛那筆改 500」需要的指代對象，又不會蓋過新訊息。
- */
-function summarizeHistoryEntry(role: string, content: string): string {
-  if (role !== 'model' || !content.startsWith('[記帳建議]')) {
-    return content.length > 300 ? content.slice(0, 300) + '…' : content
-  }
-  try {
-    const draft = JSON.parse(content.slice('[記帳建議]'.length).trim())
-    const parts = [draft.description, draft.amount, draft.currency].filter(Boolean).join(' ')
-    return `（我先前提出的記帳建議：${parts}）`
-  } catch {
-    return '（我先前提出過一筆記帳建議）'
-  }
-}
-
-/** 把字串正規化後比較：忽略大小寫、全半形空白與常見標點 */
-function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[\s\u3000._-]/g, '')
-    .trim()
-}
-
-/**
- * 把 AI 給的名字對應回成員清單裡的正式名稱。
- *
- * 依序嘗試：完全相同 → 正規化後相同 → 其中一方是另一方的子字串
- * （涵蓋「小明」對「王小明」、「Amy」對「amy」這類情況）。
- * 仍然對不上就回傳 null，讓呼叫端去問使用者，而不是硬猜。
- */
-function resolveMember(name: string, members: string[]): string | null {
-  if (!name) return null
-  if (members.includes(name)) return name
-
-  const target = normalizeName(name)
-  if (!target) return null
-
-  const exact = members.find(m => normalizeName(m) === target)
-  if (exact) return exact
-
-  const partial = members.filter(m => {
-    const n = normalizeName(m)
-    return n.includes(target) || target.includes(n)
-  })
-  // 只有唯一解才算數，兩個以上一樣像就代表有歧義，寧可去問
-  return partial.length === 1 ? partial[0] : null
-}
-
-/**
- * 把 expense 裡的成員 key 盡量對應回正式名稱。
- * 回傳對應後的物件，以及真的對不上的名字。
- */
-function resolveExpenseMembers(
-  expense: any,
-  members: string[],
-): { unresolved: string[] } {
-  const unresolved: string[] = []
-
-  for (const field of ['payer_data', 'split_details', 'split_data']) {
-    const data = expense?.[field]
-    if (!data || typeof data !== 'object') continue
-
-    const remapped: Record<string, number> = {}
-    for (const [rawName, value] of Object.entries(data)) {
-      const resolved = resolveMember(rawName, members)
-      if (resolved) {
-        // 同一位成員被指到兩次時金額相加，不要互相覆蓋
-        remapped[resolved] = (remapped[resolved] ?? 0) + (Number(value) || 0)
-      } else {
-        unresolved.push(rawName)
-      }
-    }
-    expense[field] = remapped
-  }
-
-  return { unresolved: [...new Set(unresolved)] }
-}
-
-/** ISO 4217 常見幣別，用來擋掉 AI 幻想出來的代碼 */
-const KNOWN_CURRENCIES = new Set([
-  'TWD', 'JPY', 'USD', 'EUR', 'KRW', 'CNY', 'HKD', 'GBP', 'AUD', 'CAD',
-  'SGD', 'THB', 'MYR', 'PHP', 'VND', 'IDR', 'NZD', 'CHF', 'MOP', 'INR',
-])
-
-/**
- * 驗證幣別。
- *
- * 之前完全不檢查：AI 回傳的字串直接寫進資料庫，未知幣別會被當成 2 位小數，
- * 結算時匯率當 1，金額就默默失真了。
- * 旅程 rates 裡有的最優先，其次是 ISO 白名單，都不符就退回旅程主幣別。
- */
-function normalizeCurrency(
-  currency: unknown,
-  trip: { rates?: Record<string, number>; base_currency: string; default_currency?: string },
-): { currency: string; warning: string | null; reject: string | null } {
-  const raw = String(currency ?? '').trim().toUpperCase()
-  const fallback = trip.default_currency || trip.base_currency
-  const available = Object.keys(trip.rates ?? {})
-
-  if (!raw) return { currency: fallback, warning: null, reject: null }
-
-  // 旅程有設匯率 → 正常放行
-  if (trip.rates && Object.prototype.hasOwnProperty.call(trip.rates, raw)) {
-    return { currency: raw, warning: null, reject: null }
-  }
-
-  // 是合法幣別，但這趟旅程沒有它的匯率。
-  // 不能就這樣存進去：統計會以 1:1 換算，金額直接失真且事後難以察覺。
-  if (KNOWN_CURRENCIES.has(raw)) {
-    return {
-      currency: raw,
-      warning: null,
-      reject: `🙅 這趟旅程沒有設定 ${raw} 的匯率，先存起來的話統計會算錯。\n\n`
-        + `目前可用的幣別：${available.join('、') || '（尚未設定）'}\n\n`
-        + `請改用上面其中一種，或先到網頁的「設定 → 匯率精度」加入 ${raw} 的匯率。`,
-    }
-  }
-
-  // 根本不是幣別代碼 —— 多半是 AI 看錯，退回旅程預設並告知
-  return {
-    currency: fallback,
-    warning: `⚠️ 無法辨識幣別「${raw}」，已改用 ${fallback}。`,
-    reject: null,
-  }
-}
-
-/**
- * 驗證日期。
- *
- * 之前也是直接寫進資料庫，沒有格式或範圍檢查 ——
- * AI 算錯年份就會出現 2019 或 2031 年的支出。
- * 格式錯或超出今天前後一年就退回今天。
- */
-function normalizeDate(date: unknown, today: string): { date: string; warning: string | null } {
-  const raw = String(date ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return { date: today, warning: raw ? `⚠️ 日期格式無法辨識，已改用今天 ${today}。` : null }
-  }
-
-  const parsed = new Date(`${raw}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) {
-    return { date: today, warning: `⚠️ 日期無效，已改用今天 ${today}。` }
-  }
-
-  const todayMs = new Date(`${today}T00:00:00Z`).getTime()
-  const ONE_YEAR = 365 * 24 * 60 * 60 * 1000
-  if (Math.abs(parsed.getTime() - todayMs) > ONE_YEAR) {
-    return { date: today, warning: `⚠️ 日期 ${raw} 距離今天超過一年，已改用今天 ${today}。` }
-  }
-
-  return { date: raw, warning: null }
-}
-
 // 將待確認支出暫存於 chat_history，讓 postback 只傳 nonce（避免 300 bytes 上限）
 async function storePendingExpense(sourceId: string, nonce: string, data: any) {
   await supabase.from('line_chat_history').insert({
@@ -430,6 +293,25 @@ async function storePendingExpense(sourceId: string, nonce: string, data: any) {
     role: 'pending',
     content: JSON.stringify({ n: nonce, ...data })
   })
+}
+
+/**
+ * 舊卡片被按下時要說清楚「為什麼按不動」。
+ *
+ * 以前一律回「此操作已處理過囉」，使用者看到的是一張自己從沒按過的卡片
+ * 卻說已經處理過 —— 那其實是被更新的記帳建議取代了（H1、H12）。
+ */
+function describeProcessedAction(actionType: string | null | undefined): string {
+  switch (actionType) {
+    case 'save':
+      return '⚠️ 此筆支出已於先前成功存入！'
+    case 'cancel':
+      return '⚠️ 這張卡片先前已經取消了。'
+    case 'superseded':
+      return '⚠️ 這張卡片已被較新的記帳建議取代，請改按新的那一張卡片。'
+    default:
+      return '⚠️ 此操作已處理過囉！'
+  }
 }
 
 async function getPendingExpense(sourceId: string, nonce: string): Promise<any | null> {
@@ -458,16 +340,16 @@ const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀�
 2. 輸入「旅程密碼」
 3. 綁定後，我會列出目前的成員供您確認。
 
-⚙️ 個人偏好設定：
-• 可輸入「設定:預設由我付款，所有人均分金額。」
-(可記錄最後一筆設定，設定後 AI 會參考您的習慣進行解析)
+⚙️ AI 記帳偏好（整趟旅程共用）：
+• 按下方「⚙️ 記帳偏好」按鈕編輯，或輸入「設定:預設由我付款，所有人均分金額。」
+(這份偏好屬於整趟旅程，網頁的旅程設定頁看到的是同一份；輸入「設定?」可隨時查看)
 
 💰 快速記帳相關功能：
 • 基礎：可直接說「晚餐 1200」
 • 收據分析：直接上傳照片
 • 指定付款：說「小明付了Uber 300」
 • 複雜分帳：說「拉麵 3000 日幣，小明先付，大家平分」
-• 修正記帳：說「剛剛那筆改 500」
+• 修正記帳：卡片還沒確認前，說「剛剛那筆改 500」或「取消」
 • 撤銷記帳：輸入「取消上一筆」或「刪除上一筆」
 • 刪除任一筆：輸入「刪除支出」，會列出近期紀錄讓你點選
 • 修改任一筆：輸入「編輯支出」，點選後開啟編輯畫面
@@ -502,13 +384,28 @@ function getTodayString(timezone = 'Asia/Taipei'): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date())
 }
 
+/**
+ * 快捷查詢的「各幣別合計」字串。
+ *
+ * 一律走 Decimal（sumByCurrency）再依 precision_config 格式化 ——
+ * 原本用原生 `+=` 累加，USD 旅程的合計會出現 0.30000000000000004（H5）。
+ */
+function formatTotals(
+  rows: { amount: number; currency: string }[],
+  precisionConfig: Record<string, number>,
+): string {
+  return Object.entries(sumByCurrency(rows))
+    .map(([currency, total]) => `${formatAmount(total.toNumber(), currency, precisionConfig)} ${currency}`)
+    .join('・')
+}
+
 // 旅程密碼為選填：access_code 為 NULL 或全空白時代表免密碼，綁定不需驗證
 function requiresAccessCode(code: string | null | undefined): boolean {
   return !!(code && code.trim())
 }
 
 function buildBindSuccessText(tripName: string, members: string[], tripId: string): string {
-  return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳，或輸入個人喜好「設定: 預設付款人是我，大家平分」囉！`
+  return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳；想調整分帳習慣，按下方「⚙️ 記帳偏好」或輸入「設定: 預設付款人是我，大家平分」囉！`
 }
 
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {
@@ -616,6 +513,10 @@ const TEXT_RESPONSE_SCHEMA = {
     content: { type: 'STRING', description: 'type 為 chat 時的回覆內容' },
     url: { type: 'STRING', description: 'type 為 analyze_photo 時的收據照片網址' },
     question: { type: 'STRING', description: 'type 為 analyze_photo 時使用者的問題' },
+    corrects_draft: {
+      type: 'STRING',
+      description: '若這句話是在修正某張尚未確認的記帳草稿，填該草稿的 nonce；否則留空字串',
+    },
   },
   required: ['type'],
 }
@@ -762,18 +663,21 @@ async function askGemini(contents: any[], options: AskGeminiOptions = {}) {
 /**
  * 取得發言者的 LINE 顯示名稱。
  *
- * group 與 room 走不同的 endpoint —— 原本只處理 group，
+ * 三種來源三個 endpoint —— 原本只處理 group，
  * 導致多人聊天室的發言者永遠是「未知」，還被當成身分餵進 prompt。
+ * 一對一也一樣抓不到，`我付的晚餐 300` 只能靠偏好設定猜付款人是誰。
  */
 async function getChatMemberName(
-  sourceType: 'group' | 'room',
+  sourceType: 'user' | 'group' | 'room',
   chatId: string,
   userId: string,
 ): Promise<string> {
   try {
     const endpoint = sourceType === 'group'
       ? `https://api.line.me/v2/bot/group/${chatId}/member/${userId}`
-      : `https://api.line.me/v2/bot/room/${chatId}/member/${userId}`
+      : sourceType === 'room'
+        ? `https://api.line.me/v2/bot/room/${chatId}/member/${userId}`
+        : `https://api.line.me/v2/bot/profile/${userId}`
     const response = await fetch(
       endpoint,
       { headers: { "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` } }
@@ -816,12 +720,15 @@ serve(async (req) => {
       const needsMemberName =
         (event.type === 'message' && (event.message?.type === 'text' || event.message?.type === 'image'))
         || event.type === 'postback';
-      if ((sourceType === "group" || sourceType === "room") && needsMemberName && speakerUserId) {
-        const chatId = event.source.groupId || event.source.roomId
+      if (needsMemberName && speakerUserId) {
+        const chatId = event.source.groupId || event.source.roomId || speakerUserId
         const fetchedName = await getChatMemberName(sourceType, chatId, speakerUserId);
-        memberName = fetchedName || `User_${speakerUserId.substring(0, 8)}`;
+        // 群組抓不到名字時至少給個可區分的代號；一對一就維持「未知」，
+        // 那只是拿來餵 prompt，寫個假名字反而會誤導 AI 去對應成員。
+        memberName = fetchedName || (isGroup ? `User_${speakerUserId.substring(0, 8)}` : '未知');
       }
-      // 一對一聊天不需要打 API，發言者就是對話本身
+      // 一對一的回覆不需要「由 X 記錄」這種贅述，只有群組才標記發言者。
+      // 但 memberName 兩邊都要有：AI 靠它把「我付的」對應到成員（見 H9）。
       const speakerLabel = isGroup ? memberName : null
 
       let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
@@ -833,8 +740,8 @@ serve(async (req) => {
       const isBinding = !!(userState?.pending_trip_id && !userState?.current_trip_id)
       const isBound = !!userState?.current_trip_id
       const mentionRequired = userState?.mention_required ?? true
-      // 預計算綁定狀態下的快速回覆（含群組切換按鈕），整個 event 共用
-      const boundQR = getQuickReply(true, isGroup, mentionRequired)
+      // 預計算綁定狀態下的快速回覆（含群組切換按鈕與旅程偏好按鈕），整個 event 共用
+      const boundQR = getQuickReply(true, isGroup, mentionRequired, userState?.current_trip_id)
 
       // --- Postback 處理 ---
       if (isBound && (event.type === 'postback')) {
@@ -850,18 +757,46 @@ serve(async (req) => {
         console.log(`[POSTBACK] Data: ${event.postback.data}`)
 
         // 撤銷存入（postback 按鈕）
+        //
+        // postback 只帶 eid：描述放進去的話，外文店名＋中文說明很容易讓整包
+        // 超過 LINE 的 300 bytes 上限，整則「已存入」回覆會直接發送失敗（H12）。
+        // 描述在這裡回查即可。舊卡片仍可能帶 d，留著當後備。
         if (postbackData.act === 'undo') {
           const expenseId = postbackData.eid
-          const description = postbackData.d || '該筆支出'
-          if (expenseId) {
-            const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', expenseId)
-            if (error) {
-              await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
-            } else {
-              await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}`, quickReply: boundQR }], sourceId)
-            }
-          } else {
+          if (!expenseId) {
             await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可撤銷的記錄。' }], sourceId)
+            continue
+          }
+          const { data: target } = await supabase.from('expenses')
+            .select('description, deleted_at')
+            .eq('id', expenseId)
+            .eq('trip_id', userState.current_trip_id)
+            .maybeSingle()
+          const description = target?.description || postbackData.d || '該筆支出'
+
+          if (!target) {
+            await replyMessage(replyToken, [{
+              type: 'text', text: '❌ 找不到這筆支出，可能已被永久刪除，或不屬於目前綁定的旅程。',
+            }], sourceId)
+            continue
+          }
+          // 已經撤銷過就別再 UPDATE 一次：deleted_at 被刷新的話，
+          // 網頁垃圾桶的 24 小時保留期會整個重算（H3）。
+          if (target.deleted_at) {
+            await replyMessage(replyToken, [{
+              type: 'text', text: `ℹ️ 「${description}」先前已經撤銷了。`, quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
+          const { error } = await supabase.from('expenses')
+            .update({ deleted_at: new Date().toISOString() })
+            .eq('id', expenseId)
+            .is('deleted_at', null)
+          if (error) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
+          } else {
+            await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}`, quickReply: boundQR }], sourceId)
           }
           continue
         }
@@ -931,10 +866,7 @@ serve(async (req) => {
             if (nonceInsertError) {
               // 查詢 action_type，給予更明確的重複操作提示
               const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
-              const msg = processed?.action_type === 'save'
-                ? `⚠️ 此筆支出已於先前成功存入！`
-                : `⚠️ 此操作已處理過囉！`
-              await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId); continue
+              await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId); continue
             }
           }
 
@@ -954,7 +886,9 @@ serve(async (req) => {
 
           const photo_urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
 
-          const { data: trip } = await supabase.from('trips').select('precision_config, members, is_archived').eq('id', trip_id).single()
+          const { data: trip } = await supabase.from('trips')
+            .select('precision_config, members, is_archived, default_payer, default_split_members')
+            .eq('id', trip_id).single()
 
           if (!trip) {
             // 旅程可能已被刪除（見 docs/DB_MAINTENANCE.md），此時舊卡片的按鈕不該讓整個函式崩掉
@@ -970,6 +904,21 @@ serve(async (req) => {
           const numAmount = new Decimal(parseFloat(expense.amount as any) || 0).toDecimalPlaces(precision).toNumber()
           const payerMembers = Object.keys(expense.payer_data).filter(m => trip.members.includes(m))
           const splitMembers = Object.keys(expense.split_details).filter(m => trip.members.includes(m))
+
+          // 空的付款人或分攤名單過去會一路走到「Σ != 總額」，
+          // 使用者收到的是「財務運算發生錯誤，請聯絡管理員」這種毫無頭緒的訊息。
+          // 卡片產生時已經補過預設值（applyParticipantDefaults），
+          // 走到這裡還是空的多半是成員在存檔前被刪掉了，只能請使用者重新編輯。
+          if (payerMembers.length === 0 || splitMembers.length === 0) {
+            console.warn(`[SAVE] Empty participants after filtering. trip=${trip_id}`)
+            await replyMessage(replyToken, [{
+              type: 'text',
+              text: '😅 這筆的付款人或分攤成員是空的（可能是成員已被移除），無法存入。\n\n請按卡片上的「✏️ 編輯」補上，或直接重說一次。',
+              quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
           const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
           const finalPayerData = calculateDistribution(numAmount, payerMembers, expense.payer_data, payerMembers[0], precision)
           const finalSplitData = calculateDistribution(numAmount, splitMembers, expense.split_details, adjustMember, precision)
@@ -991,9 +940,11 @@ serve(async (req) => {
             photo_urls: photo_urls, adjustment_member: adjustMember
           }).select('id').single()
 
-          // 記錄 expense_id 供文字指令「取消上一筆」使用
+          // 記錄 expense_id 供文字指令「取消上一筆」使用。
+          // ⚠️ 必須 await：Edge Runtime 會在回應送出後中止未完成的 promise，
+          //    這一列掉了就會讓「取消上一筆」撤到更早的一筆支出（H11）。
           if (savedExpense?.id) {
-            supabase.from('line_chat_history').insert({
+            await supabase.from('line_chat_history').insert({
               line_user_id: sourceId, role: 'saved',
               content: JSON.stringify({
                 expense_id: savedExpense.id,
@@ -1001,12 +952,13 @@ serve(async (req) => {
                 by: speakerLabel,
               }),
               speaker_user_id: speakerUserId, speaker_name: speakerLabel,
-            }).then(() => {})
+            })
           }
 
-          // 存入後附帶撤銷快速按鈕，讓使用者可即時反悔
+          // 存入後附帶撤銷快速按鈕，讓使用者可即時反悔。
+          // postback 只帶 eid —— 塞進描述會讓長店名超過 300 bytes，整則訊息發不出去（H12）。
           const undoItems = savedExpense?.id
-            ? [{ type: "action", action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: savedExpense.id, d: expense.description }) } }]
+            ? [{ type: "action", action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: savedExpense.id }) } }]
             : []
           // 群組裡標明是誰記的，一對一就不必贅述
           const savedBy = speakerLabel ? `\n（由 ${speakerLabel} 記錄）` : ''
@@ -1034,7 +986,8 @@ serve(async (req) => {
               .from('line_processed_actions')
               .insert({ nonce, line_user_id: sourceId, action_type: 'cancel' })
             if (nonceInsertError) {
-              await replyMessage(replyToken, [{ type: 'text', text: `⚠️ 此操作已處理過囉！` }], sourceId); continue
+              const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
+              await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId); continue
             }
           }
 
@@ -1071,8 +1024,18 @@ serve(async (req) => {
           ])
           if (!lineRes.ok) throw new Error('Failed to download image from LINE')
 
-          if (trip?.is_archived) {
+          if (!trip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+            continue
+          }
+          // 照片還沒上傳，直接回覆就好，不需要清理 Storage。
+          // 以前是靜默 continue —— 使用者傳了照片卻什麼都沒發生，
+          // 與文件寫的「回覆已封存」不符（H8）。
+          if (trip.is_archived) {
             console.log(`[PHOTO] Trip ${tripId} is archived, ignoring photo from ${sourceId}`)
+            await replyMessage(replyToken, [{
+              type: 'text', text: '🔒 此旅程已封存，無法新增支出（照片未儲存）。', quickReply: boundQR,
+            }], sourceId)
             continue
           }
 
@@ -1103,7 +1066,7 @@ serve(async (req) => {
 - 幣別與匯率：${JSON.stringify(trip.rates)} (主要幣別: ${trip.base_currency}, 預設: ${trip.default_currency || '無'})
 - 今日：${today}
 - 封存狀態：${trip.is_archived ? '已封存 (唯讀)' : '進行中'}
-- 使用者設定：${userState.default_config || '無'}
+- 記帳偏好(整趟旅程共用)：${trip.ai_preference || '無'}
 - 使用者名稱(傳訊息的人)：${memberName}
 - 旅程預設付款人：${trip.default_payer?.length ? trip.default_payer.join(', ') : '無'}
 - 旅程預設分攤成員：${trip.default_split_members?.length ? trip.default_split_members.join(', ') : '全部成員'}
@@ -1115,26 +1078,26 @@ serve(async (req) => {
      **絕對不可以**幫忙換成台幣，也不可以因為旅程的主幣別是 TWD 就改寫金額。
      換算是系統在統計時自己會做的事，你只要忠實照抄。
    - 幣別從符號、地址或語系判斷 (¥/JPY、$/USD、NT/TWD、€/EUR、₩/KRW、฿/THB)。
-   - 收據上真的看不出幣別時，才依序參考：使用者設定提及的幣別 → 背景資訊的預設幣別。
+   - 收據上真的看不出幣別時，才依序參考：記帳偏好提及的幣別 → 背景資訊的預設幣別。
 2. 辨識「日期」。若收據上無明確日期，請使用今日。
 3. 辨識「品項描述」。提取商店名稱或主要品項。
    - 外文店名請保留原文，並在括號內補上簡短的繁體中文說明，讓人看得懂那是什麼店，
      例如「肉の匠家 (和牛燒肉店)」、「一蘭ラーメン (拉麵)」、「ドン・キホーテ (驚安殿堂．藥妝百貨)」。
    - 括號裡寫「這是什麼」而不是逐字直譯；只寫原文別人會看不懂，只寫中文又失去原始資訊。
 4. 辨識「分類」。若無法判別，可以先看是否有"其他"類別，若無"其他"類別可優先使用預設分類。
-5. 請詳讀「使用者設定」，再來決定 payer_data (墊付) 與 split_details (應付)。
+5. 請詳讀「記帳偏好」，再來決定 payer_data (墊付) 與 split_details (應付)。
    - 分帳時盡量不要有小數點(除非總金額有小數點)，按照以下規則分配好金額後，請務必確保總數加起來相等。
    - 🚫 payer_data 及 split_details 的 key **絕對只能**寫「成員清單」中已列出的字串，一字不差。
      若使用者用了暱稱、口誤、諧音或縮寫，可以合理推測對應到清單裡最接近的成員，並使用清單上的正式名稱。
      但若沒把握、找不到夠接近的對應，請寧可走「成員第一位 / 全員均分」的預設邏輯，**絕對不可以**自創、音譯、或把不存在的名字寫進 JSON。
    - 墊付邏輯的優先權(payer_data):
      1. 旅程預設付款人（若有設定）
-     2. 使用者設定內所提及的預設付款人
-     3. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在使用者設定中提及，但請注意務必要用「成員清單」內定義的名字)
+     2. 記帳偏好內所提及的預設付款人
+     3. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在記帳偏好中提及，但請注意務必要用「成員清單」內定義的名字)
      4. 由成員中第一位擔任付款人
    - 金額分攤邏輯的優先權(split_details):
      1. 旅程預設分攤成員（若有設定）
-     2. 使用者設定所提及的分攤方式
+     2. 記帳偏好所提及的分攤方式
      3. 全員均分
 6. 回傳格式由系統的 response schema 約束，type 請填 "expense"。
    payer_data 與 split_details 都是陣列，每個元素是 { "member": "成員名稱", "amount": 金額 }。
@@ -1194,16 +1157,22 @@ serve(async (req) => {
             expense.date = ocrDate.date
             const ocrWarnings = [ocrCurrency.warning, ocrDate.warning].filter(Boolean) as string[]
 
+            // AI 偶爾會回空的付款人或分攤，卡片會出現整片空白的區塊，
+            // 按下確認才在 Σ 檢查那裡爆掉。先套上與網頁快速記帳一致的預設值（H6）。
+            // 補上的預設值只是 0 佔位：分配時必須改傳 {} 當 lockedData，
+            // 否則 0 會被 calculateDistribution 當成「鎖定金額」，整筆餘額落到調整成員身上。
+            const { filledPayer, filledSplit } = applyParticipantDefaults(expense, trip, memberName)
+
             const precision = (trip?.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
             const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
             if (payerMembers.length > 0) {
-              expense.payer_data = calculateDistribution(expense.amount, payerMembers, expense.payer_data, payerMembers[0], precision)
+              expense.payer_data = calculateDistribution(expense.amount, payerMembers, filledPayer ? {} : expense.payer_data, payerMembers[0], precision)
             }
             if (splitMembers.length > 0) {
-              expense.split_details = calculateDistribution(expense.amount, splitMembers, expense.split_details, adjustMember, precision)
+              expense.split_details = calculateDistribution(expense.amount, splitMembers, filledSplit ? {} : expense.split_details, adjustMember, precision)
             }
 
             const photo_ids = [messageId]
@@ -1213,13 +1182,14 @@ serve(async (req) => {
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
 
-            // storePendingExpense 與 chat history insert 並行執行
-            // 先讓舊草稿失效，再存新的：聊天室裡的舊卡片按下去不該存入過期內容
-            await supersedePendingDrafts(sourceId, nonce)
+            // ⚠️ 這裡刻意不讓舊草稿失效。一次選兩張收據送出時，
+            //    第二張會讓第一張作廢，使用者只記得到最後一張（H1、H7）。
+            //    卡片失效只發生在 AI 明確指出「這句是在修正某張草稿」的時候。
             await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId })
 
-            const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids }, null, 2)}`
-            supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary }).then(() => {})
+            // 摘要要帶 nonce：AI 才有辦法用 corrects_draft 指名它要修正哪一張卡片
+            const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids, nonce }, null, 2)}`
+            runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary }))
 
             const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
             const liffData = encodeBase64(new TextEncoder().encode(JSON.stringify({ ...exp_short, pi: photo_ids, n: nonce, u: sourceId })))
@@ -1375,7 +1345,8 @@ serve(async (req) => {
               await replyMessage(replyToken, [{
                 type: 'text',
                 text: buildBindSuccessText(targetTrip.name, targetTrip.members, mapping.trip_id),
-                quickReply: boundQR
+                // boundQR 是綁定前算的：沒有「記帳偏好」按鈕，切換旅程時還會指到舊旅程
+                quickReply: getQuickReply(true, isGroup, mentionRequired, mapping.trip_id)
               }], sourceId)
             } else {
               const msg = userState?.current_trip_id
@@ -1408,25 +1379,51 @@ serve(async (req) => {
         continue
       }
 
-      // 4. 查看個人偏好設定
+      // 4. 查看旅程的 AI 記帳偏好
+      //    偏好存在 trips.ai_preference，整趟旅程共用一份，網頁的設定頁看到的是同一份。
       if (isBound && (cleanText === '設定?' || cleanText === '設定？')) {
-        const config = userState.default_config
+        const { data: prefTrip } = await supabase.from('trips')
+          .select('ai_preference').eq('id', userState.current_trip_id).maybeSingle()
+        if (!prefTrip) {
+          await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+          continue
+        }
+        const config = prefTrip.ai_preference
         const msg = config
-          ? `⚙️ 您目前的個人偏好設定：\n\n${config}\n\n如需修改，輸入「設定: 新設定內容」`
-          : '⚙️ 您尚未設定個人偏好。\n\n輸入「設定: 預設由我付款，大家均分」來設定。'
-        await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
+          ? `⚙️ 這趟旅程目前的 AI 記帳偏好：\n\n${config}\n\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）\n\n要修改請按下方「⚙️ 記帳偏好」，或輸入「設定: 新的內容」。`
+          : '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n按下方「⚙️ 記帳偏好」開啟編輯畫面，或輸入「設定: 預設由我付款，大家均分」。'
+        await replyMessage(replyToken, [{
+          type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id, isGroup, mentionRequired),
+        }], sourceId)
         continue
       }
 
-      // 4. 設定偏好
+      // 4. 設定旅程的 AI 記帳偏好（文字捷徑；完整編輯走 LIFF 表單）
       if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定：'))) {
         const config = cleanText.substring(3).trim()
         if (!config) {
-          await replyMessage(replyToken, [{ type: 'text', text: '⚙️ 設定內容不能為空，請輸入偏好內容，例如：\n「設定: 預設由我付款，大家均分」' }], sourceId)
+          await replyMessage(replyToken, [{
+            type: 'text',
+            text: '⚙️ 設定內容不能為空，請輸入偏好內容，例如：\n「設定: 預設由我付款，大家均分」\n\n要清空請輸入「設定:清除」。',
+            quickReply: preferenceQuickReply(userState.current_trip_id, isGroup, mentionRequired),
+          }], sourceId)
           continue
         }
-        await supabase.from('line_user_states').update({ default_config: config }).eq('line_user_id', sourceId)
-        await replyMessage(replyToken, [{ type: 'text', text: `⚙️ 已更新您的偏好，之後記帳時會參考此設定。` }], sourceId)
+        // 「清除」是唯一的保留字：否則會把「清除」兩個字原封不動存成偏好內容
+        const isClear = config === '清除' || config === '清空'
+        const { error: prefError } = await supabase.from('trips')
+          .update({ ai_preference: isClear ? null : config })
+          .eq('id', userState.current_trip_id)
+        if (prefError) {
+          await replyMessage(replyToken, [{ type: 'text', text: '❌ 偏好儲存失敗，請稍後再試或改用網頁設定頁。' }], sourceId)
+          continue
+        }
+        const msg = isClear
+          ? '⚙️ 已清空這趟旅程的 AI 記帳偏好。'
+          : '⚙️ 已更新這趟旅程的 AI 記帳偏好，之後記帳時會參考它。\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）'
+        await replyMessage(replyToken, [{
+          type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id, isGroup, mentionRequired),
+        }], sourceId)
         continue
       }
 
@@ -1439,7 +1436,8 @@ serve(async (req) => {
           await replyMessage(replyToken, [{
             type: 'text',
             text: buildBindSuccessText(trip.name, trip.members, userState.pending_trip_id),
-            quickReply: boundQR
+            // 同上：要用剛綁定的旅程算快速回覆，boundQR 裡沒有偏好按鈕
+            quickReply: getQuickReply(true, isGroup, mentionRequired, userState.pending_trip_id)
           }], sourceId)
         } else {
           await replyMessage(replyToken, [{ type: 'text', text: '❌ 密碼錯誤' }], sourceId)
@@ -1451,12 +1449,53 @@ serve(async (req) => {
       if (isBound) {
         const tripId = userState.current_trip_id
 
+        // 一次查、整個 event 共用。文字路徑有兩個地方要用到還沒確認的草稿：
+        // 這裡的路由判斷，以及後面餵給 AI 的 context。
+        let draftsCache: OutstandingDraft[] | null = null
+        const loadDrafts = async (): Promise<OutstandingDraft[]> => {
+          if (!draftsCache) draftsCache = await getOutstandingDrafts(sourceId)
+          return draftsCache
+        }
+
         // 明確指令，或用自然語言表達的同一個意圖。
         // 兩者都必須在進 AI 之前處理掉，否則會變成重複記帳或收到假的完成訊息。
         const recordIntent = detectRecordIntent(cleanText)
-        const isDeleteListIntent = DELETE_LIST_KEYWORDS.includes(cleanText)
+        const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(cleanText)
+        const isEditListKeyword = EDIT_LIST_KEYWORDS.includes(cleanText)
+        const isCancelDraftKeyword = CANCEL_DRAFT_KEYWORDS.includes(cleanText)
+
+        // 同一句話在「有沒有未確認的草稿」時該走完全不同的路：
+        //   有草稿 → 「剛剛那筆改 500」是要修那張卡片（交給 AI），「取消」是要丟掉它
+        //   沒草稿 → 兩者都是在講已存檔的紀錄，只能列清單讓使用者點選
+        // 以前一律走清單，自我介紹宣傳的「剛剛那筆改 500」因此永遠到不了 AI（H2）。
+        // 明確打「編輯支出」「刪除支出」「刪除上一筆」的人是要管理既有紀錄，不受草稿影響。
+        const wantsDraftAction = !isDeleteListKeyword && !isEditListKeyword
+          && !UNDO_KEYWORDS.includes(cleanText)
+          && (isCancelDraftKeyword || recordIntent !== null)
+        const drafts = wantsDraftAction ? await loadDrafts() : []
+        const hasDraft = drafts.length > 0
+
+        if (hasDraft && (isCancelDraftKeyword || recordIntent === 'delete')) {
+          const draft = drafts[0]
+          await cancelDraft(sourceId, draft)
+          const desc = draft.exp?.d ?? draft.exp?.description ?? '這筆'
+          await replyMessage(replyToken, [{
+            type: 'text',
+            // 取消的是「還沒存入」的那張卡片。使用者若本來是想刪已存檔的支出，
+            // 這句話要讓他一眼看出走錯路了，並知道正確的入口。
+            text: (draft.photoIds.length > 0
+              ? `🗑 已取消尚未確認的草稿：${desc}（收據照片也已刪除）`
+              : `🗑 已取消尚未確認的草稿：${desc}`)
+              + '\n\n（要刪除已經存入的支出，請輸入「刪除支出」。）',
+            quickReply: boundQR,
+          }], sourceId)
+          continue
+        }
+
+        const isDeleteListIntent = isDeleteListKeyword
           || (recordIntent === 'delete' && !UNDO_KEYWORDS.includes(cleanText))
-        const isEditListIntent = EDIT_LIST_KEYWORDS.includes(cleanText) || recordIntent === 'edit'
+        // 有草稿時「改 500」交給 AI 去修那張草稿，不要跳到已存檔紀錄的清單
+        const isEditListIntent = isEditListKeyword || (recordIntent === 'edit' && !hasDraft)
 
         // 列出近期支出讓使用者點選編輯。
         // 「剛剛那筆改 500」交給 AI 會變成再記一筆重複的支出 ——
@@ -1466,6 +1505,8 @@ serve(async (req) => {
             .select('id, description, amount, currency, date, category, payer_data, split_data, photo_urls')
             .eq('trip_id', tripId)
             .is('deleted_at', null)
+            // 結清紀錄不是支出：讓它出現在清單裡，使用者用 LIFF 一存就變成一般支出，統計會失真（H4）
+            .not('is_settlement', 'is', true)
             .order('date', { ascending: false })
             .order('created_at', { ascending: false })
             .limit(6)
@@ -1521,6 +1562,7 @@ serve(async (req) => {
             .select('id, description, amount, currency, date')
             .eq('trip_id', tripId)
             .is('deleted_at', null)
+            .not('is_settlement', 'is', true)
             .order('date', { ascending: false })
             .order('created_at', { ascending: false })
             .limit(8)
@@ -1572,6 +1614,10 @@ serve(async (req) => {
         }
 
         // 撤銷上一筆（文字指令）
+        //
+        // 取最近 5 筆 saved 而不是 1 筆：連說兩次「取消上一筆」時，
+        // 只看最新一筆會重複撤同一筆支出，還會把 deleted_at 刷新，
+        // 讓網頁垃圾桶的 24 小時保留期整個重算（H3）。
         const isUndoText = UNDO_KEYWORDS.includes(cleanText)
         if (isUndoText) {
           const { data: savedHistory } = await supabase.from('line_chat_history')
@@ -1579,27 +1625,65 @@ serve(async (req) => {
             .eq('line_user_id', sourceId)
             .eq('role', 'saved')
             .order('created_at', { ascending: false })
-            .limit(1)
-          if (savedHistory && savedHistory.length > 0) {
+            .limit(5)
+
+          const savedEntries: { expense_id: string; description?: string; by?: string }[] = []
+          for (const row of savedHistory ?? []) {
             try {
-              const saved = JSON.parse(savedHistory[0].content)
-              const { error } = await supabase.from('expenses').update({ deleted_at: new Date().toISOString() }).eq('id', saved.expense_id)
-              if (error) throw error
-              // 群組內任何人都能撤銷任何人的紀錄（刻意保留），但要講清楚撤掉的是誰記的那筆
-              const originalBy = saved.by && saved.by !== speakerLabel ? `（原由 ${saved.by} 記錄）` : ''
-              await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${saved.description}${originalBy}`, quickReply: boundQR }], sourceId)
-            } catch {
-              await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
-            }
-          } else {
-            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可以撤銷的最近記錄。' }], sourceId)
+              const parsed = JSON.parse(row.content)
+              if (parsed?.expense_id) savedEntries.push(parsed)
+            } catch { /* skip malformed */ }
           }
+
+          if (savedEntries.length === 0) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可以撤銷的最近記錄。' }], sourceId)
+            continue
+          }
+
+          // 一次查回這幾筆的狀態，挑第一筆「還沒被刪掉」的來撤
+          const { data: targets } = await supabase.from('expenses')
+            .select('id, description, deleted_at')
+            .in('id', savedEntries.map(e => e.expense_id))
+            .eq('trip_id', tripId)
+          const targetById = new Map((targets ?? []).map((t: any) => [t.id, t]))
+          const undoable = savedEntries.find(e => {
+            const t = targetById.get(e.expense_id)
+            return t && !t.deleted_at
+          })
+
+          if (!undoable) {
+            await replyMessage(replyToken, [{
+              type: 'text',
+              text: '✅ 最近由 LINE 存入的支出都已經撤銷過了。\n\n想刪除其他筆請輸入「刪除支出」，我會列出近期紀錄讓你點選。',
+              quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
+          const description = targetById.get(undoable.expense_id)?.description || undoable.description || '該筆支出'
+          const { error } = await supabase.from('expenses')
+            .update({ deleted_at: new Date().toISOString() })
+            .eq('id', undoable.expense_id)
+            .eq('trip_id', tripId)
+            .is('deleted_at', null)
+          if (error) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
+            continue
+          }
+          // 群組內任何人都能撤銷任何人的紀錄（刻意保留），但要講清楚撤掉的是誰記的那筆
+          const originalBy = undoable.by && undoable.by !== speakerLabel ? `（原由 ${undoable.by} 記錄）` : ''
+          await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}${originalBy}`, quickReply: boundQR }], sourceId)
           continue
         }
 
         // ── 快捷指令（直接查 DB，不走 AI）──
         if (cleanText === '今日支出' || cleanText === '今天支出') {
-          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, default_currency').eq('id', tripId).single()
+          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, default_currency, precision_config').eq('id', tripId).single()
+          if (!trip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+            continue
+          }
+          const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
           const today = getTodayString(getTripTimezone(trip))
           const { data: todayExp } = await supabase.from('expenses')
             .select('description, amount, currency, category')
@@ -1609,17 +1693,20 @@ serve(async (req) => {
           if (!todayExp || todayExp.length === 0) {
             await replyMessage(replyToken, [{ type: 'text', text: `📅 今日（${today.substring(5)}）尚無支出記錄。`, quickReply: boundQR }], sourceId)
           } else {
-            const lines = todayExp.map((e: any) => `• ${e.description}  ${e.amount} ${e.currency}  [${e.category}]`)
-            const totals: Record<string, number> = {}
-            todayExp.forEach((e: any) => { totals[e.currency] = (totals[e.currency] || 0) + e.amount })
-            const totalStr = Object.entries(totals).map(([c, a]) => `${a} ${c}`).join('・')
+            const lines = todayExp.map((e: any) => `• ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}  [${e.category}]`)
+            const totalStr = formatTotals(todayExp, precisionConfig)
             await replyMessage(replyToken, [{ type: 'text', text: `📅 今日支出（${today.substring(5)}）\n\n${lines.join('\n')}\n\n共 ${todayExp.length} 筆 · 合計 ${totalStr}`, quickReply: boundQR }], sourceId)
           }
           continue
         }
 
         if (cleanText === '本週支出' || cleanText === '近期支出') {
-          const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency').eq('id', tripId).single()
+          const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency, precision_config').eq('id', tripId).single()
+          if (!trip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+            continue
+          }
+          const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
           const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
           const fromDate = new Intl.DateTimeFormat('en-CA', { timeZone: getTripTimezone(trip) }).format(sevenDaysAgo)
           const { data: weekExp } = await supabase.from('expenses')
@@ -1635,15 +1722,20 @@ serve(async (req) => {
             const lines: string[] = []
             Object.entries(byDate).forEach(([date, exps]) => {
               lines.push(`📌 ${date.substring(5)}`)
-              exps.forEach((e: any) => lines.push(`  • ${e.description}  ${e.amount} ${e.currency}`))
+              exps.forEach((e: any) => lines.push(`  • ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}`))
             })
-            await replyMessage(replyToken, [{ type: 'text', text: `📊 近 7 天支出\n\n${lines.join('\n')}\n\n共 ${weekExp.length} 筆`, quickReply: boundQR }], sourceId)
+            await replyMessage(replyToken, [{ type: 'text', text: `📊 近 7 天支出\n\n${lines.join('\n')}\n\n共 ${weekExp.length} 筆 · 合計 ${formatTotals(weekExp, precisionConfig)}`, quickReply: boundQR }], sourceId)
           }
           continue
         }
 
         if (cleanText === '本月支出') {
-          const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency').eq('id', tripId).single()
+          const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency, precision_config').eq('id', tripId).single()
+          if (!trip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+            continue
+          }
+          const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
           const tz = getTripTimezone(trip)
           const todayStr = getTodayString(tz)
           const monthStart = todayStr.substring(0, 7) + '-01'
@@ -1660,11 +1752,9 @@ serve(async (req) => {
             const lines: string[] = []
             Object.entries(byDate).forEach(([date, exps]) => {
               lines.push(`📌 ${date.substring(5)}`)
-              exps.forEach((e: any) => lines.push(`  • ${e.description}  ${e.amount} ${e.currency}`))
+              exps.forEach((e: any) => lines.push(`  • ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}`))
             })
-            const totals: Record<string, number> = {}
-            monthExp.forEach((e: any) => { totals[e.currency] = (totals[e.currency] || 0) + e.amount })
-            const totalStr = Object.entries(totals).map(([c, a]) => `${a} ${c}`).join('・')
+            const totalStr = formatTotals(monthExp, precisionConfig)
             let text = `📊 本月支出（${monthStart.substring(0, 7)}）\n\n${lines.join('\n')}\n\n共 ${monthExp.length} 筆 · 合計 ${totalStr}`
             if (text.length > 4900) text = text.substring(0, 4900) + '\n...(過多省略)'
             await replyMessage(replyToken, [{ type: 'text', text, quickReply: boundQR }], sourceId)
@@ -1673,7 +1763,7 @@ serve(async (req) => {
         }
 
         if (cleanText === '結算') {
-          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates').eq('id', tripId).single()
+          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, precision_config').eq('id', tripId).single()
           if (!trip) {
             await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
             continue
@@ -1699,26 +1789,28 @@ serve(async (req) => {
           if (settlements.length === 0) {
             await replyMessage(replyToken, [{ type: 'text', text: '✅ 目前一切已結清，無需轉帳！', quickReply: boundQR }], sourceId)
           } else {
-            const lines = settlements.map(s => `${s.from} → ${s.to}  ${Math.round(s.amount)} ${baseCurrency}`)
+            // Math.round 會把 12.50 USD 顯示成 13 —— 一律依旅程的 precision_config 格式化（H5）
+            const settlePrecision = (trip.precision_config ?? {}) as Record<string, number>
+            const lines = settlements.map(s => `${s.from} → ${s.to}  ${formatAmount(s.amount, baseCurrency, settlePrecision)} ${baseCurrency}`)
             await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算建議（折合 ${baseCurrency}）\n\n${lines.join('\n')}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
           }
           continue
         }
 
         if (cleanText === '旅程總覽') {
-          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, is_archived').eq('id', tripId).single()
+          const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, is_archived, precision_config').eq('id', tripId).single()
           if (!trip) {
             await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
             continue
           }
+          const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
           const today = getTodayString(getTripTimezone(trip))
           const { data: allExp } = await supabase.from('expenses')
             .select('amount, currency').eq('trip_id', tripId)
             .is('deleted_at', null).not('is_settlement', 'is', true)
-          const totals: Record<string, number> = {}
-          ;(allExp || []).forEach((e: any) => { totals[e.currency] = (totals[e.currency] || 0) + e.amount })
+          const totals = sumByCurrency(allExp ?? [])
           const totalStr = Object.keys(totals).length > 0
-            ? Object.entries(totals).map(([c, a]) => `  ${a} ${c}`).join('\n')
+            ? Object.entries(totals).map(([c, a]) => `  ${formatAmount(a.toNumber(), c, precisionConfig)} ${c}`).join('\n')
             : '  （尚無支出）'
           const status = trip.is_archived ? '已封存 🔒' : '進行中 ✈️'
           await replyMessage(replyToken, [{ type: 'text', text: `🗺️ ${trip.name}（${status}）\n\n👥 成員：${trip.members.join('、')}\n📅 今日：${today}\n💵 主幣別：${trip.base_currency}\n\n📊 支出總計：\n${totalStr}\n\n🌐 ${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
@@ -1740,11 +1832,11 @@ serve(async (req) => {
           //    對話窗口不會前進，AI 會一直停留在很久以前的內容。
           supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: false }).limit(CHAT_HISTORY_TURNS)
         ])
-        // fire-and-forget：不阻塞主流程
-        supabase.from('line_chat_history').insert({
+        // 不阻塞主流程，但交給 waitUntil 保證回應送出後仍寫得完
+        runInBackground(supabase.from('line_chat_history').insert({
           line_user_id: sourceId, role: 'user', content: cleanText,
           speaker_user_id: speakerUserId, speaker_name: speakerLabel,
-        }).then(() => {})
+        }))
 
         // 舊紀錄的清理已改由資料庫的 pg_cron 排程負責（每天一次，見
         // supabase/migrations/20260903_cron_purge_line_history.sql）。
@@ -1762,25 +1854,41 @@ serve(async (req) => {
           return base
         }).join('\n')
 
+        // 還等在聊天室裡、使用者既沒確認也沒取消的草稿。
+        // 一定要把 nonce 一起給 AI：使用者說「剛剛那筆改 500」時，
+        // 只有 AI 講得出「我在修哪一張」，路由層才知道該讓哪一張卡片失效（H1）。
+        const outstandingDrafts = await loadDrafts()
+        const draftSummary = outstandingDrafts.map((d) => {
+          const e = d.exp ?? {}
+          const payers = Object.keys(e.p ?? {}).join('、') || '未指定'
+          const splits = Object.keys(e.s ?? {}).join('、') || '未指定'
+          const photo = d.photoIds.length > 0 ? '（附收據照片）' : ''
+          return `- nonce=${d.nonce}：${e.d ?? ''} ${e.a ?? ''} ${e.c ?? ''}${photo}（付款：${payers}；分攤：${splits}）`
+        }).join('\n')
+
         // 只放「這次對話的當下狀態」。人設與不可變規則已在 YOSHI_SYSTEM_INSTRUCTION，
         // 輸出格式則交給 TEXT_RESPONSE_SCHEMA，不必再用文字描述一次。
         const tripContext = `【旅程】${trip.name}｜成員：${trip.members.join('、')}｜分類：${trip.categories.join('、')}（預設：${trip.default_category || '無'}）
 【幣別】${JSON.stringify(trip.rates)}，主幣：${trip.base_currency}，預設：${trip.default_currency || '無'}
 【今日】${today}｜${trip.is_archived ? '⚠️ 已封存（唯讀，禁止記帳）' : '進行中'}
-【使用者設定】${userState.default_config || '無'}｜傳訊者：${memberName}
+【記帳偏好（整趟旅程共用）】${trip.ai_preference || '無'}｜傳訊者：${memberName}
 【旅程預設付款人】${trip.default_payer?.length ? trip.default_payer.join('、') : '無'}｜預設分攤：${trip.default_split_members?.length ? trip.default_split_members.join('、') : '全員'}
 
 【判斷優先權】
-- payer_data（墊付）：①旅程預設付款人 ②使用者設定 ③傳訊者對應的成員 ④成員第一位
-- split_details（分攤）：①旅程預設分攤 ②使用者設定 ③全員均分
-- 幣別：使用者明講 > 使用者設定 > 旅程預設幣別
+- payer_data（墊付）：①旅程預設付款人 ②記帳偏好 ③傳訊者對應的成員 ④成員第一位
+- split_details（分攤）：①旅程預設分攤 ②記帳偏好 ③全員均分
+- 幣別：使用者明講 > 記帳偏好 > 旅程預設幣別
 ${memberAliasHint(trip.members)}
 【近期支出（最近10筆，僅供查詢參考）】
 ${expensesSummary || '（尚無支出）'}
 
+【尚未確認的草稿】（使用者可能想修正其中一張；修正時 corrects_draft 填它的 nonce）
+${draftSummary || '（沒有等待確認的草稿）'}
+
 【回應方式】
-- 想記一筆新支出 → type: expense
-- 想修正上一則「記帳建議」→ type: expense，帶上修正後的內容
+- 想記一筆新支出 → type: expense，corrects_draft 留空字串
+- 想修正上面某一張「尚未確認的草稿」→ type: expense，帶上**完整**的修正後內容，
+  並把 corrects_draft 填成那張草稿的 nonce（沒指名的話系統只會多出一張卡片，舊的不會消失）
 - 詢問某筆有收據照片的支出細節（品項明細、外文翻譯等）→ type: analyze_photo，
   url 填近期支出中對應的照片網址（找不到就填空字串，系統會自動全庫搜尋），question 填使用者的問題
 - 其他聊天或查詢 → type: chat`
@@ -1820,23 +1928,26 @@ ${expensesSummary || '（尚無支出）'}
 
         // 如果聊天室裡還有一張沒被確認／取消的收據草稿，把那張收據一起送給 AI。
         // 光看文字是分不出「A 是我吃的」對應多少錢的 —— 必須讓模型重新讀收據品項。
-        const photoDraft = await getOutstandingPhotoDraft(sourceId)
-        let reanalyzePhotoIds: string[] = []
+        const photoDraft = outstandingDrafts.find(d => d.photoIds.length > 0) ?? null
+        let attachedPhoto = false
         if (photoDraft) {
           const part = await fetchPhotoPart(photoPublicUrl(photoDraft.photoIds[0], photoDraft.tripId))
           if (part) {
             const d = photoDraft.exp ?? {}
             const lastTurn = conversation[conversation.length - 1]
             lastTurn.parts.unshift({
-              text: `【尚未確認的收據草稿】${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''}\n`
+              text: `【尚未確認的收據草稿 nonce=${photoDraft.nonce}】${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''}\n`
                 + `目前分攤：${JSON.stringify(d.s ?? {})}\n`
                 + `下面附上那張收據。若使用者這句話是在調整這筆的金額或分攤，`
                 + `請重新閱讀收據上的各品項，依照他說的分配方式重算 payer_data 與 split_details，`
-                + `並回傳 type: expense（description、amount、currency、date 沿用上面的草稿，除非使用者另有指示）。`
+                + `回傳 type: expense（description、amount、currency、date 沿用上面的草稿，除非使用者另有指示），`
+                + `並把 corrects_draft 填成 ${photoDraft.nonce}。\n`
+                + `⚠️ 若他講的是**另一筆與這張收據無關的支出**（例如「計程車 200」），`
+                + `corrects_draft 請留空字串 —— 系統會據此決定新卡片要不要沿用這張收據。\n`
                 + `若只是閒聊或詢問，照常回 chat。`,
             })
             lastTurn.parts.push(part)
-            reanalyzePhotoIds = photoDraft.photoIds
+            attachedPhoto = true
           }
         }
 
@@ -1846,7 +1957,7 @@ ${expensesSummary || '（尚無支出）'}
             responseSchema: TEXT_RESPONSE_SCHEMA,
             temperature: 0.4,
             // 有附收據時改用視覺模型清單
-            models: reanalyzePhotoIds.length > 0 ? GEMINI_OCR_MODELS : GEMINI_FALLBACK_MODELS,
+            models: attachedPhoto ? GEMINI_OCR_MODELS : GEMINI_FALLBACK_MODELS,
           })
           const res = JSON.parse(extractJSON(aiResponse))
           if (res.type === 'expense') {
@@ -1879,31 +1990,45 @@ ${expensesSummary || '（尚無支出）'}
             expense.date = textDate.date
             const textWarnings = [textCurrency.warning, textDate.warning].filter(Boolean) as string[]
 
+            // AI 偶爾會回空的付款人或分攤，補上與網頁快速記帳一致的預設值（H6）
+            // 補上的預設值只是 0 佔位：分配時必須改傳 {} 當 lockedData，
+            // 否則 0 會被 calculateDistribution 當成「鎖定金額」，整筆餘額落到調整成員身上。
+            const { filledPayer, filledSplit } = applyParticipantDefaults(expense, trip, memberName)
+
             const precision = (trip.precision_config as any)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
             expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
             const payerMembers = Object.keys(expense.payer_data)
             const splitMembers = Object.keys(expense.split_details)
             const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
             if (payerMembers.length > 0) {
-              expense.payer_data = calculateDistribution(expense.amount, payerMembers, expense.payer_data, payerMembers[0], precision)
+              expense.payer_data = calculateDistribution(expense.amount, payerMembers, filledPayer ? {} : expense.payer_data, payerMembers[0], precision)
             }
             if (splitMembers.length > 0) {
-              expense.split_details = calculateDistribution(expense.amount, splitMembers, expense.split_details, adjustMember, precision)
+              expense.split_details = calculateDistribution(expense.amount, splitMembers, filledSplit ? {} : expense.split_details, adjustMember, precision)
             }
 
-            const historySummary = `[記帳建議] ${JSON.stringify(expense, null, 2)}`
-            // fire-and-forget：不阻塞回覆流程
-            supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary }).then(() => {})
+            // AI 指名要修正哪一張草稿？只有對得上的 nonce 才算數。
+            const correctsNonce = String(res.corrects_draft ?? '').trim()
+            const correctedDraft = correctsNonce
+              ? outstandingDrafts.find(d => d.nonce === correctsNonce) ?? null
+              : null
 
             const exp_short = {
               d: expense.description, a: expense.amount, c: expense.currency,
               dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details
             }
             const nonce = Math.random().toString(36).substring(2, 10)
-            // 重新分析既有收據時沿用原本的照片，新卡片才會帶著收據縮圖
-            const photo_ids = reanalyzePhotoIds.length > 0
-              ? reanalyzePhotoIds
+            // 收據只在「確實是在修正那張收據草稿」時才沿用。
+            // 以前只要聊天室裡有收據草稿，接下來的任何一張新卡片都會被貼上
+            // 那張收據的縮圖與 photo_urls —— 傳完收據再打「計程車 200」，
+            // 計程車那筆就會掛著別人的發票（H1）。
+            const photo_ids = correctedDraft && correctedDraft.photoIds.length > 0
+              ? correctedDraft.photoIds
               : (expense.photo_ids || [])
+
+            // 摘要要帶 nonce，AI 下一輪才有辦法指名它要修正哪一張
+            const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, nonce }, null, 2)}`
+            runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary }))
 
             let heroSection: any = null
             if (photo_ids.length > 0) {
@@ -1923,9 +2048,11 @@ ${expensesSummary || '（尚無支出）'}
               ? [{ type: 'text' as const, text: textWarnings.join('\n') }]
               : []
 
-            // 修正草稿時會送出新卡片，舊卡片必須先失效，
+            // 修正草稿時會送出新卡片，被修正的那一張必須先失效，
             // 否則按舊的「確認存入」會寫進未修正的金額。
-            await supersedePendingDrafts(sourceId, nonce)
+            // ⚠️ 只失效被指名的那一張 —— 連續記多筆、群組裡多人同時記帳時，
+            //    其他人的卡片必須留著（H1）。
+            if (correctedDraft) await supersedeDraft(sourceId, correctedDraft.nonce)
 
             // storePendingExpense 與 replyMessage 並行執行，縮短回覆延遲
             await Promise.all([
@@ -1978,7 +2105,7 @@ ${expensesSummary || '（尚無支出）'}
               await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在重新分析收據照片，請稍候...' }], sourceId)
               try {
                 const content = await analyzeReceiptPhoto(photoUrl, question)
-                supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }).then(() => {})
+                runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }))
                 await pushMessage(sourceId, [{ type: 'text', text: content, quickReply: boundQR }])
               } catch (photoErr) {
                 console.error('[ANALYZE_PHOTO_ERROR]', photoErr)
@@ -2023,7 +2150,7 @@ ${expenseList}
                     await pushMessage(sourceId, [{ type: 'text', text: `✅ 找到了！正在分析「${selectRes.description}」的收據照片...` }])
                     try {
                       const content = await analyzeReceiptPhoto(selectRes.url, question)
-                      supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }).then(() => {})
+                      runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content }))
                       await pushMessage(sourceId, [{ type: 'text', text: content, quickReply: boundQR }])
                     } catch (analyzeErr) {
                       console.error('[ANALYZE_PHOTO_AFTER_SEARCH_ERROR]', analyzeErr)
@@ -2050,7 +2177,7 @@ ${expenseList}
 
             if (safeContent.length > 4900) safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
             if (!safeContent) safeContent = 'Yoshi! 🥚 有什麼需要幫忙的嗎？'
-            supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent }).then(() => {})
+            runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent }))
             await replyMessage(replyToken, [{ type: 'text', text: safeContent, quickReply: boundQR }], sourceId)
           }
         } catch (e) {

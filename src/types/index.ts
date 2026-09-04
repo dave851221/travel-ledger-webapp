@@ -14,6 +14,11 @@ export interface Trip {
   rates: Record<string, number>;
   precision_config: Record<string, number>;
   is_archived: boolean;
+  /**
+   * LINE Bot 解析自然語言與收據時參考的自由文字偏好。
+   * 整趟旅程共用一份（不分 LINE 綁定、不分管道），空字串一律存成 NULL。
+   */
+  ai_preference?: string | null;
   created_at: string;
 }
 

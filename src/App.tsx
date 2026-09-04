@@ -4,6 +4,7 @@ import Home from './pages/Home';
 import TripPortal from './pages/TripPortal';
 import Dashboard from './pages/Dashboard';
 import LiffEdit from './pages/LiffEdit';
+import LiffPreference from './pages/LiffPreference';
 import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 
@@ -70,6 +71,7 @@ function App() {
           <Route path="/trip/:id" element={<TripPortal />} />
           <Route path="/trip/:id/dashboard" element={<Dashboard />} />
           <Route path="/liff/edit" element={<LiffEdit />} />
+          <Route path="/liff/preference" element={<LiffPreference />} />
         </Routes>
       </div>
     </Router>

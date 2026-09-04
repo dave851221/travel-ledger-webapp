@@ -33,10 +33,14 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 --   category   ：旅程本身的分組（首頁分組用），與 categories（支出分類）是不同概念
 --   rates      ：{ 幣別: 對主幣別的匯率 }
 --   precision_config：{ 幣別: 小數位數 }，例如 { "TWD": 0, "JPY": 0, "USD": 2 }
+--   ai_preference   ：LINE Bot 解析自然語言與收據時參考的自由文字偏好。
+--                     整趟旅程共用一份（不分 LINE 綁定、不分管道），網頁設定頁與
+--                     LIFF 偏好頁編輯的都是這個欄位。空字串一律存成 NULL。
 CREATE TABLE IF NOT EXISTS public.trips (
     id                    UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
     name                  TEXT        NOT NULL,
     access_code           TEXT,
+    ai_preference         TEXT,
     members               TEXT[]      NOT NULL,
     categories            TEXT[]      NOT NULL,
     category              TEXT,
@@ -82,6 +86,7 @@ CREATE INDEX IF NOT EXISTS expenses_deleted_at_idx ON public.expenses (deleted_a
 -- ── 既有資料庫相容 ────────────────────────────────────────────
 -- 全新建立時以下皆為 no-op；若把 bootstrap 跑在舊資料庫上則會補正
 ALTER TABLE public.trips ALTER COLUMN access_code DROP NOT NULL;
+ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS ai_preference TEXT;
 
 -- 空白密碼一律正規化為 NULL，避免出現兩種「無密碼」表示法
 UPDATE public.trips SET access_code = NULL WHERE btrim(access_code) = '';

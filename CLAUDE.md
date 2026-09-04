@@ -10,6 +10,7 @@
 | [`docs/SETUP.md`](docs/SETUP.md) | 從零架設、資料庫初始化、Edge Function 部署 | 建新環境、部署時 |
 | [`docs/DB_MAINTENANCE.md`](docs/DB_MAINTENANCE.md) | 後台維運（**刪除旅程**、清理孤兒照片、重設 LINE 綁定） | 需要手動操作資料庫時 |
 | [`docs/LINE_BOT.md`](docs/LINE_BOT.md) | LINE Bot 行為規格與自我介紹全文 | 改機器人邏輯或對話時 |
+| [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md) | LINE 記帳的完整使用情境、支援狀態、bug 清單與修正規劃 | 改 Bot 邏輯前後的回歸檢查表 |
 | [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md) | 如何新增一個旅程行程頁 | 要做新行程頁時 |
 | [`docs/AI_TOOLING.md`](docs/AI_TOOLING.md) | 讓 AI 直接操作 Supabase（MCP 設定與風險） | 想請 AI 跑 SQL 或部署函式時 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 待辦、已知風險、未來規劃 | 想知道什麼還沒做、哪裡有雷 |
@@ -32,8 +33,8 @@ npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查
 ```
 
 提交前請跑 `npm run lint && npm test && npm run check:functions && npm run build`
-—— CI 這四關都會擋。測試只涵蓋 `src/utils/` 的純函式與跨實作的契約比對，
-沒有元件層級的測試。
+—— CI 這四關都會擋。測試涵蓋 `src/utils/` 的純函式、跨實作的契約比對，
+以及 LINE Bot 的 `supabase/functions/line-webhook/guards.ts`；沒有元件層級的測試。
 
 `tsc` 只看得到 `src/`，Edge Function 是 Deno 程式碼，必須用 `check:functions`
 才檢查得到 —— 這個專案踩過「部署後靜默失效」的坑，別跳過這一關。
@@ -80,6 +81,9 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   **所有旅程層級的寫入都在這裡**，Dashboard 只負責重新抓取。
 - **`LiffEdit.tsx`**：獨立頁面，透過 LIFF 嵌在 LINE App 的 WebView 中，
   把 URL 裡 base64url 編碼的草稿餵給 `ExpenseModal` 重用整個編輯器。
+- **`LiffPreference.tsx`**：同樣走 LIFF，編輯 `trips.ai_preference`
+  （LINE Bot 解析文字與收據時參考的自由文字偏好，整趟旅程共用一份）。
+  只覆寫單一欄位，不需要 nonce／postback。
 
 ### 財務計算引擎
 
@@ -105,7 +109,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 ### 後端（Supabase）
 
 - **資料庫**：`trips` 與 `expenses` 含 JSONB 欄位（`payer_data`、`split_data`、`rates`、
-  `precision_config`）。軟刪除用 `deleted_at`（僅 expenses 有），結清紀錄以 `is_settlement` 標記。
+  `precision_config`）。軟刪除用 `deleted_at`（僅 expenses 有），結清紀錄以 `is_settlement` 標記
+  —— **編輯既有支出時務必沿用原本的 `is_settlement`**，硬寫 `false` 會把結清變成一般支出、統計失真。
   結構定義在 [`supabase/schema/`](supabase/schema/)。
 - **即時同步**：`trips` 與 `expenses` 都在 `supabase_realtime` 發布中，Dashboard 訂閱更新。
 - **儲存空間**：`travel-images` bucket，路徑 `expenses/{tripId}/{檔名}`。
@@ -122,20 +127,35 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 ### LINE Bot Edge Function
 
-`supabase/functions/line-webhook/index.ts`（約 1300 行，Deno）：
+`supabase/functions/line-webhook/index.ts`（約 2100 行，Deno）負責路由、DB 存取與 LINE API；
+沒有副作用的純函式都在同目錄的 **`guards.ts`**（`extractJSON`、`toAmountMap`、`resolveMember`、
+`resolveExpenseMembers`、`normalizeCurrency`、`normalizeDate`、`applyParticipantDefaults`、
+`detectRecordIntent`、`claimsCompletedAction`、`summarizeHistoryEntry`），
+由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
+`check:functions` 只列 `index.ts`，`guards.ts` 透過 import 一起被檢查。
+
+處理流程：
 
 1. 以 `LINE_CHANNEL_SECRET` 驗證 HMAC-SHA256 簽章
 2. **綁定**：使用者傳 `ID:A1B2C3` → 查 `line_trip_id_mapping` → 要求通行碼 →
    寫入 `line_user_states.current_trip_id`
 3. **文字訊息**：先比對快捷指令（直接查 DB），其餘交給 Gemini 回傳結構化 JSON
 4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片
-5. **Postback**：按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出
+5. **Postback**：按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
+   同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
+   但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著
 6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式。
    群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者。
 
+7. **AI 記帳偏好**：存 `trips.ai_preference`，**整趟旅程共用一份**（不分 LINE 綁定、不分管道）。
+   網頁的 `SettingsModal`、LIFF 的 `src/pages/LiffPreference.tsx`（`#/liff/preference?tripId=`）
+   與文字指令 `設定:` 改的都是同一個欄位。舊的 `line_user_states.default_config` 已不再讀寫。
+
 **AI 回傳的內容一律先驗證再落地**：成員名稱做模糊比對後對應回正式名稱、
 幣別比對旅程 `rates` 與 ISO 白名單、日期檢查格式與合理範圍。
-任何被修正的欄位都會告知使用者，不會默默改掉。細節見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)。
+付款人與分攤為空時補上與前端 `quickAdd` 一致的預設值。
+任何被修正的欄位都會告知使用者，不會默默改掉。細節見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)，
+使用情境與回歸檢查表見 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md)。
 
 行為規格詳見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)。
 

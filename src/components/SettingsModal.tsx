@@ -18,7 +18,8 @@ import {
   ShieldCheck,
   Copy,
   Check,
-  MessageCircle
+  MessageCircle,
+  Bot
 } from 'lucide-react';
 import Modal from './Modal';
 import { supabase } from '../api/supabase';
@@ -49,6 +50,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [tripCategory, setTripCategory] = useState<string>(trip.category || '');
   const [knownTripCategories, setKnownTripCategories] = useState<string[]>([]);
   const [lineBotId, setLineBotId] = useState<string>('');
+  const [aiPreference, setAiPreference] = useState(trip.ai_preference || '');
   const [copied, setCopied] = useState(false);
   
   // Track renames: { oldName: newName }
@@ -81,6 +83,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setMembers([...trip.members]);
       setCategories([...trip.categories]);
       setTripCategory(trip.category || '');
+      setAiPreference(trip.ai_preference || '');
       setBaseCurrency(trip.base_currency);
       setDefaultCurrency(trip.default_currency || trip.base_currency);
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
@@ -213,6 +216,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           members,
           categories,
           category: tripCategory.trim() || null,
+          // 留空即代表沒有偏好；與 access_code 同樣的正規化慣例，統一存成 NULL
+          ai_preference: aiPreference.trim() || null,
           rates: finalRates,
           precision_config: finalPrecision,
           base_currency: baseCurrency,
@@ -398,6 +403,29 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   </datalist>
                 </div>
                 <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">同名分類的旅程會在首頁分組顯示，方便按家族／朋友／出差等情境分類管理。</p>
+              </div>
+
+              {/* AI 記帳偏好：LINE Bot 解析文字與收據時的參考，整趟旅程共用一份 */}
+              <div className="p-4 sm:p-6 bg-violet-50/50 dark:bg-violet-900/10 rounded-2xl border border-violet-100 dark:border-violet-900/30">
+                <div className="flex items-center gap-3 sm:gap-4 mb-3 sm:mb-5">
+                  <div className="p-2 sm:p-3 bg-violet-100 dark:bg-violet-900/30 text-violet-600 rounded-lg sm:rounded-xl"><Bot size={20} /></div>
+                  <div>
+                    <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">🤖 AI 記帳偏好</p>
+                    <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">耀西解析你說的話或收據時會參考這段描述</p>
+                  </div>
+                </div>
+                <textarea
+                  rows={4}
+                  placeholder={`例如：預設由${trip.members[0] || '我'}付款，大家均分；日幣一律不換算`}
+                  className="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border-2 border-violet-100 dark:border-violet-900/30 focus:border-violet-600 outline-none transition-all font-bold text-sm resize-none"
+                  value={aiPreference}
+                  onChange={e => setAiPreference(e.target.value)}
+                />
+                <p className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-medium leading-relaxed">
+                  <strong>整趟旅程共用一份</strong>，在 LINE 裡按「⚙️ 記帳偏好」看到的也是這一份。
+                  留空即代表沒有偏好。<br />
+                  不要在這裡寫「我是○○」—— 群組裡每個人看到的都是同一句，耀西已經會用 LINE 顯示名稱判斷「我」是誰。
+                </p>
               </div>
 
               {/* LineBot Binding Section */}

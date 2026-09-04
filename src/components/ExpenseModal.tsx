@@ -362,7 +362,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       const record = {
         trip_id: trip.id, date, category, description: finalDescription, amount: numAmount, currency,
         payer_data: finalPayerData, split_data: finalSplitData, adjustment_member: adjustmentMember,
-        photo_urls: finalPhotoUrls, is_settlement: false
+        // 結清紀錄也可能被編輯（例如從 LINE 的編輯清單開進來）。
+        // 硬寫 false 會把它變成一般支出，統計立刻失真。
+        photo_urls: finalPhotoUrls, is_settlement: editData?.is_settlement ?? false
       };
 
       let savedExpenseId: string | null = null;
