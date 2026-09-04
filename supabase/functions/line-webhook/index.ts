@@ -23,9 +23,12 @@ import {
   normalizeDate,
   normalizeExpenseAmountMaps,
   pickExpenseByRef,
+  resolveCategory,
   resolveCurrencyByRule,
   resolveExpenseMembers,
+  stripSelfMentions,
   summarizeHistoryEntry,
+  summarizeTripExpenses,
 } from "./guards.ts"
 
 const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
@@ -221,6 +224,18 @@ async function markDraftsSuperseded(sourceId: string, nonces: string[]): Promise
 }
 
 /**
+ * 把剛佔用的 nonce 放掉。
+ *
+ * 「確認存入」是先寫 nonce 再做事（那是防連點的鎖）。若後面發現不能存
+ * （成員被移除、Σ 對不上），鎖留著的話整張卡片就死了 ——
+ * 連我們自己叫使用者去按的「✏️ 編輯」都會回「這張卡片已處理過」。
+ */
+async function releaseNonce(nonce: string | null | undefined): Promise<void> {
+  if (!nonce) return
+  await supabase.from('line_processed_actions').delete().eq('nonce', nonce)
+}
+
+/**
  * 只讓「被修正的那一張」草稿失效。
  *
  * ⚠️ 這裡刻意不是「讓所有舊草稿失效」。原本每送一張新卡片就把先前全部作廢，
@@ -233,11 +248,14 @@ async function supersedeDraft(sourceId: string, nonce: string): Promise<void> {
 }
 
 /**
- * 讓這個聊天所有未處理的草稿失效。
- * 綁定／斷開／切換旅程時該用它（ROADMAP 的 M13），一般記帳流程不要呼叫。
- * 目前還沒有呼叫端 —— M13 會接上去，先 export 以免被當成死碼刪掉。
+ * 讓這個聊天所有未處理的草稿失效（M13）。
+ *
+ * 綁定成功、斷開、切換旅程時一定要呼叫：草稿的 payload 裡帶著舊的 `tid`，
+ * 換旅程後再按那張卡的「確認存入」會把支出寫進**上一趟**旅程，
+ * 或因為照片路徑對不上而壞掉（A16）。一般記帳流程不要呼叫 ——
+ * 那會把「連續記多筆」整批作廢，正是 H1 修掉的 bug。
  */
-export async function supersedeAllDrafts(sourceId: string): Promise<void> {
+async function supersedeAllDrafts(sourceId: string): Promise<void> {
   const drafts = await getOutstandingDrafts(sourceId)
   await markDraftsSuperseded(sourceId, drafts.map(d => d.nonce))
 }
@@ -366,6 +384,75 @@ async function replyEditPicker(opts: {
   }], sourceId)
 }
 
+/**
+ * 待確認的記帳卡片。
+ *
+ * OCR、文字記帳、以及「幣別沒匯率 → 選一個幣別」（M10）三條路徑送出的卡片完全一樣，
+ * 只差標題與有沒有收據縮圖。以前是三份幾乎相同的 Flex JSON 各自散在流程裡，
+ * 改一個按鈕就得記得改三個地方。
+ */
+function buildExpenseCard(opts: {
+  expense: any
+  title: string
+  altText: string
+  heroUrl?: string | null
+  nonce: string
+  webUrl: string
+  liffUrl: string
+}): any {
+  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl } = opts
+  const amountRows = (data: Record<string, unknown>) =>
+    Object.entries(data ?? {}).map(([name, amt]) => ({
+      type: "box", layout: "horizontal",
+      contents: [
+        { type: "text", text: `• ${name}`, size: "xs", color: "#666666" },
+        { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" },
+      ],
+    }))
+
+  return {
+    type: "flex", altText,
+    contents: {
+      type: "bubble",
+      hero: heroUrl ? { type: "image", url: heroUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" } : null,
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: title, weight: "bold", color: "#1DB446", size: "sm" },
+          { type: "text", text: String(expense.description), weight: "bold", size: "xl", margin: "md", wrap: true },
+          { type: "text", text: `📅 ${expense.date} · 🏷️ ${expense.category}`, size: "xs", color: "#aaaaaa", margin: "xs" },
+          { type: "separator", margin: "md" },
+          { type: "box", layout: "vertical", margin: "md", spacing: "sm", contents: [
+            { type: "box", layout: "horizontal", contents: [
+              { type: "text", text: "總金額", color: "#aaaaaa", size: "sm" },
+              { type: "text", text: `${expense.amount} ${expense.currency}`, align: "end", size: "sm", weight: "bold" },
+            ]},
+            { type: "box", layout: "vertical", margin: "sm", contents: [
+              { type: "text", text: "付款人", color: "#aaaaaa", size: "xs" },
+              ...amountRows(expense.payer_data),
+            ]},
+            { type: "box", layout: "vertical", margin: "sm", contents: [
+              { type: "text", text: "分帳明細", color: "#aaaaaa", size: "xs" },
+              ...amountRows(expense.split_details),
+            ]},
+          ]},
+        ],
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [
+          { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
+          { type: "box", layout: "horizontal", spacing: "sm", contents: [
+            { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
+            { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } },
+          ]},
+          { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } },
+        ],
+      },
+    },
+  }
+}
+
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
 const CHAT_HISTORY_TURNS = 8
 
@@ -421,6 +508,7 @@ const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀�
 1. 輸入「ID:您的旅程代碼」
 (可從網站設定頁面取得)
 2. 輸入「旅程密碼」
+(還沒輸入密碼前反悔，可以說「取消綁定」)
 3. 綁定後，我會列出目前的成員供您確認。
 
 ⚙️ AI 記帳偏好（整趟旅程共用）：
@@ -485,6 +573,21 @@ function formatTotals(
 // 旅程密碼為選填：access_code 為 NULL 或全空白時代表免密碼，綁定不需驗證
 function requiresAccessCode(code: string | null | undefined): boolean {
   return !!(code && code.trim())
+}
+
+/** 等待輸入通行碼的有效期限（M1）。超過就自動放棄，不會一直卡在等密碼狀態。 */
+const PENDING_BIND_TTL_MS = 10 * 60 * 1000
+
+/**
+ * 這個 pending 綁定是不是已經過期了。
+ * `pending_at` 為 null 代表是舊資料（欄位加上去之前寫的），一律視為過期 ——
+ * 那些狀態本來就已經卡在那裡很久了。
+ */
+function isPendingExpired(pendingAt: string | null | undefined): boolean {
+  if (!pendingAt) return true
+  const started = new Date(pendingAt).getTime()
+  if (Number.isNaN(started)) return true
+  return Date.now() - started > PENDING_BIND_TTL_MS
 }
 
 function buildBindSuccessText(tripName: string, members: string[], tripId: string): string {
@@ -664,7 +767,11 @@ const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪�
    使用者想刪除或修改既有紀錄時，請回覆：請輸入「刪除支出」或「編輯支出」，
    系統會列出近期紀錄讓他點選。
    （你能做的只有：提出新的記帳建議、修正尚未存檔的草稿、以及查詢。）
-7. analyze_photo 的 expense_ref 只填近期支出清單上的編號（例如 "#3"），不要填網址或店名。
+7. 🚫 **金額類的問題不要自己做算術。** 訊息裡的【全趟彙總】是伺服器用 Decimal 算好的
+   精確數字（總額、每人已付／應付／淨額、各分類、筆數、日期範圍），直接引用即可。
+   【近期支出】只有最近 10 筆，把它們加起來當成總額一定是錯的。
+   彙總裡沒有的切片（例如「第一天花多少」）就照實說目前算不出來，請他到網頁看，不要硬湊。
+8. analyze_photo 的 expense_ref 只填近期支出清單上的編號（例如 "#3"），不要填網址或店名。
    使用者說「剛剛」「最新」又沒指名店名時，選清單裡日期最近且有 📷 的那一筆。
    問的那筆不在清單上就把 expense_ref 留空字串，系統會自己去全庫找。`
 
@@ -851,11 +958,42 @@ serve(async (req) => {
         const { data: newState } = await supabase.from('line_user_states').insert({ line_user_id: sourceId }).select().single()
         userState = newState
       }
-      const isBinding = !!(userState?.pending_trip_id && !userState?.current_trip_id)
+      // 等密碼等太久就自動放棄（M1）。
+      //
+      // 以前沒有逾時也沒有取消指令，只能輸入正確密碼或另一個 ID 才脫身；
+      // 群組裡更糟 —— 半小時後有人隨口講一句話，還是會被當成密碼回「密碼錯誤」。
+      if (userState?.pending_trip_id && isPendingExpired(userState.pending_at)) {
+        console.log(`[BIND] pending_trip_id expired for ${sourceId}, clearing`)
+        await supabase.from('line_user_states')
+          .update({ pending_trip_id: null, pending_at: null })
+          .eq('line_user_id', sourceId)
+        userState = { ...userState, pending_trip_id: null, pending_at: null }
+      }
+      // ⚠️ 不再要求 current_trip_id 為空（M1）：切換旅程時舊的綁定要留著，
+      //    新旅程的密碼驗證成功了才換過去，中途放棄不該變成「沒綁定」。
+      const isBinding = !!userState?.pending_trip_id
       const isBound = !!userState?.current_trip_id
       const mentionRequired = userState?.mention_required ?? true
+      // last_active_at 原本是從沒被更新過的死欄位（M1 順手處理）。
+      // 不影響回覆，交給背景寫。
+      runInBackground(supabase.from('line_user_states')
+        .update({ last_active_at: new Date().toISOString() })
+        .eq('line_user_id', sourceId))
       // 預計算綁定狀態下的快速回覆（含群組切換按鈕與旅程偏好按鈕），整個 event 共用
       const boundQR = getQuickReply(true, isGroup, mentionRequired, userState?.current_trip_id)
+
+      // --- 被加進群組／聊天室（M19）---
+      // 以前完全不處理 join，機器人進來之後一片安靜，
+      // 沒人知道它會做什麼、也不知道要先輸入 ID:代碼 綁定旅程。
+      if (event.type === 'join') {
+        console.log(`[JOIN] Added to ${sourceType} ${sourceId}`)
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: BOT_SELF_INTRODUCTION,
+          quickReply: isBound ? boundQR : getQuickReply(false),
+        }], sourceId)
+        continue
+      }
 
       // --- Postback 處理 ---
       if (isBound && (event.type === 'postback')) {
@@ -912,6 +1050,90 @@ serve(async (req) => {
           } else {
             await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}`, quickReply: boundQR }], sourceId)
           }
+          continue
+        }
+
+        // 「以 XXX 存入」—— 收據的幣別在這趟旅程沒有匯率時的補救（M10）。
+        // 照片與辨識結果已經先存成 pending，這裡只是換個幣別重新出卡，
+        // 使用者不必為了改一個幣別重拍收據。
+        if (postbackData.act === 'cur') {
+          const oldNonce = postbackData.n
+          const chosen = String(postbackData.c ?? '').toUpperCase()
+          const pending = oldNonce ? await getPendingExpense(sourceId, oldNonce) : null
+          if (!pending) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，請重新傳送收據。' }], sourceId)
+            continue
+          }
+
+          // 佔用舊 nonce，避免同一則訊息的按鈕被連按兩次而出兩張卡
+          const { error: lockErr } = await supabase.from('line_processed_actions')
+            .insert({ nonce: oldNonce, line_user_id: sourceId, action_type: 'superseded' })
+          if (lockErr) {
+            const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', oldNonce).maybeSingle()
+            await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+            continue
+          }
+
+          const tripIdForCur = pending.tid || userState.current_trip_id
+          const { data: curTrip } = await supabase.from('trips')
+            .select('id, rates, precision_config, base_currency, default_currency, members').eq('id', tripIdForCur).maybeSingle()
+          if (!curTrip) {
+            await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。' }], sourceId)
+            continue
+          }
+          if (!Object.prototype.hasOwnProperty.call(curTrip.rates ?? {}, chosen)) {
+            await replyMessage(replyToken, [{ type: 'text', text: `❌ 這趟旅程沒有 ${chosen} 的匯率，請先到網頁設定。` }], sourceId)
+            continue
+          }
+
+          // 🚫 只換幣別標籤，金額不換算 —— 與兩個 prompt 的規則一致。
+          //    但精度會變（USD 2 位 → TWD 0 位），所以分帳要照新精度重算：
+          //    把原本的分配當成 lockedData 交回去，餘數由 calculateDistribution
+          //    強制加到調整成員身上，Σ 一定等於總額。
+          const src = pending.exp ?? {}
+          const curPrecision = (curTrip.precision_config as any)?.[chosen] ?? DEFAULT_PRECISION[chosen] ?? 2
+          const curAmount = new Decimal(Number(src.a) || 0).toDecimalPlaces(curPrecision).toNumber()
+          const curPayers = Object.keys(src.p ?? {})
+          const curSplits = Object.keys(src.s ?? {})
+          const curAdjust = curPayers.find((m: string) => curSplits.includes(m)) ?? curSplits[0]
+          // 全 0 的 map 是 applyParticipantDefaults 的佔位（意思是均分），不能當鎖定金額交給
+          // calculateDistribution，否則整筆會落到調整成員身上（H6 同款問題）。
+          // 有值的先照新精度四捨五入，餘數由 calculateDistribution 給調整成員。
+          const relock = (map: Record<string, unknown> | undefined): Record<string, number> => {
+            const entries = Object.entries(map ?? {})
+            if (entries.every(([, v]) => !(Number(v) || 0))) return {}
+            const out: Record<string, number> = {}
+            for (const [k, v] of entries) out[k] = new Decimal(Number(v) || 0).toDecimalPlaces(curPrecision).toNumber()
+            return out
+          }
+          const curExpense = {
+            description: src.d, amount: curAmount, currency: chosen,
+            date: src.dt, category: src.cat,
+            payer_data: curPayers.length > 0
+              ? calculateDistribution(curAmount, curPayers, relock(src.p), curPayers[0], curPrecision) : {},
+            split_details: curSplits.length > 0
+              ? calculateDistribution(curAmount, curSplits, relock(src.s), curAdjust, curPrecision) : {},
+          }
+
+          const newNonce = Math.random().toString(36).substring(2, 10)
+          const photoIds = pending.p ?? []
+          await storePendingExpense(sourceId, newNonce, {
+            exp: {
+              d: curExpense.description, a: curExpense.amount, c: curExpense.currency,
+              dt: curExpense.date, cat: curExpense.category,
+              p: curExpense.payer_data, s: curExpense.split_details,
+            },
+            p: photoIds, tid: tripIdForCur,
+          })
+          await replyMessage(replyToken, [buildExpenseCard({
+            expense: curExpense,
+            title: `🔍 已改用 ${chosen}`,
+            altText: `確認記帳: ${curExpense.description}`,
+            heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], tripIdForCur) : null,
+            nonce: newNonce,
+            webUrl: `${WEBAPP_URL}/#/trip/${tripIdForCur}/dashboard`,
+            liffUrl: buildDraftLiffUrl(tripIdForCur, newNonce, sourceId),
+          })], sourceId)
           continue
         }
 
@@ -1025,9 +1247,33 @@ serve(async (req) => {
           // 走到這裡還是空的多半是成員在存檔前被刪掉了，只能請使用者重新編輯。
           if (payerMembers.length === 0 || splitMembers.length === 0) {
             console.warn(`[SAVE] Empty participants after filtering. trip=${trip_id}`)
+            // 沒有存成功就把 nonce 放掉，卡片上的按鈕才還能用（不然連「✏️ 編輯」都會說已處理過）
+            await releaseNonce(nonce)
             await replyMessage(replyToken, [{
               type: 'text',
               text: '😅 這筆的付款人或分攤成員是空的（可能是成員已被移除），無法存入。\n\n請按卡片上的「✏️ 編輯」補上，或直接重說一次。',
+              quickReply: boundQR,
+            }], sourceId)
+            continue
+          }
+
+          // 卡片上有、但成員清單裡已經沒有的名字（M12）。
+          //
+          // ⚠️ 不能默默存下去：被移除的人的份額會被 calculateDistribution
+          //    當成餘數加到調整成員身上，Σ 仍然等於總額，所以下面的檢查也攔不住 ——
+          //    帳面上完全正常，只是有個人平白多背了一份。
+          const droppedPayers = Object.keys(expense.payer_data).filter(m => !trip.members.includes(m))
+          const droppedSplits = Object.keys(expense.split_details).filter(m => !trip.members.includes(m))
+          const dropped = [...new Set([...droppedPayers, ...droppedSplits])]
+          if (dropped.length > 0) {
+            console.warn(`[SAVE] Members no longer in trip: ${dropped.join(', ')}`)
+            await releaseNonce(nonce)
+            await replyMessage(replyToken, [{
+              type: 'text',
+              text: `😅 這張卡片上的「${dropped.join('、')}」已經不在旅程成員裡了，不能就這樣存入 —— `
+                + `他的那一份會被默默算到別人頭上。\n\n`
+                + `目前成員：${trip.members.join('、')}\n\n`
+                + `請按卡片上的「✏️ 編輯」重新分攤，或直接重說一次。`,
               quickReply: boundQR,
             }], sourceId)
             continue
@@ -1044,6 +1290,8 @@ serve(async (req) => {
 
           if (!payerSum.equals(target) || !splitSum.equals(target)) {
             console.error(`[CRITICAL_VALIDATION_ERROR] Sum mismatch. P:${payerSum}, S:${splitSum}, T:${target}`)
+            // 同上：沒存成功就把鎖放掉，卡片還能重按或改用「✏️ 編輯」
+            await releaseNonce(nonce)
             await replyMessage(replyToken, [{ type: 'text', text: `❌ 財務運算發生錯誤，請聯絡管理員。` }], sourceId)
             continue
           }
@@ -1219,8 +1467,12 @@ serve(async (req) => {
      3. 全員均分
 6. 回傳格式由系統的 response schema 約束，type 請填 "expense"。
    payer_data 與 split_details 都是陣列，每個元素是 { "member": "成員名稱", "amount": 金額 }。
-7. 如果這看起來完全不像收據（例如：人物照、風景照、截圖等），請回傳 type: "not_receipt"，
-   無需任何說明或讚美，系統會自動清除照片。
+7. 如果這看起來**與消費無關**（例如：人物照、風景照、風景明信片、與消費無關的截圖），
+   請回傳 type: "not_receipt"，無需任何說明或讚美，系統會自動清除照片。
+   ⚠️ 但**付款成功畫面與交易通知一律視為收據**，照常回 type: "expense"：
+   行動支付（LINE Pay、街口、PayPay、Suica、悠遊卡）的付款完成畫面、
+   信用卡的消費通知簡訊或 App 推播、轉帳成功畫面、電子發票畫面、訂單確認頁。
+   這些沒有紙本收據的品項描述，就用商店名稱或服務名稱當描述。
 8. **重要限制**：若封存狀態為「已封存」，一律回傳 type: "not_receipt"，系統會另行告知使用者旅程已封存。
 `
 
@@ -1245,19 +1497,18 @@ serve(async (req) => {
 
             normalizeExpenseAmountMaps(expense)
 
-            // 成員名稱：先嘗試對應回正式名稱（暱稱、大小寫、部分符合都能救回來），
-            // 真的對不上才放棄。以前是一律直接拒絕，使用者只能自己猜要怎麼講。
+            // 成員名稱：先嘗試對應回正式名稱（暱稱、大小寫、部分符合都能救回來）。
+            // 對不上的名字由 resolveExpenseMembers 從 map 裡拿掉，後面的
+            // applyParticipantDefaults 會補上旅程預設 —— 照片留著、卡片照出，
+            // 使用者按「✏️ 編輯」改就好（M10）。
+            // 以前是刪照片、要人家重傳一次，只為了改一個名字。
             const { unresolved } = resolveExpenseMembers(expense, trip.members)
-            if (unresolved.length > 0) {
-              console.warn(`[OCR] Unresolvable members: ${unresolved.join(', ')}`)
-              await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
-              await replyMessage(replyToken, [{
-                type: 'text',
-                text: `😅 我在這張收據的分帳中找不到下列成員：${unresolved.join('、')}\n\n目前旅程成員只有：${trip.members.join('、')}\n\n請確認名字是否正確，或在文字訊息中明確指定要用哪些成員，再重新傳送照片。`,
-                quickReply: boundQR
-              }], sourceId)
-              continue
-            }
+            const memberWarning = unresolved.length > 0
+              ? `⚠️ 收據的分帳裡有對不上的名字：${unresolved.join('、')}\n`
+                + `（目前成員：${trip.members.join('、')}）\n`
+                + '已改用旅程的預設分攤，不對的話請按卡片上的「✏️ 編輯」。'
+              : null
+            if (unresolved.length > 0) console.warn(`[OCR] Unresolvable members: ${unresolved.join(', ')}`)
 
             // 幣別與日期的把關。以前這兩個欄位是 AI 講什麼就寫什麼，
             // 幻想出來的幣別會讓金額在統計時默默失真，錯誤的年份則會讓支出跑到別的月份去。
@@ -1270,17 +1521,49 @@ serve(async (req) => {
             expense.currency = ocrRule.currency
             const ocrCurrency = normalizeCurrency(expense.currency, trip)
             if (ocrCurrency.reject) {
-              // 沒有匯率就存下去，統計會以 1:1 換算而失真，寧可先問清楚
-              await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
+              // 這趟旅程沒有這個幣別的匯率。直接存下去統計會以 1:1 換算而失真，
+              // 所以還是不能存 —— 但**照片要留著**（M10）。
+              // 以前是連照片一起刪掉，使用者設好匯率後還得把收據重拍一次。
+              // 改成把辨識結果暫存起來，附上「以 XXX 存入」的快速回覆讓他當場選一個幣別。
+              const available = Object.keys(trip.rates ?? {})
+              applyParticipantDefaults(expense, trip, memberName)
+              const pendingNonce = Math.random().toString(36).substring(2, 10)
+              await storePendingExpense(sourceId, pendingNonce, {
+                exp: {
+                  d: expense.description, a: expense.amount, c: expense.currency,
+                  dt: normalizeDate(expense.date, today).date, cat: expense.category,
+                  p: expense.payer_data, s: expense.split_details,
+                },
+                p: [messageId], tid: tripId,
+              })
+              // 幣別按鈕 + 取消。快速回覆上限 13 顆，留一顆給取消。
+              const currencyItems = available.slice(0, 12).map(cur => ({
+                type: 'action',
+                action: {
+                  type: 'postback', label: `以 ${cur} 存入`,
+                  data: JSON.stringify({ act: 'cur', n: pendingNonce, c: cur }),
+                },
+              }))
               await replyMessage(replyToken, [{
-                type: 'text', text: ocrCurrency.reject, quickReply: boundQR,
+                type: 'text',
+                text: `${ocrCurrency.reject}\n\n📷 收據已經先幫你留著了，選一個幣別就能直接存入（金額不會換算）。`,
+                quickReply: {
+                  items: [
+                    ...currencyItems,
+                    { type: 'action', action: { type: 'postback', label: '❌ 取消', data: JSON.stringify({ act: 'cancel', n: pendingNonce }) } },
+                  ],
+                },
               }], sourceId)
               continue
             }
             expense.currency = ocrCurrency.currency
             const ocrDate = normalizeDate(expense.date, today)
             expense.date = ocrDate.date
-            const ocrWarnings = [ocrCurrency.warning, ocrDate.warning].filter(Boolean) as string[]
+            // 分類也要驗（M18）：AI 回「美食」但旅程只有「餐飲」時，
+            // 以前會原封不動存進去，網頁的分類統計就多出一個永遠選不到的欄位（F7）。
+            const ocrCategory = resolveCategory(expense.category, trip.categories, trip.default_category)
+            expense.category = ocrCategory.category
+            const ocrWarnings = [memberWarning, ocrCurrency.warning, ocrCategory.warning, ocrDate.warning].filter(Boolean) as string[]
 
             // AI 偶爾會回空的付款人或分攤，卡片會出現整片空白的區塊，
             // 按下確認才在 Σ 檢查那裡爆掉。先套上與網頁快速記帳一致的預設值（H6）。
@@ -1325,47 +1608,28 @@ serve(async (req) => {
               ? [{ type: 'text' as const, text: ocrWarnings.join('\n') }]
               : []
 
-            await replyMessage(replyToken, [...ocrWarningMsg, {
-              type: "flex", altText: `收據辨識預覽: ${expense.description}`,
-              contents: {
-                type: "bubble",
-                hero: { type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
-                body: {
-                  type: "box", layout: "vertical",
-                  contents: [
-                    { type: "text", text: "🔍 AI 辨識結果", weight: "bold", color: "#1DB446", size: "sm" },
-                    { type: "text", text: String(expense.description), weight: "bold", size: "xl", margin: "md", wrap: true },
-                    { type: "text", text: `📅 ${expense.date} · 🏷️ ${expense.category}`, size: "xs", color: "#aaaaaa", margin: "xs" },
-                    { type: "separator", margin: "md" },
-                    { type: "box", layout: "vertical", margin: "md", spacing: "sm", contents: [
-                      { type: "box", layout: "horizontal", contents: [{ type: "text", text: "總金額", color: "#aaaaaa", size: "sm" }, { type: "text", text: `${expense.amount} ${expense.currency}`, align: "end", size: "sm", weight: "bold" }] },
-                      { type: "box", layout: "vertical", margin: "sm", contents: [
-                        { type: "text", text: "付款人", color: "#aaaaaa", size: "xs" },
-                        ...Object.entries(expense.payer_data).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
-                      ]},
-                      { type: "box", layout: "vertical", margin: "sm", contents: [
-                        { type: "text", text: "分帳明細", color: "#aaaaaa", size: "xs" },
-                        ...Object.entries(expense.split_details).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
-                      ]}
-                    ]}
-                  ]
-                },
-                footer: {
-                  type: "box", layout: "vertical", spacing: "sm",
-                  contents: [
-                    { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-                    { type: "box", layout: "horizontal", spacing: "sm", contents: [
-                      { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
-                      { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
-                    ]},
-                    { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
-                  ]
-                }
-              }
-            }], sourceId)
+            await replyMessage(replyToken, [...ocrWarningMsg, buildExpenseCard({
+              expense,
+              title: "🔍 AI 辨識結果",
+              altText: `收據辨識預覽: ${expense.description}`,
+              heroUrl: publicUrl,
+              nonce, webUrl, liffUrl,
+            })], sourceId)
           } else if (res.type === 'not_receipt') {
-            console.log(`[PHOTO] Not a receipt, silently deleting: ${filePath}`)
+            console.log(`[PHOTO] Not a receipt, deleting: ${filePath}`)
             await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
+            // 群組維持靜默（大家常在群裡貼風景照，不該每張都被機器人回一句），
+            // 但一對一非回不可 —— 使用者傳了照片卻什麼都沒發生，
+            // 根本不知道是沒收到、當機了、還是被判定不是收據（M8）。
+            if (!isGroup) {
+              await replyMessage(replyToken, [{
+                type: 'text',
+                text: '🤔 這張看起來不是收據，所以我沒有記帳（照片也沒有留下）。\n\n'
+                  + '如果要記這一筆，直接打字就可以，例如「晚餐 300」。\n'
+                  + '行動支付的付款完成畫面、信用卡消費通知截圖我也讀得懂，可以再試一次。',
+                quickReply: boundQR,
+              }], sourceId)
+            }
           } else {
             console.log(`[PHOTO] Non-expense photo response, deleting: ${filePath}`)
             await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
@@ -1386,10 +1650,13 @@ serve(async (req) => {
         continue
       }
 
-      const userText = event.message.text.trim()
+      // ⚠️ mentionees 的 index 是相對於**原始未 trim 的** text，切 mention 要用原文（M16）
+      const rawText: string = event.message.text
+      const mentionees = event.message.mention?.mentionees as any[] | undefined
+      const userText = rawText.trim()
       console.log(`[USER_TEXT] "${userText}"`)
 
-      const isMentioned = event.message.mention?.mentionees?.some((m: any) => m.isSelf === true)
+      const isMentioned = mentionees?.some((m: any) => m.isSelf === true)
       const isIdCommand = userText.toUpperCase().startsWith('ID:') || userText.toUpperCase().startsWith('ID：')
       const QUICK_CMD_KEYWORDS = ['今日支出', '今天支出', '本週支出', '近期支出', '本月支出', '結算', '旅程總覽']
       const UNDO_KEYWORDS = ['取消上一筆', '撤銷上一筆', '刪除上一筆', '刪掉上一筆', '移除上一筆']
@@ -1399,11 +1666,17 @@ serve(async (req) => {
       const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(userText)
       const isEditListKeyword = EDIT_LIST_KEYWORDS.includes(userText)
       const isToggleKeyword = userText === '模式:全回應模式' || userText === '模式:提及模式'
-      const isManagement = userText.startsWith('設定') || userText === '斷開' || userText === '切換旅程' || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword || isDeleteListKeyword || isEditListKeyword || isToggleKeyword
+      // ⚠️ 只認真正的偏好指令（M3）。以前是 startsWith('設定')，
+      //    群組裡的「設定好了嗎」「設定完再跟我說」都會被當成管理指令送進 AI。
+      const isPreferenceCmd = /^設定[:：]/.test(userText) || userText === '設定?' || userText === '設定？'
+      const isBindCancelKeyword = userText === '取消綁定' || userText === '放棄綁定'
+      const isManagement = isPreferenceCmd || userText === '斷開' || userText === '切換旅程' || isBindCancelKeyword || QUICK_CMD_KEYWORDS.includes(userText) || isUndoKeyword || isDeleteListKeyword || isEditListKeyword || isToggleKeyword
 
       // 「耀西」必須出現在訊息開頭（去除 @mention 前綴後），避免誤觸
-      const strippedForTrigger = userText.replace(/@\S+\s*/g, '').trimStart()
-      const startsWithYoshi = strippedForTrigger.startsWith('耀西')
+      // 只拿掉「提及機器人」的那幾段，其他人的 @名字要留著（M16）——
+      // 以前一律刪掉所有 @開頭的詞，「@耀西 @小明 你付的晚餐 300」的付款人整個消失（L14）。
+      const withoutSelfMention = stripSelfMentions(rawText, mentionees)
+      const startsWithYoshi = withoutSelfMention.startsWith('耀西')
 
       // 群組觸發邏輯：
       //   - 全回應模式（mention_required=false）→ 處理所有訊息
@@ -1431,7 +1704,7 @@ serve(async (req) => {
         continue
       }
 
-      const cleanText = userText.replace(/@\S+\s*/g, '').replace(/^耀西\s*/, '').trim()
+      const cleanText = withoutSelfMention.replace(/^耀西\s*/, '').trim()
 
       // 0a. 明確想看使用說明 → 完整介紹
       const HELP_KEYWORDS = ['使用說明', '說明', '教學', '怎麼用', '怎麼使用', '如何使用', 'help', 'HELP', 'Help', '功能']
@@ -1465,7 +1738,11 @@ serve(async (req) => {
             const { data: targetTrip } = await supabase.from('trips').select('access_code, name, members').eq('id', mapping.trip_id).maybeSingle()
             if (targetTrip && !requiresAccessCode(targetTrip.access_code)) {
               // 免密碼旅程：略過驗證步驟，直接完成綁定
-              await supabase.from('line_user_states').update({ current_trip_id: mapping.trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
+              await supabase.from('line_user_states')
+                .update({ current_trip_id: mapping.trip_id, pending_trip_id: null, pending_at: null })
+                .eq('line_user_id', sourceId)
+              // 換了旅程，舊草稿的 tid 指向上一趟，必須全部失效（M13）
+              await supersedeAllDrafts(sourceId)
               await replyMessage(replyToken, [{
                 type: 'text',
                 text: buildBindSuccessText(targetTrip.name, targetTrip.members, mapping.trip_id),
@@ -1473,10 +1750,16 @@ serve(async (req) => {
                 quickReply: getQuickReply(true, isGroup, mentionRequired, mapping.trip_id)
               }], sourceId)
             } else {
+              // ⚠️ 這裡**不動 current_trip_id**（M1）。
+              //    以前是當下就清空，使用者打錯代碼或改變主意就變成完全沒綁定，
+              //    而且沒有任何指令可以退回去。現在原本的旅程照常用，
+              //    等新旅程的密碼驗證成功了才切換。
               const msg = userState?.current_trip_id
-                ? '🔄 已找到旅程！請輸入新旅程密碼（原旅程連結將解除）。'
-                : '🔍 已找到旅程！請輸入密碼驗證。'
-              await supabase.from('line_user_states').update({ pending_trip_id: mapping.trip_id, current_trip_id: null }).eq('line_user_id', sourceId)
+                ? '🔄 已找到旅程！請輸入新旅程密碼以切換（10 分鐘內有效；想放棄請輸入「取消綁定」，原旅程的綁定會保留）。'
+                : '🔍 已找到旅程！請輸入密碼驗證（10 分鐘內有效，想放棄請輸入「取消綁定」）。'
+              await supabase.from('line_user_states')
+                .update({ pending_trip_id: mapping.trip_id, pending_at: new Date().toISOString() })
+                .eq('line_user_id', sourceId)
               await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
             }
           }
@@ -1486,9 +1769,36 @@ serve(async (req) => {
         continue
       }
 
+      // 1b. 放棄綁定（M1）——「輸入 ID 後反悔」以前完全沒有出口
+      if (cleanText === '取消綁定' || cleanText === '放棄綁定') {
+        if (!isBinding) {
+          await replyMessage(replyToken, [{
+            type: 'text',
+            text: 'ℹ️ 目前沒有在等待密碼。想解除已綁定的旅程請輸入「斷開」。',
+            quickReply: isBound ? boundQR : getQuickReply(false),
+          }], sourceId)
+          continue
+        }
+        await supabase.from('line_user_states')
+          .update({ pending_trip_id: null, pending_at: null })
+          .eq('line_user_id', sourceId)
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: isBound
+            ? '✅ 已取消綁定流程，維持原本綁定的旅程。'
+            : '✅ 已取消綁定流程。要重新開始請輸入「ID:您的代碼」。',
+          quickReply: isBound ? boundQR : getQuickReply(false),
+        }], sourceId)
+        continue
+      }
+
       // 2. 斷開
       if (isBound && (cleanText === '斷開' || cleanText === '切換旅程')) {
-        await supabase.from('line_user_states').update({ current_trip_id: null, pending_trip_id: null }).eq('line_user_id', sourceId)
+        await supabase.from('line_user_states')
+          .update({ current_trip_id: null, pending_trip_id: null, pending_at: null })
+          .eq('line_user_id', sourceId)
+        // 沒有旅程可以存進去了，留著的卡片按下去只會出錯（M13）
+        await supersedeAllDrafts(sourceId)
         await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼', quickReply: getQuickReply(false) }], sourceId); continue
       }
 
@@ -1555,18 +1865,51 @@ serve(async (req) => {
       if (isBinding) {
         const { data: trip } = await supabase.from('trips').select('access_code, name, members').eq('id', userState.pending_trip_id).maybeSingle()
         // 免密碼旅程（例如等待輸入期間密碼被移除）也直接放行
-        if (trip && (!requiresAccessCode(trip.access_code) || trip.access_code === cleanText)) {
-          await supabase.from('line_user_states').update({ current_trip_id: userState.pending_trip_id, pending_trip_id: null }).eq('line_user_id', sourceId)
+        const matched = !!trip && (!requiresAccessCode(trip.access_code) || trip.access_code === cleanText)
+
+        if (matched) {
+          // 驗證成功「才」切換 current_trip_id（M1）
+          await supabase.from('line_user_states')
+            .update({ current_trip_id: userState.pending_trip_id, pending_trip_id: null, pending_at: null })
+            .eq('line_user_id', sourceId)
+          // 換旅程了，舊草稿的 tid 指向上一趟，全部失效（M13）
+          await supersedeAllDrafts(sourceId)
           await replyMessage(replyToken, [{
             type: 'text',
-            text: buildBindSuccessText(trip.name, trip.members, userState.pending_trip_id),
+            text: buildBindSuccessText(trip!.name, trip!.members, userState.pending_trip_id),
             // 同上：要用剛綁定的旅程算快速回覆，boundQR 裡沒有偏好按鈕
             quickReply: getQuickReply(true, isGroup, mentionRequired, userState.pending_trip_id)
           }], sourceId)
-        } else {
-          await replyMessage(replyToken, [{ type: 'text', text: '❌ 密碼錯誤' }], sourceId)
+          continue
         }
-        continue
+
+        if (!isBound) {
+          // 全新綁定：這個聊天現在沒有別的事可做，所以密碼錯了就要講。
+          // 但群組裡別人的閒聊不該收到「密碼錯誤」（A13、M1）——
+          // 只有明確對機器人講話（@提及或以「耀西」開頭）才回覆，其餘靜默。
+          if (!isGroup || isMentioned || startsWithYoshi) {
+            await replyMessage(replyToken, [{
+              type: 'text',
+              text: '❌ 密碼錯誤。再試一次，或輸入「取消綁定」放棄（10 分鐘沒動作也會自動放棄）。',
+            }], sourceId)
+          } else {
+            console.log(`[BIND] Ignoring group chatter while waiting for access code: ${sourceId}`)
+          }
+          continue
+        }
+
+        // 切換旅程中（已綁定 + 等新旅程密碼）。
+        // 明確對機器人講的話一律當成密碼嘗試回「密碼錯誤」——
+        // 直接放行到 AI 的話，打錯的密碼「1235」會被當成一筆 1235 元的支出。
+        // 群組裡沒 @ 的閒聊才放行給原旅程的正常流程（提及模式下本來也不會處理）。
+        if (!isGroup || isMentioned || startsWithYoshi) {
+          await replyMessage(replyToken, [{
+            type: 'text',
+            text: '❌ 密碼錯誤。再試一次，或輸入「取消綁定」放棄切換（原旅程的綁定會保留；10 分鐘沒動作也會自動放棄）。',
+          }], sourceId)
+          continue
+        }
+        console.log(`[BIND] Group chatter during trip switch; falling through to the current trip.`)
       }
 
       // 6. AI 核心
@@ -1891,7 +2234,7 @@ serve(async (req) => {
           continue
         }
 
-        const [{ data: trip }, { data: expenses }, { data: history }] = await Promise.all([
+        const [{ data: trip }, { data: expenses }, { data: history }, { data: allForSummary }] = await Promise.all([
           supabase.from('trips').select('*').eq('id', tripId).single(),
           supabase.from('expenses')
             // id 是給 analyze_photo 的歷史標記用的（`[收據分析 #xxxxxxxx]`）
@@ -1905,8 +2248,26 @@ serve(async (req) => {
           // ⚠️ 必須用 descending 取「最近的 N 筆」，之後再反轉回時間順序。
           //    寫成 ascending + limit 會永遠拿到史上最舊的那幾筆，
           //    對話窗口不會前進，AI 會一直停留在很久以前的內容。
-          supabase.from('line_chat_history').select('role, content').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: false }).limit(CHAT_HISTORY_TURNS)
+          // speaker_name 要一起撈：群組整串歷史是共用的，
+          // 少了它 AI 分不出「我付的」是誰講的（L15、M17）。
+          supabase.from('line_chat_history').select('role, content, speaker_name').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: false }).limit(CHAT_HISTORY_TURNS),
+          // 全趟支出，只為了算彙總（M6）。刻意不設 limit：
+          // 「這趟總共花多少」若只看得到一部分，答出來的數字是錯的，比不答更糟。
+          // 結清紀錄也要撈進來 —— summarizeTripExpenses 會自己決定哪些數字該含它。
+          supabase.from('expenses')
+            .select('amount, currency, category, date, is_settlement, payer_data, split_data')
+            .eq('trip_id', tripId)
+            .is('deleted_at', null),
         ])
+        // 旅程可能已被後台刪除（見 docs/DB_MAINTENANCE.md）。
+        // 以前這裡直接讀 trip.name，整個 event 丟出例外 → 500 → LINE 會重送同一則訊息（M5）。
+        if (!trip) {
+          await replyMessage(replyToken, [{
+            type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。',
+          }], sourceId)
+          continue
+        }
+
         // 不阻塞主流程，但交給 waitUntil 保證回應送出後仍寫得完
         runInBackground(supabase.from('line_chat_history').insert({
           line_user_id: sourceId, role: 'user', content: cleanText,
@@ -1923,6 +2284,8 @@ serve(async (req) => {
         // 有編號、沒有網址。編號是 analyze_photo 唯一要 AI 回的東西 ——
         // 網址長又相似，小模型抄不準，還白白吃掉一堆 token（T4）。
         const contextPrecision = (trip.precision_config ?? {}) as Record<string, number>
+        // 全趟的精確彙總。AI 只看得到最近 10 筆，自由查詢（K8–K13）過去一律答錯（M6）。
+        const tripSummary = summarizeTripExpenses(allForSummary ?? [], trip.members ?? [], contextPrecision)
         const expensesSummary = (expenses ?? []).map((e: any, idx: number) => {
           const photo = e.photo_urls?.length > 0 ? ` 📷×${e.photo_urls.length}` : ''
           return `#${idx + 1} ${e.date} ${e.description} ${formatAmount(e.amount, e.currency, contextPrecision)} ${e.currency} [${e.category}]${photo}`
@@ -1954,7 +2317,12 @@ serve(async (req) => {
 - 幣別：使用者明講（currency_source: stated）> 記帳偏好（preference）> 都沒有就填 none，
   currency 一律用上面的「記帳預設」；系統會再驗一次，說謊沒有好處
 ${memberAliasHint(trip.members)}
-【近期支出（最近10筆，僅供查詢參考）】
+【全趟彙總】（伺服器用 Decimal 算好的精確數字）
+⚠️ 回答金額類問題（總共花多少、誰付最多、我還欠多少、某分類多少）時**一律引用這裡的數字**，
+   絕對不要自己去加總下面那 10 筆 —— 那只是最近的一部分，加起來一定是錯的。
+${tripSummary}
+
+【近期支出（最近10筆，只用來指稱「剛剛那筆」與查明細，不要拿來算總額）】
 ${expensesSummary || '（尚無支出）'}
 
 【尚未確認的草稿】（使用者可能想修正其中一張；修正時 corrects_draft 填它的 nonce）
@@ -1985,7 +2353,7 @@ ${draftSummary || '（沒有等待確認的草稿）'}
           // 查詢是新到舊，這裡反轉回舊到新才符合對話順序
           ...orderedHistory.map((h: any) => ({
             role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: summarizeHistoryEntry(h.role, h.content) }],
+            parts: [{ text: summarizeHistoryEntry(h.role, h.content, h.speaker_name) }],
           })),
           { role: 'user', parts: [{ text: cleanText }] },
         ]
@@ -2089,7 +2457,10 @@ ${draftSummary || '（沒有等待確認的草稿）'}
             expense.currency = textCurrency.currency
             const textDate = normalizeDate(expense.date, today)
             expense.date = textDate.date
-            const textWarnings = [textCurrency.warning, textDate.warning].filter(Boolean) as string[]
+            // 分類的把關，與 OCR 路徑相同（M18）
+            const textCategory = resolveCategory(expense.category, trip.categories, trip.default_category)
+            expense.category = textCategory.category
+            const textWarnings = [textCurrency.warning, textCategory.warning, textDate.warning].filter(Boolean) as string[]
 
             // AI 偶爾會回空的付款人或分攤，補上與網頁快速記帳一致的預設值（H6）
             // 補上的預設值只是 0 佔位：分配時必須改傳 {} 當 lockedData，
@@ -2131,13 +2502,8 @@ ${draftSummary || '（沒有等待確認的草稿）'}
             const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, nonce }, null, 2)}`
             runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: historySummary }))
 
-            let heroSection: any = null
-            if (photo_ids.length > 0) {
-              const firstId = photo_ids[0]
-              const filePath = firstId.includes('/') ? firstId : `expenses/${trip.id}/${firstId}.jpg`
-              const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(filePath)
-              heroSection = { type: "image", url: publicUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" }
-            }
+            // 沿用收據草稿時才有縮圖
+            const heroUrl = photo_ids.length > 0 ? photoPublicUrl(photo_ids[0], trip.id) : null
 
             const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
             // 草稿卡片的「✏️ 編輯」只帶 nonce，完整內容 LiffEdit 自己去 pending 列撈（T2）
@@ -2157,44 +2523,13 @@ ${draftSummary || '（沒有等待確認的草稿）'}
             // storePendingExpense 與 replyMessage 並行執行，縮短回覆延遲
             await Promise.all([
               storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId }),
-              replyMessage(replyToken, [...textWarningMsg, {
-                type: "flex", altText: `確認記帳: ${expense.description}`,
-                contents: {
-                  type: "bubble",
-                  hero: heroSection,
-                  body: {
-                    type: "box", layout: "vertical",
-                    contents: [
-                      { type: "text", text: "🤖 AI 記帳預覽", weight: "bold", color: "#1DB446", size: "sm" },
-                      { type: "text", text: String(expense.description), weight: "bold", size: "xl", margin: "md", wrap: true },
-                      { type: "text", text: `📅 ${expense.date} · 🏷️ ${expense.category}`, size: "xs", color: "#aaaaaa", margin: "xs" },
-                      { type: "separator", margin: "md" },
-                      { type: "box", layout: "vertical", margin: "md", spacing: "sm", contents: [
-                        { type: "box", layout: "horizontal", contents: [{ type: "text", text: "總金額", color: "#aaaaaa", size: "sm" }, { type: "text", text: `${expense.amount} ${expense.currency}`, align: "end", size: "sm", weight: "bold" }] },
-                        { type: "box", layout: "vertical", margin: "sm", contents: [
-                          { type: "text", text: "付款人", color: "#aaaaaa", size: "xs" },
-                          ...Object.entries(expense.payer_data).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
-                        ]},
-                        { type: "box", layout: "vertical", margin: "sm", contents: [
-                          { type: "text", text: "分帳明細", color: "#aaaaaa", size: "xs" },
-                          ...Object.entries(expense.split_details).map(([name, amt]) => ({ type: "box", layout: "horizontal", contents: [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }, { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" }] }))
-                        ]}
-                      ]}
-                    ]
-                  },
-                  footer: {
-                    type: "box", layout: "vertical", spacing: "sm",
-                    contents: [
-                      { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-                      { type: "box", layout: "horizontal", spacing: "sm", contents: [
-                        { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
-                        { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
-                      ]},
-                      { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
-                    ]
-                  }
-                }
-              }], sourceId)
+              replyMessage(replyToken, [...textWarningMsg, buildExpenseCard({
+                expense,
+                title: "🤖 AI 記帳預覽",
+                altText: `確認記帳: ${expense.description}`,
+                heroUrl,
+                nonce, webUrl, liffUrl,
+              })], sourceId),
             ])
           } else if (res.type === 'analyze_photo') {
             const question = res.question || '請詳細描述此收據的所有品項與金額'

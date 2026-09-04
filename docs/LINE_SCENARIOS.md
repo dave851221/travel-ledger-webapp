@@ -10,8 +10,9 @@
 
 以後改 Bot 邏輯前，先掃過相關章節；改完後逐條驗證。要加新功能，先在這裡加情境再動手。
 
-依據的程式版本：H1–H12、第 12 章的 Feature F、第 13 章的 T1–T4 都已實作完成（2026-09-04）。
-第 10.2 節的 M1–M19 除了 **M2**（隨 T2 一起做掉）之外維持未修，已抄進 [`ROADMAP.md`](ROADMAP.md)。
+依據的程式版本：H1–H12、第 12 章的 Feature F、第 13 章的 T1–T4 都已實作完成（2026-09-04），
+第 10.2 節的 **M1–M3、M5–M8、M10–M13、M16–M19 也已完成**（M2 隨 T2；其餘 2026-09-05）。
+**只剩 M4、M14、M15 未修**，留在 [`ROADMAP.md`](ROADMAP.md)。
 文中提到的行號來自修正前的 `index.ts`，現在已經漂移，請一律以函式名與註解關鍵字為準。
 
 純函式現在集中在 `supabase/functions/line-webhook/guards.ts`（由 `guards.test.ts` 看守），
@@ -32,21 +33,25 @@
 
 | 順序 | 進入點 | 關鍵字／函式 |
 | :--- | :--- | :--- |
-| P0 | 簽章驗證、取得發言者名稱、載入 `line_user_states` | `verifySignature`、`getChatMemberName` |
-| P1 | Postback（已綁定才處理） | `act: undo / del / save / cancel` |
+| P0 | 簽章驗證、取得發言者名稱、載入 `line_user_states`（含 pending 逾時清理、`last_active_at`） | `verifySignature`、`getChatMemberName`、`isPendingExpired` |
+| P0.5 | 被加進群組／聊天室 | `join` event → `BOT_SELF_INTRODUCTION` |
+| P1 | Postback（已綁定才處理） | `act: undo / del / save / cancel / cur` |
 | P2 | 圖片訊息（已綁定才處理） | `ocrPrompt`、`OCR_RESPONSE_SCHEMA` |
 | P3 | 群組觸發判斷 | `shouldProcess`、`isManagement`、`startsWithYoshi` |
 | P4 | 說明、純呼叫 | `HELP_KEYWORDS`、`cleanText === ''` |
-| P5 | 綁定與管理指令 | `ID:`、`斷開`、`模式:`、`設定?`、`設定:`、密碼驗證 |
+| P5 | 綁定與管理指令 | `ID:`、`取消綁定`、`斷開`、`模式:`、`設定?`、`設定:`、密碼驗證 |
 | P6 | 草稿的取消／修正，以及已存檔紀錄的編輯／刪除／撤銷攔截 | `getOutstandingDrafts`、`CANCEL_DRAFT_KEYWORDS`、`cancelDraft`、`detectRecordIntent`、`EDIT_LIST_KEYWORDS`、`DELETE_LIST_KEYWORDS`、`UNDO_KEYWORDS` |
 | P7 | 快捷查詢（直接查 DB） | `今日支出`、`本週支出`、`本月支出`、`結算`、`旅程總覽` |
-| P8 | AI 核心 | `tripContext`（含【尚未確認的草稿】）、`YOSHI_SYSTEM_INSTRUCTION`、`TEXT_RESPONSE_SCHEMA`（含 `corrects_draft`）、`getOutstandingDrafts` |
+| P8 | AI 核心 | `tripContext`（含【全趟彙總】與【尚未確認的草稿】）、`YOSHI_SYSTEM_INSTRUCTION`、`TEXT_RESPONSE_SCHEMA`（含 `corrects_draft`）、`getOutstandingDrafts`、`summarizeTripExpenses` |
 | P9 | 未綁定時的其他訊息 | 提示輸入 `ID:` |
 
 寫入前的共同防線（P2 與 P8 都會經過，全部在 `guards.ts`）：
-`normalizeExpenseAmountMaps` → `resolveExpenseMembers` → `normalizeCurrency` → `normalizeDate`
-→ `applyParticipantDefaults` → `calculateDistribution`；
-存檔時（P1 save）再擋一次「付款人或分攤為空」，並做 `Σ(付款) == Σ(分攤) == 總額` 的檢查。
+`normalizeExpenseAmountMaps` → `resolveExpenseMembers` → `resolveCurrencyByRule` →
+`normalizeCurrency` → `resolveCategory` → `normalizeDate` → `applyParticipantDefaults`
+→ `calculateDistribution`；
+存檔時（P1 save）再擋一次「付款人或分攤為空」與「有成員已不在旅程裡」，
+並做 `Σ(付款) == Σ(分攤) == 總額` 的檢查。任何一關擋下來都會 `releaseNonce()`，
+卡片的按鈕才不會跟著失效。
 
 ---
 
@@ -59,17 +64,17 @@
 | A3 | 密碼錯誤 | `ID:A1B2C3` → `0000` | 回「密碼錯誤」，維持等待狀態 | ✅ | P5 |
 | A4 | 重複綁定同一旅程 | 已綁定後再輸入相同 `ID:` | 回「已綁定此旅程」，不重置狀態 | ✅ | P5 |
 | A5 | 等密碼期間改傳另一個 ID | `ID:AAA` → `ID:BBB` | 改等 BBB 的密碼 | ✅ | P5 |
-| A6 | 已綁定時輸入新 ID（切換） | `ID:BBB` | 要求新密碼；驗證成功才切換 | 🐛 M1 輸入 ID 當下 `current_trip_id` 就被清空，放棄的話變成沒綁定 | P5 |
+| A6 | 已綁定時輸入新 ID（切換） | `ID:BBB` | 要求新密碼；驗證成功才切換 | ✅ M1 已修：輸入 ID 只寫 `pending_trip_id`，`current_trip_id` 原封不動；切換中原旅程照常可用（打的不是新密碼就直接往下走正常流程） | P5 |
 | A7 | 解除綁定 | `斷開`／`切換旅程` | 清除狀態，快速回覆只剩「使用說明」 | ✅ | P5 |
 | A8 | 代碼不存在 | `ID:ZZZZZZ` | 回「找不到代碼」 | ✅ | P5 |
 | A9 | 全形冒號、小寫 | `id：a1b2c3` | 視同 `ID:A1B2C3` | ✅ | P5 `toUpperCase` |
 | A10 | 等密碼期間旅程密碼被移除 | 網頁清空密碼後才輸入任何字 | 直接放行綁定 | ✅ | P5 |
 | A11 | 旅程被後台刪除後 | 執行 `delete_trip.sql` 後任何訊息 | `current_trip_id` 因 `ON DELETE SET NULL` 變空，視為未綁定並提示重綁 | ✅ | schema |
 | A12 | 群組中綁定 | 群組內 `ID:A1B2C3` | 整個群組共用一份綁定（刻意設計） | ✅ | P3 `isIdCommand` 免觸發 |
-| A13 | 群組等密碼期間其他人閒聊 | A 輸入 ID 後 B 說「今天好熱」 | 不應把閒聊當密碼 | 🐛 M1 每句話都回「密碼錯誤」 | P3 `isBinding` |
-| A14 | 想放棄綁定 | 輸入 ID 後反悔 | 有指令可取消等待 | 🐛 M1 沒有取消指令，只能輸入正確密碼或另一個 ID | P5 |
+| A13 | 群組等密碼期間其他人閒聊 | A 輸入 ID 後 B 說「今天好熱」 | 不應把閒聊當密碼 | ✅ M1 已修：群組裡只有 @提及或以「耀西」開頭才會回「密碼錯誤」，其餘靜默；輸對密碼仍然照常綁定 | P5 |
+| A14 | 想放棄綁定 | 輸入 ID 後反悔 | 有指令可取消等待 | ✅ M1 已修：新增「取消綁定」／「放棄綁定」；另外 `pending_at` 超過 10 分鐘會自動放棄 | P5 |
 | A15 | 綁定成功的回覆 | — | 列出成員、旅程網址、提示可以開始記帳 | ✅ | `buildBindSuccessText` |
-| A16 | 切換旅程後舊草稿卡片還在 | 換旅程後按舊卡「確認存入」 | 應告知卡片已失效 | 🐛 M13 用舊 `tid` 存進舊旅程，或照片路徑對不上 | P1 |
+| A16 | 切換旅程後舊草稿卡片還在 | 換旅程後按舊卡「確認存入」 | 應告知卡片已失效 | ✅ M13 已修：綁定成功（免密碼與密碼兩條路徑）與斷開時都呼叫 `supersedeAllDrafts()`，舊卡按下去會說「已被較新的記帳建議取代」 | P5、`supersedeAllDrafts` |
 
 | # | 情境 | 範例輸入 | 預期行為 | 現況 | 進入點 |
 | :-- | :-- | :-- | :-- | :-- | :-- |
@@ -162,7 +167,7 @@
 | F4 | 旅程所在地與主幣別不同 | 日本旅程、主幣 TWD、日本時間 23:30 記帳 | 「今天」應是日本日期 | 🐛 M4 時區取主幣別 → 台北時間，跨日一小時內會差一天 | `getTripTimezone` |
 | F5 | 明講分類 | `分類交通 計程車 300` | 採用 | ✅ | P8 |
 | F6 | 沒提分類 | `拉麵 300` | AI 依描述挑，不確定用預設分類或「其他」 | ✅ | prompt 規則 4 |
-| F7 | AI 給了清單外的分類 | AI 回「美食」但旅程只有「餐飲」 | 應對回清單或退回預設 | 🟡 目前完全不驗證，會存進不存在的分類 | 無 |
+| F7 | AI 給了清單外的分類 | AI 回「美食」但旅程只有「餐飲」 | 應對回清單或退回預設 | ✅ M18 已修：`resolveCategory()` 比照 `resolveMember` 做正規化與唯一子字串比對，對不上就退回旅程預設分類 →「其他」→ 清單第一個，並回一則提醒 | `guards.ts`、P2、P8 |
 | F8 | 未來日期 | `明天的機票 5000` | 允許（一年內） | ✅ | `normalizeDate` |
 
 ---
@@ -172,21 +177,21 @@
 | # | 情境 | 範例輸入 | 預期行為 | 現況 | 進入點 |
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | G1 | 單張收據 | 傳一張超商發票 | 下載 → 上傳 Storage → OCR → 帶縮圖的卡片 | ✅ | P2 |
-| G2 | 非收據照片 | 風景照 | 靜默刪除照片、不回覆（群組適合） | 🟡 M8 1:1 也完全沒反應，使用者不知道發生什麼事 | P2 `not_receipt` |
+| G2 | 非收據照片 | 風景照 | 群組靜默刪除；一對一要回一句 | ✅ M8 已修：群組維持靜默（貼風景照不該每張被回），一對一回「這張看起來不是收據」並提示可以直接打字，或改傳付款完成畫面 | P2 `not_receipt` |
 | G3 | 一次傳多張收據 | 相簿多選兩張 | 兩張卡都可各自確認 | ✅ OCR 路徑不再讓舊草稿失效 | P2 |
 | G4 | 多頁收據（同一筆） | 長收據拍兩張 | 合成一筆 | ❌ LINE 的 `imageSet` 未處理，會變兩筆 | — |
 | G5 | 外文店名格式 | 日本收據 | 描述「原文 (中文說明)」，如「肉の匠家 (和牛燒肉店)」 | ✅ | prompt 規則 3 |
 | G6 | 收據含服務費、稅、折扣 | 餐廳帳單 | 總金額取「實付」 | 🟡 靠 AI 判讀 | P2 |
-| G7 | 行動支付／信用卡通知截圖 | PayPay、LINE Pay、Suica 截圖 | 應視為記帳來源 | 🐛 M7 prompt 把「截圖」明列為 not_receipt | prompt 規則 7 |
+| G7 | 行動支付／信用卡通知截圖 | PayPay、LINE Pay、Suica 截圖 | 應視為記帳來源 | ✅ M7 已修：規則 7 改成「與消費無關的截圖」才是 not_receipt，並明列付款完成畫面、信用卡消費通知、轉帳成功、電子發票、訂單確認頁一律視為收據 | prompt 規則 7 |
 | G8 | 模糊看不清金額 | 糊掉的收據 | 反問或以 0 出卡讓人編輯 | 🟡 可能回 not_receipt 靜默 | P2 |
-| G9 | 收據幣別沒匯率 | 旅程沒設 USD，傳美金收據 | 拒絕並提示 | 🐛 M10 照片被刪，設好匯率後要重傳 | P2 `ocrCurrency.reject` |
+| G9 | 收據幣別沒匯率 | 旅程沒設 USD，傳美金收據 | 拒絕並提示，但別讓人重傳照片 | ✅ M10 已修：照片保留，辨識結果存成 pending，回覆附「以 TWD 存入」「以 JPY 存入」等快速回覆（只列旅程 rates 內的幣別，最多 12 顆）＋「❌ 取消」；選了就換幣別重出卡片，**金額不換算**，分帳依新精度重算 | P2 `ocrCurrency.reject`、P1 `act:'cur'` |
 | G10 | 封存旅程傳照片 | — | 回覆「已封存」 | ✅ 回「🔒 此旅程已封存，無法新增支出（照片未儲存）」 | P2 |
 | G11 | 收據日期 | 收據印 2026/09/01 | 採用；沒有就用今天 | ✅ 再經 `normalizeDate` | P2 |
 | G12 | 依偏好預測分攤 | `設定:預設我付大家分` 後傳收據 | 套用 | ✅ | prompt 規則 5 |
 | G13 | 群組任何人傳照片 | 提及模式下傳風景照 | 一律下載、上傳、OCR，非收據再刪 | 🟡 **已確認維持現狀**；注意會消耗 Gemini 額度、照片會短暫進 Storage | P2 在 P3 之前 |
 | G14 | OCR 模型全掛 | 429／5xx | 清掉照片、回額度提示 | ✅ | `askGemini` fallback、`isRateLimit` |
 | G15 | AI 回非 JSON | — | 清掉照片、請重傳 | ✅ | P2 |
-| G16 | 成員對不上 | 收據分攤出現不存在的人 | 刪照片、回訊息列成員 | 🟡 照片被刪要重傳，同 M10 | P2 |
+| G16 | 成員對不上 | 收據分攤出現不存在的人 | 不要刪照片 | ✅ M10 已修：對不上的名字直接拿掉，套旅程預設分攤後照常出卡，卡片前多一則「有對不上的名字…請按『✏️ 編輯』」的提醒 | P2、`applyParticipantDefaults` |
 | G17 | 幣別或日期被修正 | AI 幣別看錯 | 卡片前多一則「已改用 XXX」提醒 | ✅ | `ocrWarnings` |
 | G18 | 取消卡片 | 按「❌ 取消」 | 刪除 Storage 照片 | ✅ | P1 cancel |
 | G19 | 確認存入 | 按「✅ 確認存入」 | `photo_urls` 存路徑 `expenses/{tripId}/{messageId}.jpg` | ✅ | P1 save |
@@ -206,13 +211,13 @@
 | H2 | 連點兩次確認 | — | 第二次回「已於先前成功存入」 | ✅ nonce 鎖 | `line_processed_actions` |
 | H3 | 取消 | 按「❌ 取消」 | 失效 nonce，有照片就刪 | ✅ | P1 cancel |
 | H4 | 先取消再確認 | — | 回「此操作已處理過」 | ✅ | nonce 鎖 |
-| H5 | LIFF 編輯後存檔 | 按「✏️ 編輯」→ 改金額 → 存 | 佔用 nonce → INSERT → `liff-notify` 推播「已透過 LIFF 存入」 | ✅ 網址改為只帶 `n` 與 `u`，草稿內容由 `LiffEdit` 自己去 `pending` 列撈（T2）；nonce 已被處理過就直接說明，不開表單 | `ExpenseModal.handleSubmit`、`liff-notify`、`buildDraftLiffUrl` |
+| H5 | LIFF 編輯後存檔 | 按「✏️ 編輯」→ 改金額 → 存 | 佔用 nonce → INSERT → `liff-notify` 推播「已透過 LIFF 存入」（編輯既有支出則推播「已更新」，見 J11） | ✅ 網址改為只帶 `n` 與 `u`，草稿內容由 `LiffEdit` 自己去 `pending` 列撈（T2）；nonce 已被處理過就直接說明，不開表單 | `ExpenseModal.handleSubmit`、`liff-notify`、`buildDraftLiffUrl` |
 | H6 | LIFF 存檔後再按確認 | — | 回「已處理過」，不重複寫入 | ✅ | nonce 鎖 |
 | H7 | 群組裡 B 確認 A 的卡片 | — | 允許（共用同一本帳），訊息標明「由 B 記錄」 | ✅ 刻意設計 | `speakerLabel` |
 | H8 | 兩張卡同時待確認 | 連續記兩筆 | 兩張都能確認 | ✅ 只有 AI 用 `corrects_draft` 指名的那一張會失效 | `supersedeDraft` |
 | H9 | 確認時旅程已封存 | — | 回「已封存，無法新增」 | ✅ | P1 save |
 | H10 | 確認時旅程已刪除 | — | 回「找不到旅程」 | ✅ | P1 save |
-| H11 | 確認時成員已被移除或改名 | 卡片有「小華」，設定頁刪了小華 | 應告知並請重新編輯 | 🐛 M12 小華的份額被默默加給調整成員，總額仍相等所以不會被擋 | P1 `filter(m => trip.members.includes(m))` |
+| H11 | 確認時成員已被移除或改名 | 卡片有「小華」，設定頁刪了小華 | 應告知並請重新編輯 | ✅ M12 已修：存檔前比對出已不在成員清單的名字就拒絕存入並列出來，請使用者按「✏️ 編輯」重新分攤；同時 `releaseNonce()` 把鎖放掉，那張卡片的按鈕才還能用 | P1 save |
 | H12 | 按已失效的舊卡 | — | 說明「已被較新的卡片取代」 | ✅ 依 `action_type` 分別回覆取代／已存入／已取消 | P1 `describeProcessedAction` |
 | H13 | 存入後的撤銷快速按鈕 | 按「↩️ 撤銷」 | 軟刪除，回「已撤銷」 | ✅ | P1 undo |
 | H14 | 撤銷按鈕的描述太長 | 外文店名＋中文說明 | 按鈕仍可用 | ✅ postback 只帶 `eid`，描述由 undo 分支回查 | P1 save、`liff-notify` |
@@ -254,7 +259,7 @@
 | J8 | 要改的不在最近 6／8 筆 | 一週前的支出 | 能翻頁或搜尋 | ❌ 只能去網頁。清單依日期與建立時間倒序，剛存的一定在第一列 | `replyEditPicker` |
 | J9 | 用描述定位 | `刪除昨天的拉麵` | 直接找到那筆 | ❌ 只會列清單 | — |
 | J10 | 清單裡出現結清紀錄 | 網頁結清後 `編輯支出` | 結清紀錄不該出現 | ✅ 兩個清單都加了 `.not('is_settlement','is',true)`；`ExpenseModal` 也改為沿用原值 | P6 查詢、`ExpenseModal` |
-| J11 | LIFF 編輯舊支出後說 `取消上一筆` | 編輯三天前的支出 → `取消上一筆` | 應撤最近「新增」的 | 🐛 M11 `liff-notify` 把更新也記成 `saved`，會刪掉剛編輯的舊支出；推播文字也寫「存入」 | `liff-notify` |
+| J11 | LIFF 編輯舊支出後說 `取消上一筆` | 編輯三天前的支出 → `取消上一筆` | 應撤最近「新增」的 | ✅ M11 已修：`ExpenseModal` 改帶 `mode: 'update' \| 'insert'`，`liff-notify` 只有 insert 才寫 `saved`；更新的推播文字改成「✏️ 已透過 LIFF 更新」且不附「撤銷」按鈕 | `liff-notify`、`ExpenseModal` |
 | J12 | 刪除已刪除的 | 清單按兩次同一筆 | 第二次說「先前已經刪除了」 | ✅ | P1 del |
 | J13 | `saved` 紀錄沒寫進去 | Edge Runtime 提早結束 | 撤銷仍指向正確那筆 | ✅ 這一筆改為 `await`，其餘背景工作走 `runInBackground`（`EdgeRuntime.waitUntil`） | P1 save |
 | J14 | 編輯清單網址過長 | 多成員、多照片、長描述 | 清單正常送出 | ✅ T2 已修（M2 提前做）：網址只剩 `tripId`／`id`／`u`，固定百餘字元，與支出內容無關 | `buildEditLiffUrl` |
@@ -277,12 +282,12 @@
 | K5 | 旅程總覽 | `旅程總覽` | 名稱、狀態、成員、今日、主幣、各幣別總計 | ✅ | P7 |
 | K6 | 合計的浮點誤差 | USD 旅程 `今日支出` | 合計 0.30 而非 0.30000000000000004 | ✅ `sumByCurrency` + `formatAmount` | `_shared/finance.ts` |
 | K7 | 結算金額精度 | USD 主幣 | 依 `precision_config` 顯示 12.50 | ✅ 改用 `formatAmount` | P7 |
-| K8 | 自由查詢：總額 | `這趟總共花多少` | 正確數字 | 🟡 M6 AI 只看最近 10 筆，超過就答錯 | P8 |
-| K9 | 自由查詢：個人 | `我付了多少`、`我還欠多少` | 正確 | 🟡 M6 | P8 |
-| K10 | 自由查詢：對象 | `小明欠我多少` | 正確 | 🟡 M6 | P8 |
-| K11 | 自由查詢：分類 | `交通花了多少`、`吃飯佔多少` | 正確 | 🟡 M6 | P8 |
-| K12 | 自由查詢：時間 | `昨天花多少`、`第一天花多少` | 正確 | 🟡 M6 | P8 |
-| K13 | 自由查詢：排名 | `誰付最多`、`最貴的一筆` | 正確 | 🟡 M6 | P8 |
+| K8 | 自由查詢：總額 | `這趟總共花多少` | 正確數字 | ✅ M6 已修：`tripContext` 多了【全趟彙總】，各幣別合計在伺服器端用 Decimal 算好 | `summarizeTripExpenses` |
+| K9 | 自由查詢：個人 | `我付了多少`、`我還欠多少` | 正確 | ✅ M6 已修：彙總含每人「已付／應付／淨額」，且淨額有計入結清紀錄 | `summarizeTripExpenses` |
+| K10 | 自由查詢：對象 | `小明欠我多少` | 正確 | ✅ M6 已修：兩人的淨額都在彙總裡；精確的「誰給誰」仍建議用快捷指令「結算」 | `summarizeTripExpenses` |
+| K11 | 自由查詢：分類 | `交通花了多少`、`吃飯佔多少` | 正確 | ✅ M6 已修：彙總含各分類合計（分幣別） | `summarizeTripExpenses` |
+| K12 | 自由查詢：時間 | `昨天花多少`、`第一天花多少` | 🟡 彙總只有日期範圍與筆數，沒有逐日切片；system instruction 已要求「彙總裡沒有的切片就照實說算不出來」，不再硬湊 | P8 |
+| K13 | 自由查詢：排名 | `誰付最多`、`最貴的一筆` | 🟡 「誰付最多」可由彙總的每人已付看出來；「最貴的一筆」仍受限於近期 10 筆 | P8 |
 | K14 | 最近一筆 | `最近一筆是什麼` | 描述最新一筆 | ✅ 在 10 筆內 | P8 |
 | K15 | 追問收據明細 | `剛剛那張收據買了什麼` | `analyze_photo` 重新讀圖逐項翻譯 | ✅ AI 只回編號（`expense_ref`），照片由程式從近期清單取（T4） | P8 `analyze_photo`、`pickExpenseByRef` |
 | K16 | 收據不在最近 10 筆 | `上週一蘭的收據有哪些品項` | 全庫列出有照片的支出讓 AI 挑 | ✅ 先在程式端用店名做子字串比對縮小範圍，唯一解就直接用；多筆或零筆才問 AI，且一樣只回編號（T4） | `matchExpensesByQuestion`、P8 |
@@ -290,7 +295,7 @@
 | K18 | 結算與網頁不一致 | `rates[base] ≠ 1` 的旅程 | 兩邊相同 | 🟡 ROADMAP #5（M14） | P7 vs `useTripStats` |
 | K19 | 查詢排除結清紀錄 | 網頁做過結清 | 今日／本月／總覽不含結清；結算要含 | ✅ | `.not('is_settlement', 'is', true)` |
 | K20 | 查詢排除已刪除 | — | 不含 `deleted_at` 非空 | ✅ | `.is('deleted_at', null)` |
-| K21 | 旅程被刪除後打快捷指令 | — | 回「找不到旅程」 | ✅ 五個快捷指令都補上 null 檢查（AI 核心的 `trip` 仍是 M5） | P7 |
+| K21 | 旅程被刪除後打快捷指令 | — | 回「找不到旅程」 | ✅ 五個快捷指令與 AI 核心都有 null 檢查（M5 已修：以前 AI 核心會丟例外 → 500 → LINE 重送同一則訊息） | P7、P8 |
 | K22 | 查詢類回答格式 | — | 條列、簡短，適合手機 | ✅ | system instruction 規則 5 |
 | K23 | 剛剛那筆（不指名店名） | 傳完收據存檔後問 `剛剛那筆買了什麼` | 分析日期最近且有照片的那一筆，回覆開頭標明是哪一筆 | ✅ T4 已修：近期支出清單改成有編號、標 📷 的格式且**不再放網址**；system instruction 明講「說『剛剛』『最新』又沒指名店名時選日期最近且有 📷 的那一筆」 | P8、`tripContext` |
 | K24 | 多張照片的支出 | 長帳單拍兩張存成同一筆 → 追問品項 | 兩張都要看 | ✅ T4 已修：`analyzeReceiptPhoto(photoUrls[], question, expenseLabel)` 一次送出全部 `photo_urls`，prompt 開頭標明「這 N 張是同一筆支出的收據」。以前只看 `photo_urls[0]` | `analyzeReceiptPhoto` |
@@ -307,16 +312,16 @@
 | L3 | 句中提到耀西 | `晚上叫耀西記一下` | 不觸發 | ✅ 必須在開頭 | `startsWithYoshi` |
 | L4 | 快捷指令免觸發 | 群組直接打 `今日支出` | 處理 | ✅ | `isManagement` |
 | L5 | 全回應模式 | `模式:全回應模式` 後任何訊息 | 全部進 AI；閒聊會得到回覆 | ✅ 刻意設計 | P3 |
-| L6 | 以「設定」開頭的閒聊 | `設定好了嗎` | 不觸發 | 🐛 M3 `startsWith('設定')` 太寬，進 AI 回話 | `isManagement` |
+| L6 | 以「設定」開頭的閒聊 | `設定好了嗎` | 不觸發 | ✅ M3 已修：只認 `設定:`／`設定：`／`設定?`／`設定？` | `isManagement` |
 | L7 | 多人同時記帳 | A `晚餐 300`、B 接著 `計程車 200` | 兩張卡互不影響 | ✅ 只失效被指名的那一張 | `supersedeDraft` |
 | L8 | 顯示是誰做的 | 存入、刪除、撤銷 | 「由 X 記錄／刪除」 | ✅ | `speakerLabel` |
 | L9 | 多人聊天室（room） | 非群組的多人聊天 | 取名走 room endpoint | ✅ | `getChatMemberName` |
 | L10 | 群組非收據照片 | 風景照 | 靜默 | ✅ | P2 |
 | L11 | 群組成員退出後 | — | 不影響狀態 | ✅ | — |
-| L12 | 機器人被加入群組 | join event | 目前不回歡迎訊息 | 🟡 可加自我介紹 | P0 只處理 message/postback |
+| L12 | 機器人被加入群組 | join event | 回自我介紹 | ✅ M19 已修：處理 `join` event，回 `BOT_SELF_INTRODUCTION` 並附快速回覆 | P0 |
 | L13 | 群組裡的 `說明`／`功能` | 提及模式打 `功能` | 需 @ 才回 | ✅ 不在 `isManagement` | P3 |
-| L14 | @提及其他人 | `@小明 你付的晚餐 300` | 不觸發（沒 @ 機器人） | ✅ 但 `cleanText` 會把 `@小明` 也刪掉，AI 看不到付款人 | `cleanText` 的 `@\S+` |
-| L15 | 對話歷史在群組是共用的 | A 與 B 交錯講話 | AI 看到的是同一串歷史，附發言者 | 🟡 歷史沒帶 `speaker_name` 進 prompt | `summarizeHistoryEntry` |
+| L14 | @提及其他人 | `@耀西 @小明 你付的晚餐 300` | 只拿掉提及機器人的那一段，`@小明` 要留著 | ✅ M16 已修：改用 `stripSelfMentions()` 依 `mentionees[].index/length` 只切 `isSelf` 的那幾段 | `stripSelfMentions` |
+| L15 | 對話歷史在群組是共用的 | A 與 B 交錯講話 | AI 看到的是同一串歷史，附發言者 | ✅ M17 已修：歷史查詢一併撈 `speaker_name`，`summarizeHistoryEntry()` 把 user 訊息壓成「發言者：內容」 | `summarizeHistoryEntry` |
 
 ---
 
@@ -343,14 +348,20 @@
 ## 9. 目前的硬性限制（改邏輯時不要忘記）
 
 - **AI 沒有修改或刪除已存檔紀錄的能力**，只能提出新草稿、修正未存檔草稿、查詢。所有既有紀錄的異動都走清單按鈕或 LIFF。
-- **AI 只看得到最近 10 筆支出與最近 8 輪對話**（`CHAT_HISTORY_TURNS`），沒有彙總數字。
+- **AI 只看得到最近 10 筆支出與最近 8 輪對話**（`CHAT_HISTORY_TURNS`）。
   近期支出清單是**有編號、無網址**的格式（`#3 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`）；
   `analyze_photo` 要 AI 回的是那個編號（`expense_ref`），照片一律由程式自己找。
+- **金額類的問題不靠 AI 算術**：`summarizeTripExpenses()` 在伺服器端用 Decimal 算好
+  各幣別合計、每人已付／應付／淨額、各分類合計、筆數與日期範圍，以【全趟彙總】放進 context（M6）。
+  但**沒有逐日切片，也沒有排名**（K12、K13 仍有缺口）。
 - **一句話只能產生一筆**（schema 是單一 `data` 物件）。
 - **Postback data 上限 300 bytes**；LINE `uri` action 上限 1000 字；文字訊息上限 5000 字（程式取 4900）。
   LIFF 編輯網址已改為只帶 `id`／`n` 的間接法（T2），長度固定，不再受支出內容影響。
 - **reply token 只能用一次、時效約一分鐘**；之後只能 push（會計入推播額度）。
-- **群組共用一份綁定、對話歷史與草稿**；發言者只用來標記與餵 prompt。
+- **群組共用一份綁定、對話歷史與草稿**；發言者用來標記回覆、餵 prompt，
+  也會以「發言者：內容」的形式進到對話歷史（M17）。
+- **`current_trip_id` 與 `pending_trip_id` 可以同時有值**＝正在切換旅程；
+  驗證成功才換過去，10 分鐘沒動作或輸入「取消綁定」就放棄（M1）。
 - **AI 記帳偏好是旅程層級的**（`trips.ai_preference`），一趟旅程只有一份，不分管道；
   網頁設定頁、LIFF 偏好頁與「設定:」文字指令改的都是同一個欄位。
 - **收據照片先上傳再判斷**，非收據才刪；群組提及模式下也是如此（已確認維持現狀）。
@@ -466,30 +477,32 @@
 - **修法**：postback 只帶 `{ act: 'undo', eid }`；P1 undo 改為用 `eid` 查 `expenses.description` 後再回覆。
 - **驗證**：情境 H14。
 
-### 10.2 中低優先（只記錄，已同步到 [`ROADMAP.md`](ROADMAP.md)，本次不修）
+### 10.2 中低優先
 
-> **M2 已完成** —— 第 13 章的 T2 需要它，順手一起做掉了。其餘維持未修。
+> **狀態（2026-09-05）**：M1–M3、M5–M8、M10–M13、M16–M19 **已全部完成**
+> （M2 隨第 13 章的 T2 一起做掉）。完成內容留在下表當作「為什麼要這樣寫」的紀錄。
+> **只剩 M4（旅程時區）、M14（結算彙總收斂）、M15（語音記帳）**，仍在 [`ROADMAP.md`](ROADMAP.md)。
 
 | # | 問題 | 修法方向 |
 | :-- | :-- | :-- |
-| M1 | 群組綁定：輸入 `ID:` 當下 `current_trip_id` 就清空；等密碼期間群組每句話都被當密碼回「密碼錯誤」；沒有放棄指令。 | 驗證成功才切換旅程；加 `取消綁定`；`line_user_states` 加 `pending_at`，逾時 10 分鐘自動放棄（`last_active_at` 目前從未被更新，是死欄位，可順便處理）。 |
+| ~~M1~~ | ~~群組綁定：輸入 `ID:` 當下 `current_trip_id` 就清空；等密碼期間群組每句話都被當密碼回「密碼錯誤」；沒有放棄指令。~~ | ✅ **已完成**（2026-09-05）：驗證成功才切換；新增「取消綁定」；`pending_at` 逾時 10 分鐘自動放棄（migration `20260905_line_pending_bind.sql`）；群組閒聊不再收到「密碼錯誤」；`last_active_at` 改為每次事件背景更新。 |
 | ~~M2~~ | ~~`buildEditLiffUrl()` 把整筆支出塞進 URL，LINE `uri` 上限 1000 字，多成員多照片會讓整張清單發不出去。~~ | ✅ **已完成**（隨 T2 一起做，2026-09-04）：編輯既有支出只帶 `id`，`LiffEdit` 自行查 `expenses`；草稿帶 nonce 與 sourceId 查 `line_chat_history` 的 pending 列；舊的 `data=` 格式保留。 |
-| M3 | `isManagement` 用 `userText.startsWith('設定')`，群組「設定好了嗎」會被送進 AI。 | 改為只認 `設定:`、`設定：`、`設定?`、`設定？`。 |
+| ~~M3~~ | ~~`isManagement` 用 `userText.startsWith('設定')`，群組「設定好了嗎」會被送進 AI。~~ | ✅ **已完成**（2026-09-05）：改為 `/^設定[:：]/` 加上 `設定?`／`設定？` 的精確比對。 |
 | M4 | `getTripTimezone()` 先看 `base_currency`，主幣 TWD 的日本旅程「今天」是台北時間。 | 旅程設定加時區欄位，或改為優先看非主幣別的 rates。 |
-| M5 | 今日／本週／本月／AI 核心在 `trip` 為 null 時直接存取欄位 → 500 → LINE 重送。 | 抽一個 `loadTripOrReply()`，沒有旅程就回「找不到旅程」並 `continue`。 |
-| M6 | AI context 只有最近 10 筆，自由查詢（K8–K13）會答錯。 | 伺服器端用 Decimal 算好：各幣別合計、每人已付／應付、各分類合計、筆數、日期範圍，放進 `tripContext`；長期改 function calling（見 `MCP_SERVER_DESIGN.md`）。 |
-| M7 | OCR prompt 把「截圖」列為 not_receipt，行動支付與信用卡通知截圖記不了。 | prompt 規則 7 改為「人物照、風景照、與消費無關的截圖」，並加一句「付款成功畫面、交易通知視為收據」。 |
-| M8 | 1:1 傳非收據照片完全沒回應。 | 1:1 回一句「這看起來不是收據，要記帳可以直接打字」；群組維持靜默。 |
-| M10 | 收據幣別沒匯率或成員對不上時照片被刪，要重傳。 | 保留照片，回覆附快速回覆「以 TWD 存入」「以 JPY 存入」；或先出卡讓使用者按「編輯」改。 |
-| M11 | `liff-notify` 把 LIFF 的 UPDATE 也記成 `saved`，`取消上一筆` 會刪掉剛編輯的舊支出；推播文字寫「存入」。 | `ExpenseModal` 呼叫時多帶 `mode: 'update' | 'insert'`；更新不寫 `saved`，文字改「已更新」。 |
-| M12 | 確認時成員已被移除，`calculateDistribution` 把該人份額默默加給調整成員。 | P1 save 發現有成員被過濾掉時，回「成員已變動，請按『編輯』重新分攤」。 |
-| M13 | 綁定、斷開、切換旅程時舊草稿沒失效。 | 在 A1／A2／A7 的成功路徑呼叫 `supersedeAllDrafts(sourceId)`（H1 已把函式留下來）。 |
+| ~~M5~~ | ~~AI 核心在 `trip` 為 null 時直接存取欄位 → 500 → LINE 重送。~~ | ✅ **已完成**（2026-09-05）：AI 核心查完旅程就先檢查 null，回「找不到這個旅程」並 `continue`。 |
+| ~~M6~~ | ~~AI context 只有最近 10 筆，自由查詢（K8–K13）會答錯。~~ | ✅ **已完成**（2026-09-05）：`summarizeTripExpenses()` 在伺服器端用 Decimal 算好各幣別合計、每人已付／應付／淨額、各分類合計、筆數、日期範圍，放進 `tripContext` 的【全趟彙總】；system instruction 明令不得自己加總。逐日切片（K12）與「最貴的一筆」（K13）仍未涵蓋，長期改 function calling（見 `MCP_SERVER_DESIGN.md`）。 |
+| ~~M7~~ | ~~OCR prompt 把「截圖」列為 not_receipt，行動支付與信用卡通知截圖記不了。~~ | ✅ **已完成**（2026-09-05）：規則 7 改為「與消費無關的截圖」，並明列付款完成畫面、信用卡消費通知、轉帳成功、電子發票、訂單確認頁一律視為收據。 |
+| ~~M8~~ | ~~1:1 傳非收據照片完全沒回應。~~ | ✅ **已完成**（2026-09-05）：一對一回一句說明並提示可以直接打字；群組維持靜默。 |
+| ~~M10~~ | ~~收據幣別沒匯率或成員對不上時照片被刪，要重傳。~~ | ✅ **已完成**（2026-09-05）：幣別沒匯率 → 照片保留、辨識結果存成 pending，附「以 XXX 存入」快速回覆（`act:'cur'` postback 換幣別重出卡，金額不換算、分帳依新精度重算）；成員對不上 → 拿掉對不上的名字、套預設分攤後照常出卡並加註提醒。 |
+| ~~M11~~ | ~~`liff-notify` 把 LIFF 的 UPDATE 也記成 `saved`，`取消上一筆` 會刪掉剛編輯的舊支出；推播文字寫「存入」。~~ | ✅ **已完成**（2026-09-05）：`ExpenseModal` 帶 `mode`，`liff-notify` 只有 insert 才寫 `saved`，更新的推播改「✏️ 已透過 LIFF 更新」且不附撤銷按鈕。 |
+| ~~M12~~ | ~~確認時成員已被移除，`calculateDistribution` 把該人份額默默加給調整成員。~~ | ✅ **已完成**（2026-09-05）：存檔前比對出已不在成員清單的名字就拒絕存入並列出來；同時 `releaseNonce()` 放掉剛佔用的 nonce，卡片的「✏️ 編輯」才不會跟著失效。 |
+| ~~M13~~ | ~~綁定、斷開、切換旅程時舊草稿沒失效。~~ | ✅ **已完成**（2026-09-05）：A1／A2／A7 三條成功路徑都呼叫 `supersedeAllDrafts(sourceId)`。 |
 | M14 | ROADMAP #5：結算匯率換算兩邊不一致。 | 把餘額彙總收進 `_shared/finance.ts`，納入契約測試。 |
 | M15 | 語音訊息不支援。 | Gemini 可直接吃音訊：下載 `audio/m4a` 後走與文字相同的 schema。 |
-| M16 | `cleanText` 的 `@\S+` 會把 `@小明` 也刪掉（L14）。 | 只移除 mention 到機器人自己的那段（用 `mentionees[].index/length`）。 |
-| M17 | 對話歷史沒把發言者帶進 prompt（L15）。 | `summarizeHistoryEntry` 對 user 訊息前綴 `speaker_name`。 |
-| M18 | AI 回的分類不驗證（F7）。 | 比照 `resolveMember` 做 `resolveCategory`，對不上退回預設分類並提醒。 |
-| M19 | 機器人加入群組不打招呼（L12）。 | 處理 `join` event，回 `BOT_SELF_INTRODUCTION`。 |
+| ~~M16~~ | ~~`cleanText` 的 `@\S+` 會把 `@小明` 也刪掉（L14），AI 看不到付款人。~~ | ✅ **已完成**（2026-09-05）：`stripSelfMentions()` 依 `mentionees[].index/length` 只切 `isSelf` 的那幾段（由後往前刪避免錯位）；沒有 mention 資料時原樣回傳。 |
+| ~~M17~~ | ~~對話歷史沒把發言者帶進 prompt（L15）。~~ | ✅ **已完成**（2026-09-05）：歷史查詢一併撈 `speaker_name`，`summarizeHistoryEntry()` 對 user 訊息加上「發言者：」前綴。 |
+| ~~M18~~ | ~~AI 回的分類不驗證（F7），會存進旅程裡不存在的分類。~~ | ✅ **已完成**（2026-09-05）：`resolveCategory()`（`guards.ts` 並有測試），對不上退回旅程預設 →「其他」→ 清單第一個並提醒。 |
+| ~~M19~~ | ~~機器人加入群組不打招呼（L12）。~~ | ✅ **已完成**（2026-09-05）：處理 `join` event，回 `BOT_SELF_INTRODUCTION`。 |
 
 ---
 

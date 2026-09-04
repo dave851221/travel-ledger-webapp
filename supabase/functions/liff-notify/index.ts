@@ -18,7 +18,10 @@ serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   try {
-    const { line_user_id, expense_id, description, amount, currency } = await req.json()
+    const { line_user_id, expense_id, description, amount, currency, mode } = await req.json()
+    // mode: 'insert'（新增）或 'update'（編輯既有支出）。
+    // 舊版前端不會帶，沒帶時視為 insert —— 那是加上 mode 之前的行為。
+    const isUpdate = mode === 'update'
 
     if (!line_user_id || !description) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), {
@@ -26,12 +29,18 @@ serve(async (req) => {
       })
     }
 
-    // 記錄到 chat_history，讓「撤銷上一筆」文字指令可以運作
-    await supabase.from('line_chat_history').insert({
-      line_user_id,
-      role: 'saved',
-      content: JSON.stringify({ expense_id, description })
-    })
+    // 記錄到 chat_history，讓「撤銷上一筆」文字指令可以運作。
+    //
+    // ⚠️ 只有「新增」才寫（M11）。編輯既有支出也寫一筆 `saved` 的話，
+    //    使用者接著說「取消上一筆」撤掉的會是那筆剛編輯好的舊支出
+    //    —— 他要的是撤銷最近**新增**的那一筆。
+    if (!isUpdate) {
+      await supabase.from('line_chat_history').insert({
+        line_user_id,
+        role: 'saved',
+        content: JSON.stringify({ expense_id, description })
+      })
+    }
 
     // 建立快速回覆（含撤銷按鈕）
     type QuickReplyItem = {
@@ -41,7 +50,9 @@ serve(async (req) => {
         | { type: 'message'; label: string; text: string }
     }
     const quickReplyItems: QuickReplyItem[] = []
-    if (expense_id) {
+    // 編輯既有支出不給「撤銷」按鈕：按下去是把整筆軟刪除，
+    // 但使用者剛剛做的是「修改」，那顆按鈕的語意會誤導人（M11）。
+    if (expense_id && !isUpdate) {
       quickReplyItems.push({
         type: "action",
         // postback 只帶 eid：描述放進來的話，長店名很容易超過 LINE 的 300 bytes
@@ -63,7 +74,7 @@ serve(async (req) => {
         to: line_user_id,
         messages: [{
           type: 'text',
-          text: `✅ 已透過 LIFF 存入：${description}\n💰 ${amount} ${currency}`,
+          text: `${isUpdate ? '✏️ 已透過 LIFF 更新' : '✅ 已透過 LIFF 存入'}：${description}\n💰 ${amount} ${currency}`,
           quickReply: { items: quickReplyItems }
         }]
       })

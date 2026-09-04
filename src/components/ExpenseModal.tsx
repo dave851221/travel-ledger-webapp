@@ -383,6 +383,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       }
 
       // --- LIFF 通知：透過 Edge Function 讓機器人推送確認訊息 ---
+      // ⚠️ 一定要帶 mode（M11）。少了它，liff-notify 會把「編輯既有支出」也記成
+      //    一筆 `saved`，使用者接著說「取消上一筆」就會刪掉那筆剛編輯好的舊支出，
+      //    而不是最近新增的那一筆；推播文字也會謊稱「已存入」。
       if (liffMeta?.line_user_id) {
         const { error: invokeErr } = await supabase.functions.invoke('liff-notify', {
           body: {
@@ -391,6 +394,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             description: finalDescription,
             amount: numAmount,
             currency,
+            mode: editData?.id ? 'update' : 'insert',
           }
         });
         if (invokeErr) console.error('[LIFF] notify error:', invokeErr);

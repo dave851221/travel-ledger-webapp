@@ -130,32 +130,43 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 ### LINE Bot Edge Function
 
-`supabase/functions/line-webhook/index.ts`（約 2100 行，Deno）負責路由、DB 存取與 LINE API；
+`supabase/functions/line-webhook/index.ts`（約 2400 行，Deno）負責路由、DB 存取與 LINE API；
 沒有副作用的純函式都在同目錄的 **`guards.ts`**（`extractJSON`、`toAmountMap`、`resolveMember`、
-`resolveExpenseMembers`、`normalizeCurrency`、`normalizeDate`、`applyParticipantDefaults`、
-`detectRecordIntent`、`claimsCompletedAction`、`summarizeHistoryEntry`），
+`resolveExpenseMembers`、`normalizeCurrency`、`resolveCurrencyByRule`、`resolveCategory`、
+`normalizeDate`、`applyParticipantDefaults`、`detectRecordIntent`、`mentionsEditingExisting`、
+`claimsCompletedAction`、`summarizeHistoryEntry`、`summarizeTripExpenses`、
+`stripSelfMentions`、`pickExpenseByRef`、`matchExpensesByQuestion`），
 由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
 `check:functions` 只列 `index.ts`，`guards.ts` 透過 import 一起被檢查。
+`guards.ts` 只 import `_shared/finance.ts` 與 `_shared/deps.ts`（Decimal）——
+`vitest.config.ts` 的 alias 同時涵蓋 `./deps.ts` 與 `../_shared/deps.ts` 兩種寫法。
 
 處理流程：
 
 1. 以 `LINE_CHANNEL_SECRET` 驗證 HMAC-SHA256 簽章
 2. **綁定**：使用者傳 `ID:A1B2C3` → 查 `line_trip_id_mapping` → 要求通行碼 →
-   寫入 `line_user_states.current_trip_id`
+   **驗證成功才**寫入 `line_user_states.current_trip_id`。
+   切換旅程時原綁定會留著（`current_trip_id` 與 `pending_trip_id` 可同時有值），
+   10 分鐘沒動作或輸入「取消綁定」就放棄；綁定／斷開成功都會 `supersedeAllDrafts()`
 3. **文字訊息**：先比對快捷指令（直接查 DB），其餘交給 Gemini 回傳結構化 JSON
 4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片
 5. **Postback**：按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
    但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著
 6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式。
-   群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者。
+   群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者，
+   對話歷史也以「發言者：內容」的形式餵進 prompt。
+   `cleanText` 只移除「提及機器人自己」的那幾段（`stripSelfMentions`），`@其他人` 要留著。
 
 7. **AI 記帳偏好**：存 `trips.ai_preference`，**整趟旅程共用一份**（不分 LINE 綁定、不分管道）。
    網頁的 `SettingsModal`、LIFF 的 `src/pages/LiffPreference.tsx`（`#/liff/preference?tripId=`）
    與文字指令 `設定:` 改的都是同一個欄位。舊的 `line_user_states.default_config` 已不再讀寫。
 
 **AI 回傳的內容一律先驗證再落地**：成員名稱做模糊比對後對應回正式名稱、
-幣別比對旅程 `rates` 與 ISO 白名單、日期檢查格式與合理範圍。
+幣別由 `resolveCurrencyByRule` 依 `currency_source` 決定後再比對旅程 `rates` 與 ISO 白名單、
+分類比對旅程的分類清單、日期檢查格式與合理範圍。
+金額類的查詢不靠 AI 算術：`summarizeTripExpenses` 在伺服器端用 Decimal 算好
+各幣別合計、每人已付／應付／淨額、各分類合計，以【全趟彙總】放進 context。
 付款人與分攤為空時補上與前端 `quickAdd` 一致的預設值。
 任何被修正的欄位都會告知使用者，不會默默改掉。細節見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)，
 使用情境與回歸檢查表見 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md)。

@@ -12,10 +12,13 @@ import {
   mentionsEditingExisting,
   normalizeExpenseAmountMaps,
   pickExpenseByRef,
+  resolveCategory,
   resolveCurrencyByRule,
   resolveExpenseMembers,
   resolveMember,
+  stripSelfMentions,
   summarizeHistoryEntry,
+  summarizeTripExpenses,
   toAmountMap,
 } from './guards';
 import { calculateDistribution } from '../_shared/finance';
@@ -96,6 +99,78 @@ describe('mentionsEditingExisting', () => {
     expect(mentionsEditingExisting('今天好累')).toBe(false);
     expect(mentionsEditingExisting('剛剛那個改天再說')).toBe(false);
     expect(mentionsEditingExisting('')).toBe(false);
+  });
+});
+
+describe('stripSelfMentions', () => {
+  it('只刪掉提及機器人的那一段，其他人的名字留著', () => {
+    // 「@耀西 @小明 你付的晚餐 300」
+    const raw = '@耀西 @小明 你付的晚餐 300';
+    const mentionees = [
+      { index: 0, length: 3, isSelf: true },
+      { index: 4, length: 3, isSelf: false },
+    ];
+    expect(stripSelfMentions(raw, mentionees)).toBe('@小明 你付的晚餐 300');
+  });
+
+  it('提及在句中也切得掉', () => {
+    const raw = '晚餐 300 @耀西';
+    expect(stripSelfMentions(raw, [{ index: 7, length: 3, isSelf: true }])).toBe('晚餐 300');
+  });
+
+  it('多段自我提及由後往前刪，index 不會錯位', () => {
+    const raw = '@耀西 晚餐 300 @耀西';
+    const mentionees = [
+      { index: 0, length: 3, isSelf: true },
+      { index: 11, length: 3, isSelf: true },
+    ];
+    expect(stripSelfMentions(raw, mentionees)).toBe('晚餐 300');
+  });
+
+  it('沒有 mention 資料時原樣回傳（不再亂刪 @開頭的詞）', () => {
+    expect(stripSelfMentions('@小明 你付的晚餐 300')).toBe('@小明 你付的晚餐 300');
+    expect(stripSelfMentions('@小明 你付的晚餐 300', [])).toBe('@小明 你付的晚餐 300');
+    expect(stripSelfMentions('晚餐 300', null)).toBe('晚餐 300');
+  });
+
+  it('欄位缺漏或超出範圍時不會爆掉', () => {
+    expect(stripSelfMentions('晚餐 300', [{ isSelf: true }])).toBe('晚餐 300');
+    expect(stripSelfMentions('晚餐 300', [{ index: 99, length: 3, isSelf: true }])).toBe('晚餐 300');
+  });
+});
+
+describe('resolveCategory', () => {
+  const categories = ['餐飲', '交通', '住宿', '其他'];
+
+  it('完全相同或正規化後相同就直接採用', () => {
+    expect(resolveCategory('交通', categories)).toEqual({ category: '交通', warning: null });
+    expect(resolveCategory(' 交通 ', categories).category).toBe('交通');
+  });
+
+  it('清單外的分類退回預設並提醒', () => {
+    const res = resolveCategory('美食', categories, '餐飲');
+    expect(res.category).toBe('餐飲');
+    expect(res.warning).toContain('美食');
+  });
+
+  it('沒有旅程預設時退回「其他」', () => {
+    expect(resolveCategory('美食', categories).category).toBe('其他');
+  });
+
+  it('連「其他」都沒有就用清單第一個', () => {
+    expect(resolveCategory('美食', ['餐飲', '交通']).category).toBe('餐飲');
+  });
+
+  it('旅程預設本身已不在清單裡時不採用它', () => {
+    expect(resolveCategory('美食', categories, '已刪掉的分類').category).toBe('其他');
+  });
+
+  it('AI 沒填分類時退回預設但不吵使用者', () => {
+    expect(resolveCategory('', categories, '餐飲')).toEqual({ category: '餐飲', warning: null });
+  });
+
+  it('旅程沒設分類清單就不驗證', () => {
+    expect(resolveCategory('美食', [])).toEqual({ category: '美食', warning: null });
   });
 });
 
@@ -308,6 +383,100 @@ describe('resolveCurrencyByRule', () => {
   });
 });
 
+describe('summarizeTripExpenses', () => {
+  const members = ['代杰', 'Amy'];
+  const precision = { TWD: 0, JPY: 0 };
+
+  const rows = [
+    {
+      amount: 900, currency: 'TWD', category: '餐飲', date: '2026-09-01',
+      payer_data: { 代杰: 900 }, split_data: { 代杰: 450, Amy: 450 },
+    },
+    {
+      amount: 3000, currency: 'JPY', category: '交通', date: '2026-09-03',
+      payer_data: { Amy: 3000 }, split_data: { 代杰: 1500, Amy: 1500 },
+    },
+    {
+      amount: 100, currency: 'TWD', category: '餐飲', date: '2026-09-02',
+      payer_data: { Amy: 100 }, split_data: { Amy: 100 },
+    },
+  ];
+
+  it('算出筆數、日期範圍、各幣別合計與各分類合計', () => {
+    const text = summarizeTripExpenses(rows, members, precision);
+    expect(text).toContain('筆數：3 筆');
+    expect(text).toContain('日期範圍：2026-09-01 ~ 2026-09-03');
+    expect(text).toContain('各幣別合計：3000 JPY・1000 TWD');
+    expect(text).toContain('交通 3000 JPY');
+    expect(text).toContain('餐飲 1000 TWD');
+  });
+
+  it('每人的已付／應付／淨額分幣別計算', () => {
+    const text = summarizeTripExpenses(rows, members, precision);
+    // 代杰：付了 900 TWD，應付 450 TWD + 1500 JPY
+    expect(text).toContain('- 代杰：已付 900 TWD｜應付 1500 JPY・450 TWD｜淨額 -1500 JPY・+450 TWD');
+    // Amy：付了 3000 JPY + 100 TWD，應付 1500 JPY + 550 TWD
+    expect(text).toContain('- Amy：已付 3000 JPY・100 TWD｜應付 1500 JPY・550 TWD｜淨額 +1500 JPY・-450 TWD');
+  });
+
+  it('結清紀錄不計入總額與分類，但要算進每人收支', () => {
+    const withSettlement = [
+      ...rows,
+      {
+        amount: 450, currency: 'TWD', category: '結清', date: '2026-09-04',
+        is_settlement: true,
+        payer_data: { Amy: 450 }, split_data: { 代杰: 450 },
+      },
+    ];
+    const text = summarizeTripExpenses(withSettlement, members, precision);
+    // 總額與筆數不變
+    expect(text).toContain('筆數：3 筆');
+    expect(text).toContain('各幣別合計：3000 JPY・1000 TWD');
+    expect(text).not.toContain('結清 450 TWD');
+    // Amy 還了 450 TWD 之後，兩人的 TWD 淨額歸零
+    expect(text).toContain('- 代杰：已付 900 TWD｜應付 1500 JPY・900 TWD｜淨額 -1500 JPY・0 TWD');
+    expect(text).toContain('- Amy：已付 3000 JPY・550 TWD｜應付 1500 JPY・550 TWD｜淨額 +1500 JPY・0 TWD');
+  });
+
+  it('金額用 Decimal 累加，不會出現浮點尾數', () => {
+    const usd = [
+      { amount: 0.1, currency: 'USD', category: '零食', date: '2026-09-01', payer_data: { 代杰: 0.1 }, split_data: { 代杰: 0.1 } },
+      { amount: 0.2, currency: 'USD', category: '零食', date: '2026-09-01', payer_data: { 代杰: 0.2 }, split_data: { 代杰: 0.2 } },
+    ];
+    const text = summarizeTripExpenses(usd, ['代杰'], {});
+    expect(text).toContain('各幣別合計：0.30 USD');
+    expect(text).not.toContain('0.30000000000000004');
+  });
+
+  it('沒有支出時給一句話，不是一堆空欄位', () => {
+    expect(summarizeTripExpenses([], members, precision)).toBe('（這趟旅程還沒有任何支出）');
+  });
+
+  it('沒有活動的成員標成「尚無收支」，而不是假裝有 0', () => {
+    const text = summarizeTripExpenses(rows, [...members, '新來的'], precision);
+    expect(text).toContain('- 新來的：尚無收支');
+  });
+
+  it('只出現在舊帳裡的名字也會被列出來（成員被移除或改名過）', () => {
+    const text = summarizeTripExpenses(rows, ['代杰'], precision);
+    expect(text).toContain('- Amy：已付');
+  });
+
+  it('沒有分類的支出歸到「（未分類）」', () => {
+    const text = summarizeTripExpenses(
+      [{ amount: 50, currency: 'TWD', date: '2026-09-01', payer_data: { 代杰: 50 }, split_data: { 代杰: 50 } }],
+      ['代杰'], precision,
+    );
+    expect(text).toContain('（未分類） 50 TWD');
+  });
+
+  it('只有一天時日期範圍不重複印兩次', () => {
+    const text = summarizeTripExpenses([rows[0]], members, precision);
+    expect(text).toContain('日期範圍：2026-09-01\n');
+    expect(text).not.toContain('2026-09-01 ~ 2026-09-01');
+  });
+});
+
 describe('pickExpenseByRef', () => {
   const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
 
@@ -475,5 +644,16 @@ describe('summarizeHistoryEntry', () => {
   it('一般訊息只做長度截斷', () => {
     expect(summarizeHistoryEntry('user', '晚餐 300')).toBe('晚餐 300');
     expect(summarizeHistoryEntry('user', 'x'.repeat(400))).toHaveLength(301);
+  });
+
+  it('群組的 user 訊息前面補上發言者（M17）', () => {
+    expect(summarizeHistoryEntry('user', '我付的晚餐 300', '代杰')).toBe('代杰：我付的晚餐 300');
+    // 一對一沒有 speaker_name，維持原樣
+    expect(summarizeHistoryEntry('user', '晚餐 300', null)).toBe('晚餐 300');
+    expect(summarizeHistoryEntry('user', '晚餐 300', '  ')).toBe('晚餐 300');
+  });
+
+  it('model 訊息不加發言者前綴', () => {
+    expect(summarizeHistoryEntry('model', '好的唷', '代杰')).toBe('好的唷');
   });
 });

@@ -80,33 +80,19 @@ Edge Function 的結算換算寫成 `e.currency === base ? 1 : rates[...]`，
 
 ---
 
-## LINE Bot 的中低優先 bug（M1–M19）
+## LINE Bot 的中低優先 bug（剩下的 M4、M14、M15）
 
 來源是 [`LINE_SCENARIOS.md`](LINE_SCENARIOS.md) 第 10.2 節。
-高優先的 H1–H12 已經修完，這一批**已確認暫不處理**，只記錄下來排程。
-每條都寫了現象與修法方向，實作者可以直接照做；動手前請先看 `LINE_SCENARIOS.md`
-對應的情境編號，改完逐條回歸。
+**M1–M3、M5–M8、M10–M13、M16–M19 都已經修完**（M2 隨 T2，其餘於 2026-09-05），
+完成內容留在 `LINE_SCENARIOS.md` 第 10.2 節當作紀錄。
+下面三條刻意留著：M4 要先決定旅程時區怎麼存、M14 牽涉前後端彙總邏輯的收斂、
+M15 是新功能而不是 bug。動手前請先看 `LINE_SCENARIOS.md` 對應的情境編號，改完逐條回歸。
 
 | # | 問題 | 修法方向 |
 | :-- | :-- | :-- |
-| M1 | 群組綁定：輸入 `ID:` 當下 `current_trip_id` 就清空；等密碼期間群組每句話都被當密碼回「密碼錯誤」；沒有放棄指令。 | 驗證成功才切換旅程；加 `取消綁定`；`line_user_states` 加 `pending_at`，逾時 10 分鐘自動放棄（`last_active_at` 目前從未被更新，是死欄位，可順便處理）。 |
-| ~~M2~~ | ~~`buildEditLiffUrl()` 把整筆支出塞進 URL，LINE `uri` 上限 1000 字，多成員多照片會讓整張清單發不出去。~~ | ✅ **已完成**（隨 T2 一起做，2026-09-04）：編輯既有支出只帶 `id`，`LiffEdit` 自行查 `expenses`；草稿帶 nonce 與 sourceId 查 `line_chat_history` 的 pending 列；舊的 `data=` 格式保留。 |
-| M3 | `isManagement` 用 `userText.startsWith('設定')`，群組「設定好了嗎」會被送進 AI。 | 改為只認 `設定:`、`設定：`、`設定?`、`設定？`。 |
 | M4 | `getTripTimezone()` 先看 `base_currency`，主幣 TWD 的日本旅程「今天」是台北時間。 | 旅程設定加時區欄位，或改為優先看非主幣別的 rates。 |
-| M5 | AI 核心在 `trip` 為 null 時直接存取欄位 → 500 → LINE 重送。（快捷查詢已在修 H5 時一併補上 null 檢查。） | 抽一個 `loadTripOrReply()`，沒有旅程就回「找不到旅程」並 `continue`。 |
-| M6 | AI context 只有最近 10 筆，自由查詢（K8–K13）會答錯。 | 伺服器端用 Decimal 算好：各幣別合計、每人已付／應付、各分類合計、筆數、日期範圍，放進 `tripContext`；長期改 function calling（見 [`MCP_SERVER_DESIGN.md`](MCP_SERVER_DESIGN.md)）。 |
-| M7 | OCR prompt 把「截圖」列為 not_receipt，行動支付與信用卡通知截圖記不了。 | prompt 規則 7 改為「人物照、風景照、與消費無關的截圖」，並加一句「付款成功畫面、交易通知視為收據」。 |
-| M8 | 1:1 傳非收據照片完全沒回應。 | 1:1 回一句「這看起來不是收據，要記帳可以直接打字」；群組維持靜默。 |
-| M10 | 收據幣別沒匯率或成員對不上時照片被刪，要重傳。 | 保留照片，回覆附快速回覆「以 TWD 存入」「以 JPY 存入」；或先出卡讓使用者按「編輯」改。 |
-| M11 | `liff-notify` 把 LIFF 的 UPDATE 也記成 `saved`，`取消上一筆` 會刪掉剛編輯的舊支出；推播文字寫「存入」。 | `ExpenseModal` 呼叫時多帶 `mode: 'update' \| 'insert'`；更新不寫 `saved`，文字改「已更新」。 |
-| M12 | 確認時成員已被移除，`calculateDistribution` 把該人份額默默加給調整成員。（全部成員都被移除的情況已由 H6 擋下並提示編輯。） | P1 save 發現有成員被過濾掉時，回「成員已變動，請按『編輯』重新分攤」。 |
-| M13 | 綁定、斷開、切換旅程時舊草稿沒失效。 | 在 A1／A2／A7 的成功路徑呼叫 `supersedeAllDrafts(sourceId)` —— H1 已經把這支函式準備好留在 `index.ts`，只差接上呼叫端。 |
 | M14 | 結算匯率換算兩邊不一致（同下方「已知風險 5」）。 | 把餘額彙總收進 `_shared/finance.ts`（`sumByCurrency` 已經先搬進去了），納入契約測試。 |
 | M15 | 語音訊息不支援。 | Gemini 可直接吃音訊：下載 `audio/m4a` 後走與文字相同的 schema。 |
-| M16 | `cleanText` 的 `@\S+` 會把 `@小明` 也刪掉（L14），AI 看不到付款人。 | 只移除 mention 到機器人自己的那段（用 `mentionees[].index/length`）。 |
-| M17 | 對話歷史沒把發言者帶進 prompt（L15）。 | `summarizeHistoryEntry` 對 user 訊息前綴 `speaker_name`。 |
-| M18 | AI 回的分類不驗證（F7），會存進旅程裡不存在的分類。 | 比照 `resolveMember` 做 `resolveCategory`（放 `guards.ts` 並加測試），對不上退回預設分類並提醒。 |
-| M19 | 機器人加入群組不打招呼（L12）。 | 處理 `join` event，回 `BOT_SELF_INTRODUCTION`。 |
 
 （編號沿用 `LINE_SCENARIOS.md`，M9 不存在。）
 

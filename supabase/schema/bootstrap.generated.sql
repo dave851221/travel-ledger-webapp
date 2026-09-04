@@ -109,11 +109,16 @@ CREATE TABLE IF NOT EXISTS public.line_trip_id_mapping (
 --   line_user_id：實際存的是 sourceId（群組為 groupId、聊天室為 roomId、一對一為 userId）
 --                 因此「群組內所有人共用同一份狀態」是刻意的設計 —— 群組成員都能操作同一本帳
 --   current_trip_id：已綁定的旅程；pending_trip_id：等待輸入通行碼中
+--     ⚠️ 兩者可以同時有值 —— 那是「已綁定 A，正在切換到 B」。
+--        驗證成功才會把 current 換掉，中途放棄不會變成沒綁定（M1）。
+--   pending_at：進入等待通行碼狀態的時間，超過 10 分鐘由 Edge Function 自動放棄
 --   mention_required：群組觸發模式，true = 需 @提及或以「耀西」開頭才回應
+--   last_active_at：每次收到事件時由 Edge Function 背景更新
 CREATE TABLE IF NOT EXISTS public.line_user_states (
     line_user_id     TEXT PRIMARY KEY,
     current_trip_id  UUID REFERENCES public.trips(id) ON DELETE SET NULL,
     pending_trip_id  UUID REFERENCES public.trips(id) ON DELETE SET NULL,
+    pending_at       TIMESTAMPTZ,
     default_config   TEXT,
     mention_required BOOLEAN NOT NULL DEFAULT TRUE,
     last_active_at   TIMESTAMPTZ DEFAULT NOW(),

@@ -9,7 +9,13 @@
 // 連帶把它們弄壞而沒人發現。抽成獨立檔案並加測試，行為就被釘住了。
 //
 // `npm run check:functions` 只列 index.ts，但這個檔案透過 import 一起被型別檢查。
+//
+// 唯一的 import 是 _shared/finance.ts 與 _shared/deps.ts（Decimal）——
+// deps.ts 那層間接就是為了讓 vitest 在 Node 下也載得到，見 vitest.config.ts 的 alias。
 // ============================================================
+
+import { Decimal } from "../_shared/deps.ts"
+import { formatAmount } from "../_shared/finance.ts"
 
 /** Gemini 偶爾會用 markdown code block 包裝 JSON，此函式負責安全提取 */
 export function extractJSON(text: string): string {
@@ -215,6 +221,79 @@ export function mentionsEditingExisting(text: string): boolean {
   return EDIT_VERB.test(text) || CORRECTION_HINT.test(text)
 }
 
+/** LINE 的 mention 條目，只列這裡真正會用到的欄位 */
+export interface Mentionee {
+  index?: number
+  length?: number
+  isSelf?: boolean
+}
+
+/**
+ * 只把「提及機器人自己」的那幾段從訊息裡拿掉（M16）。
+ *
+ * 以前是拿一個「@ 加上任意非空白字元」的正規表示式全域取代 —— 一律刪掉所有 @開頭的詞。
+ * 於是「@耀西 @小明 你付的晚餐 300」會變成「你付的晚餐 300」，
+ * AI 根本看不到付款人是小明，只好套預設值（L14）。
+ *
+ * LINE 的 mention.mentionees 每一項都帶 index 與 length，
+ * 照著切掉 isSelf 的那幾段就好，其他人的名字原封不動留著。
+ *
+ * ⚠️ index 是相對於**原始未 trim 的** message.text，所以呼叫端要傳原文進來。
+ * 沒有 mention 資料時原樣回傳 —— 沒有東西可以刪，不該亂猜。
+ */
+export function stripSelfMentions(rawText: string, mentionees?: Mentionee[] | null): string {
+  const text = String(rawText ?? '')
+  const targets = (mentionees ?? [])
+    .filter(m => m?.isSelf === true && typeof m.index === 'number' && typeof m.length === 'number')
+    // 由後往前刪，前面幾段的 index 才不會被移動
+    .sort((a, b) => (b.index as number) - (a.index as number))
+
+  let out = text
+  for (const m of targets) {
+    const start = Math.max(0, m.index as number)
+    const end = Math.min(out.length, start + (m.length as number))
+    if (start >= out.length) continue
+    out = out.slice(0, start) + out.slice(end)
+  }
+  // 刪掉之後常會留下連續空白（「@耀西 晚餐 300」→「 晚餐 300」）
+  return out.replace(/[ \u3000]{2,}/g, ' ').trim()
+}
+
+/**
+ * 把 AI 給的分類對回旅程的分類清單（M18）。
+ *
+ * 之前完全不驗證：AI 回「美食」但旅程只有「餐飲」，就真的存進一個
+ * 不存在的分類 —— 網頁的分類統計會多出一個永遠選不到的欄位（F7）。
+ *
+ * 對法與 resolveMember 一致：完全相同 → 正規化後相同 → 唯一的子字串。
+ * 都對不上就退回預設分類（旅程預設 →「其他」→ 清單第一個）並回一句提醒。
+ */
+export function resolveCategory(
+  category: unknown,
+  categories: string[],
+  defaultCategory?: string | null,
+): { category: string; warning: string | null } {
+  const raw = String(category ?? '').trim()
+  const list = (categories ?? []).filter(c => typeof c === 'string' && c.trim())
+
+  // 旅程根本沒設分類清單就沒什麼好驗的
+  if (list.length === 0) return { category: raw, warning: null }
+
+  const matched = resolveMember(raw, list)
+  if (matched) return { category: matched, warning: null }
+
+  const fallback = (defaultCategory && list.includes(defaultCategory))
+    ? defaultCategory
+    : (list.includes('其他') ? '其他' : list[0])
+
+  return {
+    category: fallback,
+    warning: raw
+      ? `⚠️ 分類「${raw}」不在這趟旅程的清單裡，已改用「${fallback}」。`
+      : null,
+  }
+}
+
 /**
  * 用文字取消「尚未確認的草稿」的說法。
  * 精確比對整句 —— 「取消上一筆」是撤銷已存檔的支出，不能混進來。
@@ -245,10 +324,20 @@ export function claimsCompletedAction(text: string): boolean {
  *
  * 摘要會附上草稿的 nonce：AI 要用 corrects_draft 指名修正的是哪一張卡片，
  * 沒有 nonce 它只能靠上下文猜。
+ *
+ * 群組裡整串歷史是共用的，A 與 B 交錯講話時 AI 看到的是同一串（L15）。
+ * 所以 user 訊息前面補上發言者（M17）—— 少了它，「我付的」在多輪對話裡
+ * 會被算到當下這位發言者身上，即使那句話是別人講的。
  */
-export function summarizeHistoryEntry(role: string, content: string): string {
+export function summarizeHistoryEntry(
+  role: string,
+  content: string,
+  speakerName?: string | null,
+): string {
   if (role !== 'model' || !content.startsWith('[記帳建議]')) {
-    return content.length > 300 ? content.slice(0, 300) + '…' : content
+    const body = content.length > 300 ? content.slice(0, 300) + '…' : content
+    const speaker = String(speakerName ?? '').trim()
+    return role === 'user' && speaker ? `${speaker}：${body}` : body
   }
   try {
     const draft = JSON.parse(content.slice('[記帳建議]'.length).trim())
@@ -258,6 +347,145 @@ export function summarizeHistoryEntry(role: string, content: string): string {
   } catch {
     return '（我先前提出過一筆記帳建議）'
   }
+}
+
+
+// ============================================================
+// 全趟彙總（M6）
+//
+// AI 的 context 只放得下最近 10 筆支出，所以「這趟總共花多少」「我還欠多少」
+// 「交通花了多少」這類問題它一律答錯 —— 它只能把看得到的那 10 筆加一加。
+// 這裡在伺服器端用 Decimal 先算好精確數字放進 tripContext，
+// 模型就不必（也不該）自己做算術。
+//
+// 長期解法是 Gemini function calling，見 docs/MCP_SERVER_DESIGN.md。
+// ============================================================
+
+/** 彙總只讀得到這幾個欄位 */
+export interface SummaryRow {
+  amount: number | string
+  currency: string
+  category?: string | null
+  date?: string | null
+  is_settlement?: boolean | null
+  payer_data?: Record<string, unknown> | null
+  split_data?: Record<string, unknown> | null
+}
+
+/** { 幣別: Decimal } 的累加器 */
+type MoneyMap = Map<string, InstanceType<typeof Decimal>>
+
+function addMoney(map: MoneyMap, currency: string, amount: unknown): void {
+  const cur = String(currency ?? '').trim().toUpperCase()
+  if (!cur) return
+  const value = new Decimal(Number(amount) || 0)
+  map.set(cur, (map.get(cur) ?? new Decimal(0)).plus(value))
+}
+
+/** 把累加器印成「12345 JPY・2100 TWD」；空的話回傳 dash */
+function renderMoney(
+  map: MoneyMap,
+  precisionConfig: Record<string, number>,
+  options: { signed?: boolean; empty?: string } = {},
+): string {
+  const parts: string[] = []
+  // 幣別排序固定，同一趟旅程每次問到的字串才會一致
+  for (const cur of [...map.keys()].sort()) {
+    const value = map.get(cur)!
+    const text = formatAmount(value.toNumber(), cur, precisionConfig)
+    parts.push(`${options.signed && value.greaterThan(0) ? '+' : ''}${text} ${cur}`)
+  }
+  return parts.length > 0 ? parts.join('・') : (options.empty ?? '0')
+}
+
+/**
+ * 把整趟旅程的支出壓成一段給 AI 讀的精確彙總。
+ *
+ * 刻意的取捨：
+ *   - 筆數／日期範圍／各幣別合計／各分類合計 **不含結清紀錄** ——
+ *     結清是「誰把錢還給誰」，不是這趟花了多少（與快捷查詢的 K19 一致）。
+ *   - 每人的已付／應付／淨額 **含結清紀錄** ——
+ *     「我還欠多少」要扣掉已經還過的錢，不然數字永遠不會歸零。
+ */
+export function summarizeTripExpenses(
+  rows: SummaryRow[],
+  members: string[],
+  precisionConfig: Record<string, number> = {},
+): string {
+  const all = rows ?? []
+  const real = all.filter(r => !r.is_settlement)
+
+  if (all.length === 0) return '（這趟旅程還沒有任何支出）'
+
+  const totals: MoneyMap = new Map()
+  const byCategory = new Map<string, MoneyMap>()
+  const dates: string[] = []
+
+  for (const row of real) {
+    addMoney(totals, row.currency, row.amount)
+
+    const category = String(row.category ?? '').trim() || '（未分類）'
+    if (!byCategory.has(category)) byCategory.set(category, new Map())
+    addMoney(byCategory.get(category)!, row.currency, row.amount)
+
+    const date = String(row.date ?? '').trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dates.push(date)
+  }
+
+  // 每人收支：payer_data 是已付、split_data 是應付，兩者都含結清紀錄
+  const paid = new Map<string, MoneyMap>()
+  const owed = new Map<string, MoneyMap>()
+  const bump = (store: Map<string, MoneyMap>, member: string, currency: string, amount: unknown) => {
+    if (!store.has(member)) store.set(member, new Map())
+    addMoney(store.get(member)!, currency, amount)
+  }
+  for (const row of all) {
+    for (const [member, amount] of Object.entries(row.payer_data ?? {})) {
+      bump(paid, member, row.currency, amount)
+    }
+    for (const [member, amount] of Object.entries(row.split_data ?? {})) {
+      bump(owed, member, row.currency, amount)
+    }
+  }
+
+  dates.sort()
+  const range = dates.length > 0
+    ? (dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} ~ ${dates[dates.length - 1]}`)
+    : '（無）'
+
+  const categoryLine = byCategory.size > 0
+    ? [...byCategory.keys()].sort()
+        .map(c => `${c} ${renderMoney(byCategory.get(c)!, precisionConfig)}`)
+        .join('｜')
+    : '（無）'
+
+  // 名單以旅程成員為準，並補上只出現在支出裡的名字（成員被改名或移除過的舊帳）
+  const names = [...members]
+  for (const name of [...paid.keys(), ...owed.keys()]) {
+    if (!names.includes(name)) names.push(name)
+  }
+
+  const memberLines = names.map(name => {
+    const p = paid.get(name) ?? new Map()
+    const o = owed.get(name) ?? new Map()
+    if (p.size === 0 && o.size === 0) return `- ${name}：尚無收支`
+    // 淨額 = 已付 - 應付。正數代表這個人先墊了錢，別人要還他。
+    const net: MoneyMap = new Map()
+    for (const cur of new Set([...p.keys(), ...o.keys()])) {
+      net.set(cur, (p.get(cur) ?? new Decimal(0)).minus(o.get(cur) ?? new Decimal(0)))
+    }
+    return `- ${name}：已付 ${renderMoney(p, precisionConfig)}`
+      + `｜應付 ${renderMoney(o, precisionConfig)}`
+      + `｜淨額 ${renderMoney(net, precisionConfig, { signed: true })}`
+  })
+
+  return [
+    `筆數：${real.length} 筆（不含結清紀錄）｜日期範圍：${range}`,
+    `各幣別合計：${renderMoney(totals, precisionConfig, { empty: '（無）' })}`,
+    `各分類合計：${categoryLine}`,
+    '每人收支（已付／應付／淨額，含結清紀錄；淨額為正代表別人要還他）：',
+    ...memberLines,
+  ].join('\n')
 }
 
 /**
