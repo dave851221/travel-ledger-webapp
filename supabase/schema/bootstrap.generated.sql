@@ -249,6 +249,68 @@ $$;
 REVOKE ALL ON FUNCTION public.generate_linebot_id()           FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.trigger_generate_line_mapping() FROM PUBLIC, anon, authenticated;
 
+-- ============================================================
+-- 垃圾桶保留期（24 小時）—— 一律以資料庫時鐘判斷
+--
+-- 以前是前端拿 `new Date()` 減 `deleted_at`，裝置時間不準就會提早清空或永遠不清。
+-- 改成這兩支 RPC 之後，「還在保留期內」與「已過期」都由 now() 決定。
+-- 不需要 SECURITY DEFINER：expenses 的 RLS 本來就對 anon 開放，
+-- 以呼叫者權限執行即可，避免多開一個繞過 RLS 的入口。
+-- ============================================================
+
+-- 保留期內的垃圾桶內容（供畫面顯示）
+DROP FUNCTION IF EXISTS public.list_trip_trash(UUID);
+
+CREATE FUNCTION public.list_trip_trash(p_trip_id UUID)
+RETURNS SETOF public.expenses
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT *
+    FROM public.expenses
+    WHERE trip_id = p_trip_id
+      AND deleted_at IS NOT NULL
+      AND deleted_at > now() - interval '24 hours'
+    ORDER BY deleted_at DESC;
+$$;
+
+-- 已過保留期的垃圾桶內容（供前端永久刪除；photo_urls 是為了先清 Storage）
+DROP FUNCTION IF EXISTS public.list_expired_trash(UUID);
+
+CREATE FUNCTION public.list_expired_trash(p_trip_id UUID)
+RETURNS TABLE(id UUID, photo_urls TEXT[])
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT e.id, e.photo_urls
+    FROM public.expenses e
+    WHERE e.trip_id = p_trip_id
+      AND e.deleted_at IS NOT NULL
+      AND e.deleted_at <= now() - interval '24 hours';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.list_trip_trash(UUID)    TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_expired_trash(UUID) TO anon, authenticated;
+
+-- 軟刪除的時間戳一律蓋成資料庫時間。
+-- 寫入端有三個（前端 useTrash.softDelete、Edge Function、LIFF），
+-- 各自送自己的時鐘，上面兩支 RPC 的判斷才會失準。
+-- 只在「從 NULL 變成有值」時覆寫，還原（寫回 NULL）不受影響。
+CREATE OR REPLACE FUNCTION public.stamp_deleted_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN
+        NEW.deleted_at := now();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 -- 通知 PostgREST 重新載入 schema，讓新建立/變更的 RPC 立即可用
 NOTIFY pgrst, 'reload schema';
 
@@ -269,6 +331,14 @@ FOR EACH ROW EXECUTE FUNCTION public.trigger_generate_line_mapping();
 INSERT INTO public.line_trip_id_mapping (trip_id, linebot_id)
 SELECT id, public.generate_linebot_id() FROM public.trips
 ON CONFLICT (trip_id) DO NOTHING;
+
+-- 軟刪除時把 deleted_at 蓋成資料庫時間，讓垃圾桶的 24 小時保留期
+-- 不受各寫入端（網頁、Edge Function、LIFF）的時鐘影響
+DROP TRIGGER IF EXISTS tr_expenses_stamp_deleted_at ON public.expenses;
+
+CREATE TRIGGER tr_expenses_stamp_deleted_at
+BEFORE UPDATE OF deleted_at ON public.expenses
+FOR EACH ROW EXECUTE FUNCTION public.stamp_deleted_at();
 
 
 -- <<<<<<<<<< 05_policies.sql <<<<<<<<<<

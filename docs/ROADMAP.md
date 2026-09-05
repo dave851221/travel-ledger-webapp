@@ -40,13 +40,19 @@ RLS 政策全部是 `FOR ALL USING (true)`（見 [`supabase/schema/05_policies.s
 
 方案 2 改動較小但會動到大量前端查詢，尚未排程。
 
-### 2. 垃圾桶的 24 小時判斷依賴客戶端時間
+### 2. ~~垃圾桶的 24 小時判斷依賴客戶端時間~~（已解決，2026-09-07）
 
-`Dashboard.tsx` 過濾 `deleted_at` 時是用瀏覽器的 `new Date()` 去減資料庫時間。
-使用者裝置時間不準的話，可能提早清空或永遠不清。
+**已修**：保留期的切割改由資料庫的 `now()` 決定，兩支 STABLE 的 RPC
+`list_trip_trash()` / `list_expired_trash()` 分別回傳「保留期內」與「已過期」兩份清單，
+`src/hooks/useTripData.ts` 的 `refetchDeleted` 直接呼叫它們，
+不再把 `deleted_at` 撈回瀏覽器用 `new Date()` 相減。
 
-**建議修法**：改由資料庫過濾（`deleted_at > NOW() - INTERVAL '24 hours'`），
-或建一個 view。
+搭配 `expenses` 的 BEFORE UPDATE trigger `tr_expenses_stamp_deleted_at`
+把軟刪除的時間戳蓋成 `now()` —— 寫入端有三個（網頁 `useTrash`、LINE Edge Function、LIFF），
+不統一時間來源的話伺服器端的判斷還是會歪。還原（寫回 `NULL`）不受影響。
+
+> 清理逾期紀錄仍維持「先刪 Storage 照片、再刪資料列」的順序，
+> 且刪列時加上 `deleted_at IS NOT NULL`，避免兩次呼叫之間被還原的紀錄遭硬刪。
 
 ### 3. anon key 曾外洩於 git 歷史（已決定接受此風險）
 
@@ -94,7 +100,6 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
 
 ### 短期
 
-- 修正上述已知風險 2（垃圾桶的 24 小時判斷依賴客戶端時間）。
 - 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
 - Edge Function 模組化：純函式已抽到 `line-webhook/guards.ts` 並有測試，
   但 `index.ts` 仍是兩千行的路由單檔。並為 LINE webhook 事件與

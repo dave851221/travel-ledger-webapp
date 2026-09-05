@@ -3,9 +3,6 @@ import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { RECEIPTS_BUCKET } from '../utils/storage';
 
-/** 垃圾桶保留時間。超過就在下次載入頁面時永久刪除。 */
-const TRASH_RETENTION_HOURS = 24;
-
 export interface UseTripDataResult {
   trip: Trip | null;
   expenses: Expense[];
@@ -103,39 +100,36 @@ export const useTripData = (
   const refetchDeleted = useCallback(async () => {
     if (!supabase || !id) return;
     try {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .eq('trip_id', id)
-        .not('deleted_at', 'is', null)
-        .order('deleted_at', { ascending: false });
+      // 保留期的 24 小時一律交給資料庫的時鐘判斷（RPC 裡用 now()），
+      // 以前拿瀏覽器時間相減，裝置時間不準就會提早清空或永遠不清。
+      const { data, error } = await supabase.rpc('list_trip_trash', { p_trip_id: id });
       if (error) throw error;
+      setDeletedExpenses((data || []) as Expense[]);
 
-      const now = new Date();
-      const validDeleted: Expense[] = [];
-      const expiredIds: string[] = [];
-      const expiredPhotoUrls: string[] = [];
+      if (purgeDoneRef.current) return;
 
-      (data || []).forEach((exp: Expense) => {
-        if (!exp.deleted_at) return;
-        const hoursDiff = (now.getTime() - new Date(exp.deleted_at).getTime()) / (1000 * 60 * 60);
-        if (hoursDiff <= TRASH_RETENTION_HOURS) {
-          validDeleted.push(exp);
-        } else {
-          expiredIds.push(exp.id);
-          (exp.photo_urls || []).forEach((url) => { if (url) expiredPhotoUrls.push(url); });
-        }
-      });
+      const { data: expired, error: expiredError } = await supabase
+        .rpc('list_expired_trash', { p_trip_id: id });
+      if (expiredError) throw expiredError;
 
-      if (expiredIds.length > 0 && !purgeDoneRef.current) {
-        purgeDoneRef.current = true;
-        if (expiredPhotoUrls.length > 0) {
-          await supabase.storage.from(RECEIPTS_BUCKET).remove(expiredPhotoUrls);
-        }
-        await supabase.from('expenses').delete().in('id', expiredIds);
+      const expiredRows = (expired || []) as { id: string; photo_urls: string[] | null }[];
+      if (expiredRows.length === 0) return;
+
+      purgeDoneRef.current = true;
+      const expiredPhotoUrls = expiredRows
+        .flatMap((row) => row.photo_urls || [])
+        .filter((url) => !!url);
+
+      // 順序不能換：紀錄一消失就查不出該刪哪些照片
+      if (expiredPhotoUrls.length > 0) {
+        await supabase.storage.from(RECEIPTS_BUCKET).remove(expiredPhotoUrls);
       }
-
-      setDeletedExpenses(validDeleted);
+      // 兩次呼叫之間可能有人把紀錄還原，還原過的不能硬刪
+      await supabase
+        .from('expenses')
+        .delete()
+        .in('id', expiredRows.map((row) => row.id))
+        .not('deleted_at', 'is', null);
     } catch (err) {
       console.error(err);
     }

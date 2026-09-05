@@ -121,6 +121,9 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   `precision_config`）。軟刪除用 `deleted_at`（僅 expenses 有），結清紀錄以 `is_settlement` 標記
   —— **編輯既有支出時務必沿用原本的 `is_settlement`**，硬寫 `false` 會把結清變成一般支出、統計失真。
   結構定義在 [`supabase/schema/`](supabase/schema/)。
+  **垃圾桶的 24 小時保留期由資料庫時鐘判斷**：RPC `list_trip_trash` / `list_expired_trash`
+  在伺服器端以 `now()` 切出「保留期內」與「已過期」，`deleted_at` 則由 trigger
+  `tr_expenses_stamp_deleted_at` 一律蓋成 `now()`（還原寫 `NULL` 不受影響）。
 - **即時同步**：`trips` 與 `expenses` 都在 `supabase_realtime` 發布中，Dashboard 訂閱更新。
 - **儲存空間**：`travel-images` bucket，路徑 `expenses/{tripId}/{檔名}`。
   這個前綴慣例被 `supabase/scripts/delete_trip.sql` 依賴，勿隨意更動。
