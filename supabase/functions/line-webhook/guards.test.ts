@@ -3,7 +3,6 @@ import {
   applyParticipantDefaults,
   CANCEL_DRAFT_KEYWORDS,
   claimsCompletedAction,
-  detectRecordIntent,
   extractJSON,
   normalizeCurrency,
   normalizeDate,
@@ -32,48 +31,8 @@ import { calculateDistribution } from '../_shared/finance';
  * 這支測試把行為釘住。
  */
 
-describe('detectRecordIntent', () => {
-  it('「改 + 數字」是修改意圖', () => {
-    expect(detectRecordIntent('剛剛那筆改 500')).toBe('edit');
-    expect(detectRecordIntent('剛剛那筆改500')).toBe('edit');
-    expect(detectRecordIntent('那筆帳改成 800')).toBe('edit');
-    expect(detectRecordIntent('編輯支出')).toBe('edit');
-  });
-
-  it('刪除動詞優先於修改動詞', () => {
-    expect(detectRecordIntent('把昨天那筆刪掉')).toBe('delete');
-    expect(detectRecordIntent('刪除支出')).toBe('delete');
-    expect(detectRecordIntent('把那筆紀錄移除，順便改成 500')).toBe('delete');
-  });
-
-  it('只有動詞或只有受詞都不算', () => {
-    // 「改天」不是「改 + 數字」，不能誤判
-    expect(detectRecordIntent('這筆帳我改天再處理')).toBeNull();
-    // 「行程」不是紀錄類的受詞
-    expect(detectRecordIntent('取消行程')).toBeNull();
-    expect(detectRecordIntent('刪掉這張照片')).toBeNull();
-    expect(detectRecordIntent('晚餐 300')).toBeNull();
-    expect(detectRecordIntent('')).toBeNull();
-  });
-
-  it('「取消上一筆」不是刪除意圖（走撤銷路徑）', () => {
-    expect(detectRecordIntent('取消上一筆')).toBeNull();
-  });
-
-  it('指示代名詞與時間指稱也算受詞（T1）', () => {
-    // 真機回報：「那筆」認得、「那個」不認得，同一句話卻被當成新支出重複記了一筆
-    expect(detectRecordIntent('剛剛那個改250')).toBe('edit');
-    expect(detectRecordIntent('剛才那個刪掉')).toBe('delete');
-    expect(detectRecordIntent('最近一筆改成 800')).toBe('edit');
-    expect(detectRecordIntent('上一個改為 500')).toBe('edit');
-  });
-
-  it('加了新受詞之後「改天」仍然不能誤判', () => {
-    expect(detectRecordIntent('剛剛那個改天再說')).toBeNull();
-    expect(detectRecordIntent('這個改天再處理')).toBeNull();
-  });
-
-  it('CANCEL_DRAFT_KEYWORDS 精確比對，不會吃到「取消上一筆」', () => {
+describe('CANCEL_DRAFT_KEYWORDS', () => {
+  it('精確比對，不會吃到「取消上一筆」', () => {
     expect(CANCEL_DRAFT_KEYWORDS.includes('取消')).toBe(true);
     expect(CANCEL_DRAFT_KEYWORDS.includes('取消上一筆')).toBe(false);
   });
@@ -186,6 +145,21 @@ describe('claimsCompletedAction', () => {
     expect(claimsCompletedAction('我沒辦法刪除已存檔的支出')).toBe(false);
     expect(claimsCompletedAction('請輸入「刪除支出」，我會列出近期紀錄')).toBe(false);
     expect(claimsCompletedAction('Yoshi! 今天總共花了 1200 元')).toBe(false);
+  });
+
+  // 改用 function calling 之後，「按了確認才會生效」正是我們要模型講的話。
+  // regex 若連未來式一起殺，等於逼它改口說謊。
+  it('未來式的說明不能被誤殺', () => {
+    expect(claimsCompletedAction('幫你準備好修改卡片了，確認後就會修改好了')).toBe(false);
+    expect(claimsCompletedAction('按下「確認修改」之後才會更新了')).toBe(false);
+    expect(claimsCompletedAction('我可以幫你刪除，請按確認')).toBe(false);
+    expect(claimsCompletedAction('卡片給你了，你按下去我就會幫你刪了')).toBe(false);
+    expect(claimsCompletedAction('要刪除的話請按確認')).toBe(false);
+  });
+
+  it('過去式的完成宣稱仍然要攔', () => {
+    expect(claimsCompletedAction('我幫你刪了')).toBe(true);
+    expect(claimsCompletedAction('已經幫你把那筆刪掉了')).toBe(true);
   });
 });
 

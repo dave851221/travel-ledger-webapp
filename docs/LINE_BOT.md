@@ -6,7 +6,13 @@
 開發者若修改機器人邏輯或自我介紹，請務必同步更新本文件與對應的模組。
 
 ## 1. 核心行為與功能
-- **自然語言記帳**: 透過 Gemini AI 解析使用者的自然語言輸入（例如：「午餐 500 迪哥付的」），自動轉化為結構化的記帳資料。支援追溯性指令，如「剛剛那筆改 500」，AI 會參考尚未確認的草稿清單進行修正（見下方「草稿的修正與取消」）。
+- **自然語言記帳**: 透過 Gemini AI 解析使用者的自然語言輸入（例如：「午餐 500 迪哥付的」），自動轉化為結構化的記帳資料。
+  支援追溯性指令，如「剛剛那筆改 500」，AI 會參考尚未確認的草稿清單進行修正（見下方「草稿的修正與取消」）。
+  **一句話可以記多筆**（「午餐 300 晚餐 500」出兩張卡，上限 4 筆）。
+- **自然語言修改／刪除既有支出**（Feature G）: 「把昨天的拉麵改成 300」「刪除 9/3 那筆計程車」
+  會由 AI 定位到那一筆並送出一張確認卡（「✏️ 修改預覽」或「🗑 確認刪除？」），
+  **按下確認才會真的動到帳本**。要改的那筆不在最近 10 筆裡時，AI 會先呼叫 `list_expenses` 去查；
+  找不到唯一一筆就反問，不會猜。清單式的「編輯支出」「刪除支出」仍然保留。
 - **收據 OCR 智慧辨識**: 
   - **自動流程**: 使用者上傳照片後，機器人會自動下載並同步存儲至 Supabase Storage (`expenses/{tripId}/{messageId}.jpg`)。
   - **AI 解析**: 使用 Gemini 視覺模型辨識商店、金額、幣別、日期與品項。
@@ -112,24 +118,25 @@
   上限 1000 字，多成員長描述時整張清單會直接發不出去。
   ⚠️ **這是前端改動，要 push `main`；Edge Function 也要同時重新部署**，
   否則新網址格式對不上（前端與 Edge Function 是兩條獨立的部署路徑）。
-- **用自然語言表達的刪除／修改意圖**（`detectRecordIntent`，位於 `guards.ts`）
-  **在沒有待確認草稿時**會被攔下來，直接回傳上述選單而不進 AI ——
-  因為 AI 沒有修改既有紀錄的能力，「把昨天那筆刪掉」交給它只會多記一筆重複的支出。
-  有草稿時則走下面的「草稿的修正與取消」。
-  受詞除了「支出／花費／帳／紀錄／這筆／那筆／上一筆」，也包含指示代名詞與時間指稱
-  （`那個`／`這個`／`剛剛`／`剛才`／`上一個`／`前一個`／`最後一筆`／`最近一筆`／`最新一筆`）；
-  動詞仍要求「改＋數字」或「改成／改為／改到／改一下」，所以「剛剛那個改天再說」不會誤判。
-- **第二道防線：AI 回了 expense 但現場沒有草稿可修**（`mentionsEditingExisting`）。
-  路由層攔不到的說法（例如沒有受詞的「改成 250」）會進 AI，schema 又允許它回 `expense`，
-  結果就是憑空多記一筆。所以在產生卡片之前再判斷一次：
+- **用自然語言講的刪除／修改不再被路由層攔截**（Feature G）。以前有一支 `detectRecordIntent()`
+  會在「沒有待確認草稿」時把這類句子攔下來直接列清單，因為當時的 AI 沒有修改既有紀錄的能力。
+  現在它有了（`propose_expense_update` / `propose_expense_delete`），那道攔截連同函式與測試一併移除 ——
+  留著只會把該進 AI 的句子擋在門外。**精確關鍵字**（`編輯支出`、`刪除支出`、`取消上一筆`…）維持不進 AI。
+- **第二道防線：AI 提議新記一筆，但現場沒有草稿可修**（`mentionsEditingExisting`）。
+  模型偶爾會把「改成 250」當成一筆新支出而不是改既有的那一筆，照著出卡片就憑空多記一筆。
+  所以在產生卡片之前再判斷一次：
   **沒有任何未確認草稿 + AI 沒填 `corrects_draft` + 這句話有「改／不對／錯了／打錯／記錯／更正」**
   → 不出卡片，改列編輯清單（`replyEditPicker()`），並在標題下加一句
   「看起來你想改已經存入的紀錄。如果其實是要新記一筆，請不要用『改』來描述。」
   清單依日期與建立時間倒序，剛存的那一筆必定在第一列。
 - **編輯／刪除清單不含結清紀錄**（`.not('is_settlement', 'is', true)`）。
   結清是網頁「結算」功能寫進去的特殊紀錄，被當成一般支出編輯會讓統計失真。
-- **假完成宣稱的防線**: AI 仍可能回「已經幫您刪除了」。送出前以 `claimsCompletedAction`
-  攔截並換成誠實的說明 —— 讓使用者以為帳已經改掉，比直說做不到更糟。
+- **假完成宣稱的防線**: 修改與刪除只是「提議」，要使用者按確認卡才生效，但 AI 仍可能回
+  「已經幫您刪除了」。送出前以 `claimsCompletedAction` 攔截並換成
+  「我可以幫你提議修改或刪除，但要你按了確認卡片才會真的生效」——
+  讓使用者以為帳已經改掉，比直說還沒生效更糟。
+  ⚠️ regex 只認**過去式**：「確認後就會修改好了」「按下去才會更新」是我們**要**模型講的話，
+  攔掉它等於逼它改口說謊（見 `guards.test.ts` 的「未來式的說明不能被誤殺」）。
 - **嚴禁自行換算匯率**: 兩個 prompt 都明令 `amount` 與 `currency` 必須照抄收據／使用者的原始幣別。
   換算只在統計時由前端依 `trip.rates` 進行；AI 先換過會讓原始金額永久遺失。
 - **幣別由程式決定，不靠 prompt 記性**（`resolveCurrencyByRule`，位於 `guards.ts`）:
@@ -146,7 +153,10 @@
 - **外文店名的描述格式**: 保留原文並在括號補上簡短中文說明「這是什麼店」，
   例如「肉の匠家 (和牛燒肉店)」，而不是逐字直譯，也不是只留原文。
 - **草稿的修正與取消**: 「草稿」＝已送出 Flex 卡片但使用者還沒按確認或取消的那一筆，
-  存在 `line_chat_history` 的 `pending` 列（`getOutstandingDrafts()` 取最近 5 張未處理的）。
+  存在 `line_chat_history` 的 `pending` 列（`getOutstandingDrafts()` 掃最近 10 列，回未處理的）。
+  ⚠️ 同一張表也放 AI 的修改／刪除提議卡（`kind: 'update'` / `'delete'`），
+  但那些**不算草稿**，`getOutstandingDrafts()` 只回 `kind` 為空或 `'expense'` 的列 ——
+  否則使用者打「取消」會取消到一張修改卡，AI 也會拿它的 nonce 去填 `corrects_draft`。
   - 每張草稿的 **nonce 會一起餵進 `tripContext` 的【尚未確認的草稿】**，
     AI 修正時必須用 `corrects_draft` 欄位指名它在修哪一張。
   - **只有被指名的那一張會失效**（`supersedeDraft()` 把它的 nonce 寫進 `line_processed_actions`，
@@ -167,7 +177,8 @@
 - **紀錄保留**: 由資料庫的 pg_cron 每天清理（`purge-line-records`，03:17 UTC）——
   `line_chat_history` 留 14 天、`line_processed_actions` 留 7 天。
   原本在 Edge Function 內以 10% 機率順手清理，沒人講話就不會清，已移除。
-- **快捷查詢指令**: 以下為精確字串比對，會直接查詢資料庫而不經過 AI，因此結果保證正確：
+- **快捷查詢指令**: 以下為精確字串比對，會直接查詢資料庫而不經過 AI，因此結果保證正確
+  （**只有這些精確字串**會被攔下來；其餘的自然語言 —— 包含記帳、查詢、修改與刪除 —— 一律進 AI）：
   `今日支出` / `今天支出`、`本週支出` / `近期支出`、`本月支出`、`結算`、`旅程總覽`、
   `取消上一筆` / `撤銷上一筆`（軟刪除最近一筆存檔的支出）。
   金額一律以 `Decimal` 加總（`sumByCurrency`）並依旅程的 `precision_config` 格式化
@@ -191,26 +202,29 @@
     超過 30 天的旅程只留最早一天與最近 29 天，中間明講省略了幾天，讓 AI 知道那段答不出來。
   - **金額最大的 3 筆**（K13）：跨幣別會先用 `getRate()` 折合主幣別再排序 ——
     3000 JPY 與 900 TWD 直接比數字是錯的。列出日期、描述、原幣金額與折合金額。
-  - 仍是「事先算好固定幾種切片」，問到沒被涵蓋的角度還是答不出來；
-    長期解法是 Gemini function calling。
-- **收據照片再分析 (`analyze_photo`)**: 若使用者針對某筆已有收據照片的支出追問細節（品項明細、外文翻譯等），
-  AI 會回傳 `analyze_photo`，系統重新取回該筆的收據交給 Gemini 逐項解析後作答。
-  - **AI 只回編號，照片由程式自己找**：近期支出清單是有編號、標 📷 的格式
-    （`#3 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`），**不再放照片網址**。
-    AI 回的 `expense_ref`（例如 `#3`）由 `pickExpenseByRef()` 換回那一筆。
+  - 彙總仍是「事先算好固定幾種切片」，但問到沒被涵蓋的角度時（某兩人之間的往來、某個關鍵字），
+    模型現在可以自己呼叫 `list_expenses` / `get_balance` / `get_settlement_plan` 去查（Feature G）。
+    彙總留著是因為它便宜又準：常見的金額問題不必多跑一輪工具呼叫。
+- **收據照片再分析 (`analyze_receipt`)**: 若使用者針對某筆已有收據照片的支出追問細節（品項明細、外文翻譯等），
+  AI 會呼叫 `analyze_receipt`，系統重新取回該筆的收據交給 Gemini 逐項解析後作答。
+  - **AI 只回 ref，照片由程式自己找**：近期支出清單是有 ref、標 📷 的格式
+    （`ref=1a2b3c4d 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`），**不再放照片網址**。
+    ref 是 uuid 前 8 碼，由 `resolveExpenseRef()` 換回那一筆（**唯一命中才算**，
+    而且擋掉垃圾桶裡的與結清紀錄）。同一個 ref 也用在 `propose_expense_update` / `propose_expense_delete`。
     ⚠️ 以前是把完整網址塞進 context 要它逐字抄回來 —— 網址長又只差幾個字元，
     小模型常抄錯或抄成上一輪對話裡的另一張，使用者問 A 店卻拿到 B 店的收據。
     順帶也省掉每筆一長串網址的 token。
   - **不在近期 10 筆時的全庫搜尋**：先在程式端用 `matchExpensesByQuestion()`
     把問句與各筆 description（含「括號前的原文」，因為描述格式是「Lawson (便利商店)」）
-    做 `normalizeName()` 子字串比對；唯一命中就直接用，多筆或零筆才交給 AI 二選一，
-    而 AI 一樣只回編號。
+    做 `normalizeName()` 子字串比對；唯一命中就直接用，多筆或零筆才交給 AI 二選一。
+    那一次額外呼叫仍是 JSON mode（沒有工具要用，只是從清單裡挑一個），
+    回的是 `#編號`，由 `pickExpenseByRef()` 換回那一筆 —— 所以那支函式**保留著**。
   - **一筆支出的所有照片一起分析**：`analyzeReceiptPhoto(photoUrls[], question, expenseLabel)`
     會把該筆的每一張 `photo_urls` 都下載送進模型，prompt 開頭標明
     「以下 N 張是同一筆支出『…』的收據」。以前只看 `photo_urls[0]`，
     長帳單拍成兩張時第二張的品項永遠問不到。
   - **回覆與歷史都標明是哪一筆**：回覆開頭是 `🔍 {日期} {描述} {金額} {幣別}`，
-    寫進 `line_chat_history` 的內容前面加 `[收據分析 #{id前8碼}]`，
+    寫進 `line_chat_history` 的內容前面加 `[收據分析 {ref}]`，
     下一輪追問（「那第二項是什麼」）才有指代對象。
 - **旅程被刪除時不會 500**（M5）: AI 核心查完旅程先檢查 null 再往下走。
   以前直接讀 `trip.name` 會丟例外 → webhook 回 500 → LINE 重送同一則訊息。
@@ -270,10 +284,14 @@ Yoshi! Yoshi!
   五條路徑各自在 [`handlers/`](../supabase/functions/line-webhook/handlers/)
   （`postback.ts`、`image.ts`、`audio.ts`、`commands.ts`、`ai-text.ts`），
   共用的東西在 `config.ts`／`db.ts`／`util.ts`／`line-api.ts`／`drafts.ts`／`messages.ts`／`gemini.ts`。
+  記帳的實際動作（驗證、寫入、查詢、餘額）在 [`_shared/tools/`](../supabase/functions/_shared/tools/)，
+  與未來的 MCP server 共用；Gemini 的呼叫與 function calling 迴圈在
+  [`_shared/gemini.ts`](../supabase/functions/_shared/gemini.ts)（不碰 `Deno.env`，所以測得動）。
   沒有副作用的純函式在 [`_shared/validate.ts`](../supabase/functions/_shared/validate.ts)（AI 回傳內容的驗證）
   與 [`guards.ts`](../supabase/functions/line-webhook/guards.ts)（與 LINE 有關的判斷與摘要），
   兩者都由 `guards.test.ts` 看守 —— 改這些行為請連同測試一起改。
-  `check:functions` 只列 `index.ts`，其餘模組透過 import 一起被檢查。
+  `check:functions` 列了四個進入點（`line-webhook/index.ts`、`liff-notify/index.ts`、
+  `_shared/tools/registry.ts`、`_shared/gemini.ts`），其餘模組透過 import 一起被檢查。
   完整的模組清單與 import 方向見 [`../CLAUDE.md`](../CLAUDE.md)。
 - **狀態管理**: 透過 `line_user_states` 維護綁定狀態（`current_trip_id`／`pending_trip_id`／
   `pending_at`）與群組觸發模式；`last_active_at` 每次收到事件時由 `runInBackground()` 更新
@@ -288,15 +306,47 @@ Yoshi! Yoshi!
   2. **真正的解法是 nonce 間接法**：postback 只帶 `{"act":"save","n":"<8碼>"}`（約 30 bytes），
      完整內容存在 `line_chat_history` 的 `pending` 列，點擊時再取回。
   3. 保留讀取舊格式內嵌欄位的相容分支，讓已發出的舊卡片仍可運作。
-- **Gemini 呼叫方式**:
-  - 人設與不可變規則放在 `system_instruction`（`YOSHI_SYSTEM_INSTRUCTION`），與每次變動的旅程 context 分開。
-  - 回應格式由 `response_schema` 約束（結構化輸出），prompt 不再需要手寫 JSON 範例。
-    注意 Gemini 的 schema 不支援 `additionalProperties`，所以「成員 → 金額」是以
-    `[{ member, amount }]` 陣列表達，解析後由 `toAmountMap()` 轉回程式內部慣用的 map。
+- **Gemini 呼叫方式**: **文字與 OCR 是兩套不同的契約**，不要互相套用。
+  - 人設與不可變規則放在 `systemInstruction`（`YOSHI_SYSTEM_INSTRUCTION`），與每次變動的旅程 context 分開。
   - 對話歷史組成真正的多輪 `contents`，而不是壓成一段文字塞進 prompt。
   - 記帳走低溫（0.2 ~ 0.4）以求穩定。
+  - **文字路徑：function calling**（Feature G，`runToolLoop()` 於 `_shared/gemini.ts`）。
+    模型可以先呼叫唯讀工具把資料查清楚，最後一定要呼叫一支「終結函式」：
+
+    | 名稱 | 種類 | 效果 |
+    | :--- | :--- | :--- |
+    | `list_expenses` | 讀 | 依日期／分類／成員／關鍵字查支出（上限 50 筆），回 ref 給模型指名 |
+    | `get_balance` | 讀 | 每人折合主幣別的淨結餘 |
+    | `get_settlement_plan` | 讀 | 最少轉帳次數的結清路徑 |
+    | `propose_expenses` | 終結 | 1–4 張「🤖 AI 記帳預覽」卡（`corrects_draft` 指名要修正的草稿） |
+    | `propose_expense_update` | 終結 | 「✏️ 修改預覽」卡，列出欄位「前 → 後」 |
+    | `propose_expense_delete` | 終結 | 「🗑 確認刪除？」卡 |
+    | `analyze_receipt` | 終結 | 重新閱讀某一筆的收據並回答 |
+    | `reply` | 終結 | 一般回覆（取代舊的 `type: chat`） |
+
+    讀取工具的定義直接來自 `_shared/tools/registry.ts`（MCP 用同一份），
+    `propose_*` 的參數 schema 也是 `_shared/tools/schemas.ts` 裡那幾份**本身**。
+    ⚠️ 寫入類的 `create_expense` / `update_expense` / `delete_expense` **刻意不公開給模型** ——
+    那三支按下去就落地了，LINE 這條路一律要經過使用者按確認；`execute` 那裡再擋一次。
+  - **迴圈的三條硬性限制**（都已查證，違反的症狀都不好懂）：
+    ①`tools` 與 `responseMimeType: application/json` **不能同時帶**（Gemini 3 以外直接 400），
+    所以文字路徑不用 JSON mode，改以 `toolConfig.functionCallingConfig.mode = 'ANY'` 強迫每輪都回 function call；
+    ②Gemini 3 的 `functionCall` part 帶 `thoughtSignature`，下一輪必須原樣送回，而且**簽章綁定模型** ——
+    迴圈全程鎖定同一個模型，換模型時從原始 `contents` 重來；
+    ③`functionResponse.response` 必須是 JSON **物件**，陣列或字串包成 `{ result }`（超過 6000 字元截斷並標記）。
+    400 一律把 body 讀出來記 log；body 含 `thought_signature` / `function` / `tool` 字樣時視為
+    `FatalError`（schema 問題，換模型沒用）。
+  - **收尾與時限**：最多 3 輪；到最後一輪或超過 `deadlineAt` 時加 `allowedFunctionNames` 強迫收尾。
+    `deadlineAt = event.timestamp + 45s`，以 **LINE 送出事件的時間**為準（排隊延遲要算進去），
+    每次 fetch 的 timeout 取 `min(25s, 剩餘時間)`。
+  - **OCR 路徑：維持 JSON mode**（`askGemini` + `OCR_RESPONSE_SCHEMA`）。
+    回應格式由 `responseSchema` 約束，prompt 不必手寫 JSON 範例。
+    注意 Gemini 的 schema 不支援 `additionalProperties`，所以「成員 → 金額」是以
+    `[{ member, amount }]` 陣列表達，解析後由 `toAmountMap()` 轉回程式內部慣用的 map。
+    語音轉錄與「重新閱讀收據」也走 `askGemini`。
 - **模型 fallback**: 依序嘗試多個模型。429（額度用盡）、404（模型下架）、400（不支援送出的設定）、
-  5xx、連線失敗與空回應都會換下一個，全部失敗才回覆額度提示。
+  5xx、連線失敗、逾時與空回應都會換下一個（`RetryableError`），全部失敗才回覆額度提示（`RATE_LIMIT:` 前綴）。
+  `FatalError`（schema 問題、金鑰不對）直接往外丟，不浪費額度重試。
   文字與 OCR 使用不同的模型優先序。
 - **寫入前的驗證**: AI 回傳的內容不會直接落地。
   - **成員名稱**：`resolveMember()` 做正規化與部分比對，把暱稱、大小寫差異對應回正式名稱；

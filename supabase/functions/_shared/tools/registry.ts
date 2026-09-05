@@ -9,9 +9,11 @@
 // ⚠️ execute 的回傳**一律是物件**：Gemini 的 functionResponse.response 不接受
 //    陣列或純字串，MCP 那邊也是包在物件裡回。陣列請包成 { expenses: [...] }。
 //
-// ⚠️ 這個檔案不會被 line-webhook import（LINE 直接呼叫底層函式），
-//    所以 package.json 的 check:functions 有把它列成獨立的進入點 ——
-//    不然沒人用到的工具永遠不會被 deno check 看到。
+// LINE 的文字路徑用得到這裡的**讀取**工具（`toGeminiFunctionDeclarations(READ_TOOL_NAMES)`
+// 與 `runTool`），寫入類的 create／update／delete 則刻意不公開給模型 ——
+// 那三支會直接落地，對話式管道一律要先出一張確認卡（見 line-webhook/gemini.ts）。
+// package.json 的 check:functions 仍把這個檔案列成獨立的進入點，
+// 免得沒人用到的那幾支工具漏掉 deno check。
 // ============================================================
 
 import {
@@ -27,6 +29,7 @@ import {
 } from "./expenses.ts"
 import { getBalance, getSettlementPlan } from "./balance.ts"
 import { getTrip } from "./trip.ts"
+import { optionalString, toExpenseInput, toExpensePatch, toListFilters } from "./args.ts"
 import {
   EXPENSE_INPUT_SCHEMA,
   EXPENSE_REF_SCHEMA,
@@ -35,68 +38,12 @@ import {
   NO_ARGS_SCHEMA,
   UPDATE_EXPENSE_SCHEMA,
 } from "./schemas.ts"
-import type { CurrencySource } from "../validate.ts"
 import type {
-  ExpenseInput,
   GeminiFunctionDeclaration,
-  ListExpensesFilters,
   ToolArgs,
   ToolContext,
   ToolDefinition,
 } from "./types.ts"
-
-// ============================================================
-// 參數的收斂
-//
-// args 是模型或 MCP 客戶端給的，schema 只是「請求」不是保證：
-// 少一個欄位、型別填錯、多塞一個都可能發生，所以每一個值都要自己收。
-// ============================================================
-
-function optionalString(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined
-  const text = String(value).trim()
-  return text ? text : undefined
-}
-
-function toExpenseInput(args: ToolArgs): ExpenseInput {
-  return {
-    description: String(args.description ?? ''),
-    amount: Number(args.amount) || 0,
-    currency: optionalString(args.currency),
-    currency_source: optionalString(args.currency_source) as CurrencySource | undefined,
-    date: optionalString(args.date),
-    category: optionalString(args.category),
-    payer_data: args.payer_data as ExpenseInput['payer_data'],
-    split_details: args.split_details as ExpenseInput['split_details'],
-  }
-}
-
-/** 修改用：**沒給的欄位必須留成 undefined**，那是「沿用原值」的訊號 */
-function toExpensePatch(args: ToolArgs): Partial<ExpenseInput> {
-  const patch: Partial<ExpenseInput> = {}
-  if (args.description !== undefined) patch.description = String(args.description)
-  if (args.amount !== undefined) patch.amount = Number(args.amount) || 0
-  if (args.currency !== undefined) patch.currency = String(args.currency)
-  if (args.currency_source !== undefined) patch.currency_source = String(args.currency_source) as CurrencySource
-  if (args.date !== undefined) patch.date = String(args.date)
-  if (args.category !== undefined) patch.category = String(args.category)
-  if (args.payer_data !== undefined) patch.payer_data = args.payer_data as ExpenseInput['payer_data']
-  if (args.split_details !== undefined) patch.split_details = args.split_details as ExpenseInput['split_details']
-  return patch
-}
-
-function toListFilters(args: ToolArgs): ListExpensesFilters {
-  return {
-    from: optionalString(args.from),
-    to: optionalString(args.to),
-    category: optionalString(args.category),
-    member: optionalString(args.member),
-    payer: optionalString(args.payer),
-    keyword: optionalString(args.keyword),
-    includeSettlements: args.include_settlements === true,
-    limit: args.limit === undefined ? undefined : Number(args.limit) || undefined,
-  }
-}
 
 // ============================================================
 // 工具

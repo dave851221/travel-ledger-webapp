@@ -107,15 +107,23 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
   往來都有具名型別（`line-webhook/types.ts`、`_shared/types.ts`），
   `supabase/functions/` 底下已經沒有任何 `no-explicit-any` warning
   （只剩 `guards.test.ts` 裡的 6 個）。
-- LINE Bot 尚未支援：以自然語言直接定位並修改／刪除既有支出（只能走清單按鈕或撤銷最近一筆）、
-  多品項收據拆帳、任意條件的支出查詢。
-  查詢已經好很多 —— 【全趟彙總】把總額、每人收支、各分類、逐日合計與最大金額
-  都先算好餵給 AI（M6、K12、K13）—— 但仍是「事先算好固定幾種切片」，
-  問到沒被涵蓋的角度（例如「某兩人之間的交易」）還是答不出來。
-  這些適合改用 Gemini function calling 一次解決，並與
-  [`MCP_SERVER_DESIGN.md`](MCP_SERVER_DESIGN.md) 的工具清單共用同一層實作。
+- ~~共用工具層~~ **已完成**：記帳的實際動作（驗證、寫入、更新、刪除、查詢、餘額）
+  收進 `supabase/functions/_shared/tools/`，LINE Bot 是它的第一個呼叫端，
+  MCP server 之後是第二個。由 `expenses.test.ts` / `registry.test.ts` 看守。
+- ~~LINE Bot 的自然語言修改／刪除、一句話多筆、任意條件查詢~~ **已完成**
+  （Feature G，見 [`LINE_SCENARIOS.md`](LINE_SCENARIOS.md) 第 14 章）：
+  文字路徑改用 Gemini function calling，模型可以自己呼叫 `list_expenses` / `get_balance` /
+  `get_settlement_plan` 查資料，並用 `propose_expense_update` / `propose_expense_delete`
+  提議修改或刪除（一律要使用者按確認卡才生效）；`propose_expenses` 一次最多 4 筆。
+  ⚠️ **尚未部署** —— Edge Function 要另外 `npm run fn:deploy`。
+- LINE Bot 尚未支援：**多品項收據拆帳**（一張收據拆成好幾筆，或指定某幾個品項給某個人；
+  現在只能靠「收據草稿 + 文字重新分帳」逐項講）。
+  LINE 的 `imageSet`（相簿多選被視為同一組）也還沒處理，多頁收據會變成多筆（G4）。
 - Webhook 目前整條同步處理到底，OCR 與**語音**路徑有超過 LINE replyToken 時效的風險
   （語音會先呼叫一次 Gemini 轉錄，再呼叫一次解析，是目前最慢的一條路）。
+  文字路徑的 AI 迴圈已經有 `deadlineAt`（事件時間 + 45 秒）會強迫收尾，
+  而且 reply 失敗會改 push 原本那組 messages，卡片不會丟失 —— 但那只是止血，
+  真正的解法還是把 webhook 非同步化（先回 200，處理完再 push）。
 
 ### 中期
 

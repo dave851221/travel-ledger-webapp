@@ -7,10 +7,12 @@
 
 - 為了「修正草稿」加的 `supersedePendingDrafts()` 把「連續記多筆」擋掉了（每送一張新卡，舊卡就失效）。
 - 為了擋「AI 假稱已刪除」加的 `detectRecordIntent()` 把自我介紹裡宣傳的「剛剛那筆改 500」攔到編輯清單去，永遠到不了 AI。
+  （那支函式已於 Feature G 移除 —— 它存在的前提「AI 不會改既有紀錄」已經不成立了。）
 
 以後改 Bot 邏輯前，先掃過相關章節；改完後逐條驗證。要加新功能，先在這裡加情境再動手。
 
 依據的程式版本：H1–H12、第 12 章的 Feature F、第 13 章的 T1–T4 都已實作完成（2026-09-04），
+第 14 章的 **Feature G（文字路徑改 Gemini function calling）已於 2026-09-05 完成，尚未部署**；
 第 10.2 節的 **M1–M19 已全部完成**（M2 隨 T2；M1/M3/M5–M8/M10–M13/M16–M19 於 2026-09-05；
 M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 文中提到的行號來自修正前的 `index.ts`，現在已經漂移，請一律以函式名與註解關鍵字為準。
@@ -39,15 +41,15 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | :--- | :--- | :--- |
 | P0 | 簽章驗證、取得發言者名稱、載入 `line_user_states`（含 pending 逾時清理、`last_active_at`） | `verifySignature`、`getChatMemberName`、`isPendingExpired` |
 | P0.5 | 被加進群組／聊天室 | `join` event → `BOT_SELF_INTRODUCTION` |
-| P1 | Postback（已綁定才處理） | `act: undo / del / save / cancel / cur` |
+| P1 | Postback（已綁定才處理） | `act: undo / del / upd / save / cancel / cur` |
 | P2 | 圖片訊息（已綁定才處理） | `ocrPrompt`、`OCR_RESPONSE_SCHEMA` |
 | P2.5 | 語音訊息（已綁定才處理；群組提及模式跳過） | `transcribeAudio` → 轉成文字後往下走 |
 | P3 | 群組觸發判斷 | `shouldProcess`、`isManagement`、`startsWithYoshi` |
 | P4 | 說明、純呼叫 | `HELP_KEYWORDS`、`cleanText === ''` |
 | P5 | 綁定與管理指令 | `ID:`、`取消綁定`、`斷開`、`模式:`、`設定?`、`設定:`、密碼驗證 |
-| P6 | 草稿的取消／修正，以及已存檔紀錄的編輯／刪除／撤銷攔截 | `getOutstandingDrafts`、`CANCEL_DRAFT_KEYWORDS`、`cancelDraft`、`detectRecordIntent`、`EDIT_LIST_KEYWORDS`、`DELETE_LIST_KEYWORDS`、`UNDO_KEYWORDS` |
+| P6 | 草稿的取消，以及已存檔紀錄的編輯／刪除清單、撤銷上一筆（**只認精確關鍵字**） | `getOutstandingDrafts`、`CANCEL_DRAFT_KEYWORDS`、`cancelDraft`、`EDIT_LIST_KEYWORDS`、`DELETE_LIST_KEYWORDS`、`UNDO_KEYWORDS` |
 | P7 | 快捷查詢（直接查 DB） | `今日支出`、`本週支出`、`本月支出`、`結算`、`旅程總覽` |
-| P8 | AI 核心 | `tripContext`（含【全趟彙總】與【尚未確認的草稿】）、`YOSHI_SYSTEM_INSTRUCTION`、`TEXT_RESPONSE_SCHEMA`（含 `corrects_draft`）、`getOutstandingDrafts`、`summarizeTripExpenses` |
+| P8 | AI 核心（Gemini function calling，見第 14 章） | `tripContext`（含【全趟彙總】與【尚未確認的草稿】）、`YOSHI_SYSTEM_INSTRUCTION`、`TEXT_TOOL_DECLARATIONS`、`runToolLoop`、`summarizeTripExpenses` |
 | P9 | 未綁定時的其他訊息 | 提示輸入 `ID:` |
 
 寫入前的共同防線（P2 與 P8 都會經過，全部在 `guards.ts`）：
@@ -112,7 +114,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | C5 | 中文數字與口語數字 | `三百`、`1千2`、`1.2k`、`兩萬五` | 正確換算成阿拉伯數字 | 🟡 靠 AI，未驗證 | P8 |
 | C6 | 小數金額 | `咖啡 4.5 美金` | 依 `precision_config` 保留位數 | ✅ | `DEFAULT_PRECISION` |
 | C7 | 描述本身含數字 | `7-11 55`、`2 杯咖啡 200` | 金額取 55／200，描述保留 | ✅ AI 處理（前端 quickAdd 有同樣規則） | P8 |
-| C8 | 一句話多筆 | `午餐 300 晚餐 500` | 出兩張卡 | ❌ schema 只允許一筆，AI 會合併或只取一筆 | `TEXT_RESPONSE_SCHEMA` |
+| C8 | 一句話多筆 | `午餐 300 晚餐 500` | 出兩張卡 | ✅ Feature G：`propose_expenses` 收的是陣列，一次最多 4 筆，每筆各自 nonce／pending／卡片，可分別確認或取消。超過 4 筆只出前 4 張並附一則說明 | P8 `propose_expenses` |
 | C9 | 英文或日文輸入 | `dinner 3000 yen`、`ラーメン 1200円` | 正常解析，描述可保留原文 | 🟡 靠 AI | P8 |
 | C10 | 純閒聊 | `今天好累` | 回 `chat`，不出卡片 | ✅ | P8 |
 | C11 | 超長文字 | 貼一大段行程 | 不崩潰；回覆超過 4900 字截斷 | ✅ | P8 `safeContent` |
@@ -202,7 +204,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | G19 | 確認存入 | 按「✅ 確認存入」 | `photo_urls` 存路徑 `expenses/{tripId}/{messageId}.jpg` | ✅ | P1 save |
 | G20 | 照片下載失敗 | LINE CDN 錯誤 | 回「處理圖片時發生錯誤」 | ✅ | P2 catch |
 | G21 | 同一張照片重傳 | 轉傳同一則圖片 | 新 messageId，視為新照片 | ✅ | — |
-| G22 | OCR 太慢超過 reply token 時效 | 大圖 + 模型慢 | 改用 push 補送 | 🟡 目前 reply 失敗會 push 一則錯誤文字，卡片本身丟失 | `replyMessage` fallback |
+| G22 | OCR 太慢超過 reply token 時效 | 大圖 + 模型慢 | 改用 push 補送 | ✅ 與 N5 同一個修正：reply 失敗改 push 原本那組 messages | `replyMessage` fallback |
 
 ---
 
@@ -259,10 +261,10 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | J3 | 撤銷群組裡別人記的 | B 說 `取消上一筆`，最近是 A 記的 | 允許，訊息標明「原由 A 記錄」 | ✅ 刻意設計 | P6 |
 | J4 | 刪除清單 | `刪除支出` | 列最近 8 筆，各一顆「🗑 刪除」 | ✅ 按鈕的刪除已改走 `deleteExpense`，**因此多了旅程範圍的保護**：切換旅程後按舊清單上的按鈕，只會回「這筆支出已不存在」，不會刪到別趟旅程的支出 | P6 `DELETE_LIST_KEYWORDS`、P1 del |
 | J5 | 編輯清單 | `編輯支出` | 列最近 6 筆，各一顆 LIFF「✏️ 編輯」 | ✅ 網址改為只帶 `id` 與 `u`（T2） | P6 `EDIT_LIST_KEYWORDS`、`replyEditPicker` |
-| J6 | 自然語言刪除／修改已存檔 | `把昨天那筆刪掉`、`那筆帳改成 800`、`剛才那個刪掉` | 攔下並列清單，不進 AI | ✅ **沒有未確認草稿時**才攔（有草稿時走 I1／I6）；受詞已含「那個／這個／剛剛／剛才／上一個／最近一筆」（T1） | `detectRecordIntent` + `getOutstandingDrafts` |
-| J7 | AI 假稱已刪除 | AI 回「已經幫您刪除了」 | 換成誠實說明 | ✅ | `claimsCompletedAction` |
-| J8 | 要改的不在最近 6／8 筆 | 一週前的支出 | 能翻頁或搜尋 | ❌ 只能去網頁。清單依日期與建立時間倒序，剛存的一定在第一列 | `replyEditPicker` |
-| J9 | 用描述定位 | `刪除昨天的拉麵` | 直接找到那筆 | ❌ 只會列清單 | — |
+| J6 | 自然語言刪除／修改已存檔 | `把昨天那筆刪掉`、`那筆帳改成 800`、`剛才那個刪掉` | 找到那一筆並出確認卡 | ✅ Feature G：路由層的 `detectRecordIntent` 攔截**已移除**，這類句子現在會進到 AI，由 `propose_expense_update`／`propose_expense_delete` 定位。有未確認草稿時模型仍會優先當成修正草稿（I1） | P8 `propose_expense_*` |
+| J7 | AI 假稱已刪除 | AI 回「已經幫您刪除了」 | 換成誠實說明 | ✅ 換成「我可以幫你提議修改或刪除，請告訴我是哪一筆」。regex 已收緊，不會誤殺「確認後就會修改好了」這種**未來式**說法（Feature G） | `claimsCompletedAction` |
+| J8 | 要改的不在最近 6／8 筆 | `上週那筆一蘭改成 1500` | 能搜尋 | ✅ Feature G：模型先呼叫 `list_expenses`（可依日期、分類、成員、關鍵字查，上限 50 筆）拿到 ref，再出「✏️ 修改預覽」卡。找不到唯一一筆就反問，不猜 | P8 `list_expenses` → `propose_expense_update` |
+| J9 | 用描述定位 | `刪除昨天的拉麵` | 直接找到那筆 | ✅ Feature G：出「🗑 確認刪除？」卡，按了才軟刪除（`act: 'del'` 帶 nonce 防連點）。對不到唯一一筆時反問 | P8 `propose_expense_delete` → P1 `del` |
 | J10 | 清單裡出現結清紀錄 | 網頁結清後 `編輯支出` | 結清紀錄不該出現 | ✅ 兩個清單都加了 `.not('is_settlement','is',true)`；`ExpenseModal` 也改為沿用原值 | P6 查詢、`ExpenseModal` |
 | J11 | LIFF 編輯舊支出後說 `取消上一筆` | 編輯三天前的支出 → `取消上一筆` | 應撤最近「新增」的 | ✅ M11 已修：`ExpenseModal` 改帶 `mode: 'update' \| 'insert'`，`liff-notify` 只有 insert 才寫 `saved`；更新的推播文字改成「✏️ 已透過 LIFF 更新」且不附「撤銷」按鈕 | `liff-notify`、`ExpenseModal` |
 | J12 | 刪除已刪除的 | 清單按兩次同一筆 | 第二次說「先前已經刪除了」 | ✅ 改由 `_shared/tools/expenses.ts` 的 `deleteExpense` 統一把關 | P1 del |
@@ -271,9 +273,9 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | J15 | 刪除清單裡的 LIFF 編輯已存支出 | 從清單開 LIFF 改金額 | UPDATE 而非 INSERT | ✅ payload 帶 `id` | `LiffEdit.decoded.id` |
 | J16 | 刪除後還原 | 網頁垃圾桶 | 24 小時內可還原 | ✅（垃圾桶時效依客戶端時間，ROADMAP #2） | 前端 |
 | J17 | 撤銷時支出已被網頁硬刪 | — | 回「找不到」而不是成功 | ✅ 兩處都先 SELECT 再決定回覆（查無 → 「找不到這筆支出」） | P1 undo、P6 |
-| J18 | 沒草稿時用「那個」「剛剛」指稱要改 | 存檔後 `剛剛那個改250` | 列編輯清單，**不可以**多記一筆 | ✅ T1 已修，兩層防線：①`detectRecordIntent` 的受詞加了指示代名詞，路由層就攔下；②真的進了 AI 且它回 `expense` 時，若沒有任何未確認草稿、沒填 `corrects_draft`、`mentionsEditingExisting()` 又為 true，改列清單並加註「如果其實是要新記一筆，請不要用『改』來描述」 | `guards.ts`、P6、P8、`replyEditPicker` |
+| J18 | 沒草稿時用「那個」「剛剛」指稱要改 | 存檔後 `剛剛那個改250` | 列編輯清單，**不可以**多記一筆 | ✅ T1 已修。⚠️ Feature G 之後**只剩第二道防線**：路由層的 `detectRecordIntent` 已移除（那類句子現在該進 AI 由 `propose_expense_update` 處理），所以擋的是「模型回了 `propose_expenses`、沒有任何未確認草稿、沒填 `corrects_draft`、`mentionsEditingExisting()` 又為 true」——改列清單並加註「如果其實是要新記一筆，請不要用『改』來描述」 | `guards.ts`、P8、`replyEditPicker` |
 | J19 | 改完再按同一顆編輯看到新資料 | 從清單開 LIFF 改成 800 存檔 → 回 LINE 再按同一列的「✏️ 編輯」 | 表單顯示 800 | ✅ T2 已修：`LiffEdit` 每次開啟都用 `id` 直接查 DB。找不到或 `deleted_at` 非空就顯示「這筆支出已被刪除或不存在」 | `LiffEdit` |
-| J20 | 工具層改支出時換幣別 | `update_expense` 把 USD 100.50 改成 JPY | 金額與分帳依**新幣別的精度**重算（100.50 → 101，分攤重新湊回 101） | ⚠️ 已知差異：網頁的 `ExpenseModal` 換幣別時只換標籤、不改精度。工具層這樣做是為了讓 Σ 一定等於總額；目前只有 `_shared/tools/registry.ts` 的 `update_expense` 會走到，LINE 還沒有入口（P3 才接） | `prepareExpenseUpdate` |
+| J20 | 工具層改支出時換幣別 | `update_expense` 把 USD 100.50 改成 JPY | 金額與分帳依**新幣別的精度**重算（100.50 → 101，分攤重新湊回 101） | ⚠️ 已知差異：網頁的 `ExpenseModal` 換幣別時只換標籤、不改精度。工具層這樣做是為了讓 Σ 一定等於總額；LINE 的「✏️ 修改預覽」卡（Feature G）與工具層的 `update_expense` 都會走到 | `prepareExpenseUpdate` |
 
 ---
 
@@ -339,7 +341,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | N2 | Gemini 5xx／連線失敗／404／400 | — | 換下一個模型 | ✅ | `askGemini` |
 | N3 | Gemini 回空內容 | 安全機制擋下 | 換模型 | ✅ | `askGemini` |
 | N4 | AI 回的 JSON 壞掉 | — | 回「AI 處理時發生錯誤」 | ✅ | P8 catch |
-| N5 | reply token 過期 | 處理超過 1 分鐘 | 改 push | 🟡 只 push 錯誤文字，原訊息丟失 | `replyMessage` |
+| N5 | reply token 過期 | 處理超過 1 分鐘 | 改 push | ✅ Feature G：改為 push **原本那組 messages**，卡片不會再丟失（以前 push 的是一段英文錯誤文字）。會計入推播額度，但免費方案下這是罕見路徑 | `replyMessage` |
 | N6 | 貼圖、位置、檔案、影片 | — | 跳過不回 | ✅ | P2.5 之後 `[SKIP]` |
 | N14 | 語音記帳 | 對機器人講「晚餐三百」 | 轉成文字後走與打字完全相同的流程 | ✅ M15 已修：下載 m4a → `inlineData` 交給 Gemini 逐字轉錄 → 當成使用者打的字往下走，所以快捷指令、草稿修正、取消也都能用講的。🟡 **群組的提及模式不處理語音**（語音無法 @提及，全部轉錄會吃掉額度），要用請切「模式:全回應模式」 | P2.5 `transcribeAudio` |
 | N15 | 語音聽不清楚或太長 | 雜音、空白錄音、超過 10MB | 回一句提示而不是靜默 | ✅ 空轉錄回「我聽不太清楚」；超過 10MB 回「這段語音太長了」；額度用盡回 `RATE_LIMIT_MSG` | P2.5 |
@@ -355,10 +357,16 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 
 ## 9. 目前的硬性限制（改邏輯時不要忘記）
 
-- **AI 沒有修改或刪除已存檔紀錄的能力**，只能提出新草稿、修正未存檔草稿、查詢。所有既有紀錄的異動都走清單按鈕或 LIFF。
-- **AI 只看得到最近 10 筆支出與最近 8 輪對話**（`CHAT_HISTORY_TURNS`）。
-  近期支出清單是**有編號、無網址**的格式（`#3 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`）；
-  `analyze_photo` 要 AI 回的是那個編號（`expense_ref`），照片一律由程式自己找。
+- **AI 可以「提議」修改或刪除已存檔的紀錄，但不能自己動手**（Feature G）：
+  它只拿得到唯讀工具（`list_expenses` / `get_balance` / `get_settlement_plan`）與 `propose_*`，
+  真正的 UPDATE／軟刪除發生在使用者按下卡片按鈕之後（`act: 'upd'` / `act: 'del'`）。
+  工具層的 `create_expense` / `update_expense` / `delete_expense` **刻意不公開給模型**。
+  `claimsCompletedAction` 仍在把關「已經幫你刪掉了」這種話。
+- **AI 的 context 只放最近 10 筆支出與最近 8 輪對話**（`CHAT_HISTORY_TURNS`），
+  但它可以呼叫 `list_expenses` 自己去查更早的（Feature G）。
+  近期支出清單是**有 ref、無網址**的格式（`ref=1a2b3c4d 2026-09-04 Lawson (便利商店) 1280 JPY [餐飲] 📷×2`）；
+  ref 是 uuid 前 8 碼，`propose_expense_update` / `propose_expense_delete` / `analyze_receipt`
+  指名哪一筆用的都是它，照片與資料列一律由程式自己找（`resolveExpenseRef`，**唯一命中才算**）。
 - **金額類的問題不靠 AI 算術**：`summarizeTripExpenses()` 在伺服器端用 Decimal 算好
   各幣別合計、每人已付／應付／淨額、各分類合計、筆數、日期範圍、
   **逐日合計（最多 30 天，超過只留頭尾）**與**金額最大的 3 筆**，
@@ -369,7 +377,8 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 - **旅程時區存在 `trips.timezone`**（IANA 字串）。沒設定才從幣別推測 ——
   幣別不等於所在地，主幣 TWD 的日本旅程猜出來是台北時間（M4）。
 - **語音先轉文字再走原本的流程**（M15）。群組的提及模式不處理語音。
-- **一句話只能產生一筆**（schema 是單一 `data` 物件）。
+- **一句話最多產生 4 筆**（`propose_expenses` 的陣列上限，`MAX_PROPOSED_EXPENSES`）。
+  上限來自 LINE 一次 reply 只能送 5 則訊息 —— 要留一則給警告與說明文字。
 - **Postback data 上限 300 bytes**；LINE `uri` action 上限 1000 字；文字訊息上限 5000 字（程式取 4900）。
   LIFF 編輯網址已改為只帶 `id`／`n` 的間接法（T2），長度固定，不再受支出內容影響。
 - **reply token 只能用一次、時效約一分鐘**；之後只能 push（會計入推播額度）。
@@ -736,3 +745,117 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 
 T3 → T1 → T4 → T2。前三個只動 Edge Function，可以一起部署驗證；T2 牽涉前端與 Edge Function 要同時上線，最後做。
 每個 T 做完都要把本文件對應的情境列更新（現況欄與新增的情境），並跑四關。
+
+---
+
+## 14. Feature G：文字路徑改用 Gemini function calling
+
+> **狀態（2026-09-05）**：✅ 已實作，尚未部署（Edge Function 要另外 `npm run fn:deploy`）。
+> 迴圈在 [`_shared/gemini.ts`](../supabase/functions/_shared/gemini.ts)（由 `gemini.test.ts` 看守），
+> 函式清單在 `line-webhook/gemini.ts`，分派在 `handlers/ai-text.ts`。
+> **OCR 路徑（`handlers/image.ts`）維持 JSON mode 不動。**
+
+### 動機
+
+改版前文字路徑是「一次呼叫、回一個 JSON 物件」（`TEXT_RESPONSE_SCHEMA`），
+形狀決定了能力上限，於是有三個一直修不掉的缺口：
+
+- **J8／J9**：模型只看得到最近 10 筆，指不到更早的支出，也沒有任何「改／刪既有紀錄」的動作可以回，
+  只能列一份最近 6 筆的清單讓使用者自己點。使用者說「刪除昨天的拉麵」，得到的是一張清單。
+- **C8**：`data` 是單一物件，「午餐 300 晚餐 500」只能合併成一筆或漏掉一筆。
+- **K8–K13**：查詢靠【全趟彙總】事先算好幾種切片，問到沒被涵蓋的角度（某兩人之間的往來、某個關鍵字）就答不出來。
+
+三者的共同解法是同一個：**讓模型自己決定要查什麼、提議做什麼**，
+而工具層（`_shared/tools/`，P2 已完成）本來就是為了這件事寫的 —— MCP 之後會用同一份。
+
+### 設計
+
+**對模型公開的函式**（`line-webhook/gemini.ts` 的 `TEXT_TOOL_DECLARATIONS`）
+
+| 名稱 | 種類 | 參數 schema | 效果 |
+| :--- | :--- | :--- | :--- |
+| `list_expenses` | 讀 | `LIST_EXPENSES_SCHEMA` | 直接呼叫工具層，結果以 `functionResponse` 回給模型 |
+| `get_balance` | 讀 | `GET_BALANCE_SCHEMA` | 同上 |
+| `get_settlement_plan` | 讀 | `NO_ARGS_SCHEMA` | 同上 |
+| `propose_expenses` | 終結 | `PROPOSE_EXPENSES_SCHEMA`（`expenses: ExpenseInput[]` 1–4 筆、`corrects_draft?`） | 一到四張「🤖 AI 記帳預覽」卡 |
+| `propose_expense_update` | 終結 | `UPDATE_EXPENSE_SCHEMA` | 「✏️ 修改預覽」卡 |
+| `propose_expense_delete` | 終結 | `EXPENSE_REF_SCHEMA` | 「🗑 確認刪除？」卡 |
+| `analyze_receipt` | 終結 | `ANALYZE_RECEIPT_SCHEMA` | 沿用既有的收據重新閱讀流程 |
+| `reply` | 終結 | `REPLY_SCHEMA` | 一般回覆（取代舊的 `type: chat`） |
+
+`propose_*` 用的就是工具層 `schemas.ts` 裡那幾份 schema **本身**，MCP 之後要「先提議再確認」不必再寫一份。
+寫入類的 `create_expense` / `update_expense` / `delete_expense` 在 registry 裡，
+但**刻意不公開給模型** —— 那三支按下去就落地了，LINE 這條路一律要經過使用者按確認。
+`get_trip` 也不給（旅程設定已經在 context 裡）。
+
+**迴圈**（`runToolLoop`，`_shared/gemini.ts`）
+
+1. `toolConfig.functionCallingConfig.mode = 'ANY'`，強迫每一輪都回 function call；**不帶 `responseMimeType`**。
+2. 外層對模型清單逐一嘗試，**內層迴圈全程用同一個模型**；任一輪遇到可重試錯誤（429／404／5xx／逾時／空回應）
+   就換下一個模型並從**原始** contents 重來。
+3. 模型回的 `candidate.content` **原樣** push 回 contents。
+4. 一輪裡只有讀取工具 → 依同順序執行，組成一個 `user` turn 的多個 `functionResponse`；
+   出現任一終結函式 → 結束。同輪同時有 `propose_*` 與 `reply` 時，`reply.text` 當附帶文字一起帶回去（不丟）。
+5. 沒有任何 `functionCall`（安全機制或 MAX_TOKENS）→ 把 text parts 串起來當 `reply`；連文字都沒有才算失敗。
+6. `maxRounds`（預設 3）或超過 `deadlineAt` 時，最後一輪加 `allowedFunctionNames: terminalNames` 強迫收尾。
+7. `deadlineAt = event.timestamp + 45s` —— 以 **LINE 送出事件的時間**為準（`ctx.eventTimestamp`），
+   排隊延遲也要算進去；每次 fetch 的 timeout 取 `min(25s, 剩餘時間)`。
+
+**三條照做的 API 限制**（都已查證，違反的症狀都很難看懂）
+
+- `generateContent` 不能同時帶 `tools` 與 `responseMimeType: application/json`（Gemini 3 以外直接 400）。
+- Gemini 3 系列的 `functionCall` part 帶 `thoughtSignature`，下一輪必須原樣送回，而且**簽章綁定模型** —— 換模型一定要重來。
+- `functionResponse.response` 必須是 JSON **物件**，陣列或字串要包成 `{ result }`（超過 6000 字元就截斷並標記 `truncated`）。
+
+400 一律把 body 讀出來 `console.error`；body 含 `thought_signature` / `function` / `tool` 字樣時視為
+`FatalError`（schema 問題，換模型沒用），直接往外丟。
+
+**卡片、pending 列與 postback**
+
+- `line_chat_history` 的 `pending` 列多了 `kind`：空或 `'expense'`＝記帳草稿，`'update'` / `'delete'`＝提議卡（另帶 `eid`）。
+  ⚠️ `getOutstandingDrafts()` **只回 `expense`** —— 提議卡不是草稿，被當成草稿的話使用者打「取消」會取消到它，
+  AI 也會拿它的 nonce 去填 `corrects_draft`。掃描上限從 5 提到 10。
+- 「✏️ 修改預覽」卡列出 `prepareExpenseUpdate()` 算出的 `changes`（欄位：前 → 後），
+  按鈕「✅ 確認修改」`{act:'upd', n}`、「🌐 網頁編輯」（`buildEditLiffUrl`，開的是**修改前**的原內容，卡上有小字說明）、「❌ 取消」。
+- `act: 'upd'`：nonce 上鎖（`action_type: 'update'`）→ 重新讀那一筆（`resolveExpenseRef`，不存在／已刪除就 `releaseNonce` 並回錯）
+  → `commitExpenseUpdate` → 回「✏️ 已修改：描述（改了哪些欄位）」。
+  **不寫 `saved` 列**，與 `liff-notify` 的 `mode === 'update'` 一致（J11／M11）。
+- 「🗑 確認刪除？」卡的按鈕帶 `{act:'del', eid, n}`；`del` 有 `n` 就以 `action_type: 'delete'` 上鎖，
+  舊的「刪除支出」清單卡沒有 `n`，照舊處理。
+- 取消提議卡走既有的 `act: 'cancel'`：沒有照片可刪，只上鎖並回「已取消」。
+
+**路由層**
+
+- 移除 `detectRecordIntent()`（函式與測試一併刪除）—— 那道攔截的存在正是為了補「AI 不會改既有紀錄」，
+  現在它會把該進 AI 的句子擋在門外。精確關鍵字（`今日支出`、`刪除支出`、`編輯支出`、`取消上一筆`…）維持不進 AI。
+- 保留 `mentionsEditingExisting()` 當第二道防線（T1）：模型回 `propose_expenses`、沒有 `corrects_draft`、
+  現場也沒有草稿，而句子像在改既有紀錄 → 仍然改列 `replyEditPicker`。
+- 保留 `claimsCompletedAction()`，只套在 `reply` 上；替換文字改成「我可以幫你提議修改或刪除，請告訴我是哪一筆」。
+  regex 收緊成只認過去式，`確認後就會修改好了` 這種**我們要模型講的話**不會被誤殺。
+- `pickExpenseByRef()` **保留**：全庫找收據時那次 `#編號` 的 JSON mode 選擇呼叫還在用。
+
+### 影響到的情境
+
+- **改為 ✅**：C8（一句話多筆）、J6／J8／J9（自然語言定位並修改／刪除）、N5／G22（reply 失敗改 push 原訊息）。
+- **加強**：K8–K13（彙總沒涵蓋的角度可以自己查）、J7（假完成宣稱的替換文字與 regex）。
+- **不變**：G1–G22 的 OCR 路徑（仍是 JSON mode）、I1–I12 的草稿修正（改用 `propose_expenses` + `corrects_draft`，行為相同）、
+  H1–H18 的卡片按鈕、L1–L15 的群組行為。
+
+### 已知差異與風險
+
+- **幣別變更時的精度重算**：`prepareExpenseUpdate()` 會依**新幣別的精度**重算金額與分帳（USD 100.50 → JPY 101），
+  網頁的 `ExpenseModal` 換幣別時只換標籤、不改精度。這是刻意的（工具層要保證 Σ 等於總額），
+  但兩邊行為不同，見 J20。現在 LINE 也走得到這條路了。
+- **`del` 的旅程範圍**：`deleteExpense()` 一律加 `trip_id` 條件，所以切換旅程後按舊卡片上的
+  「🗑 刪除」只會回「這筆支出已不存在」，不會刪到別趟旅程的支出（J4）。提議卡同理。
+- **提議卡不會因為切換旅程而失效**：`supersedeAllDrafts()` 走 `getOutstandingDrafts()`，
+  而那支已經濾掉 `kind` 非 `expense` 的列。不過 `act: 'upd'` / `'del'` 都以 pending 列自己的 `tid`
+  為範圍去 `resolveExpenseRef`，動不到別趟旅程的資料，與 `save` 的語意一致。
+- **小模型在 ANY 模式下可能亂叫 `propose_*`**：`mentionsEditingExisting` 的防線仍在，
+  而且所有提議都要使用者按確認才生效，最壞情況是多看到一張卡片。
+
+### 驗證
+
+1. `npm run lint && npm test && npm run check:functions && npm run build`。
+2. 真機回歸（部署後）：C8、J6、J8、J9、K8–K13、I1／I7／I9／I10、H1／H8、T1、G3。
+3. 特別看 Supabase 函式日誌有沒有 400 —— `thought_signature` 相關的 400 代表換模型時沒有從原始 contents 重來。

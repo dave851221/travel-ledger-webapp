@@ -23,6 +23,12 @@ export interface EventContext {
   /** 實際發言的人。群組事件也有，除非對方沒加機器人好友。 */
   speakerUserId: string | null
   /**
+   * LINE 送出這則事件的時間（epoch ms）。
+   * ⚠️ 不是函式啟動的時間 —— replyToken 的一分鐘時效是從這一刻起算的，
+   *    AI 迴圈的 deadline 必須以它為準，不然排隊等了 20 秒的事件會誤以為還有滿滿一分鐘。
+   */
+  eventTimestamp: number
+  /**
    * 傳訊者的顯示名稱，抓不到時是「未知」。
    * ⚠️ 一對一也要有：AI 靠它把「我付的」對應到成員（H9）。
    */
@@ -63,6 +69,8 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
   // 只有 message / postback / join 會走到需要回覆的分支，那三種一定帶 replyToken；
   // 其餘事件拿到空字串也不會被用到。
   const replyToken = (event as { replyToken?: string }).replyToken ?? ''
+  // LINE 一律會帶 timestamp；沒有的話只能退回「現在」，那等於假設沒有排隊延遲
+  const eventTimestamp = Number(event.timestamp) || Date.now()
   const sourceId = event.source.groupId || event.source.roomId || event.source.userId || ''
   const sourceType = event.source.type
   const isGroup = sourceType !== 'user'
@@ -134,6 +142,7 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
     isGroup,
     replyToken,
     speakerUserId,
+    eventTimestamp,
     memberName,
     speakerLabel,
     userState: userState as UserStateRow,

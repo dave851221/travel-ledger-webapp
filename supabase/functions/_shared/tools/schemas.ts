@@ -102,3 +102,50 @@ export const GET_BALANCE_SCHEMA: JsonSchema = {
   },
   required: [],
 }
+
+// ============================================================
+// 「提議」類的 schema —— 給對話式管道（LINE）用
+//
+// 與上面的差別只在「誰按下確認」：MCP 的 create／update／delete_expense 是
+// 直接落地，LINE 這邊一律先出一張卡片，使用者按了才寫進資料庫。
+// 內容欄位刻意共用同一份 schema，未來 MCP 若也要「先提議再確認」就不必再寫一份。
+// ============================================================
+
+/** 一句話可以記好幾筆。上限是 LINE 一次 reply 只能送 5 則訊息（要留一則放說明）。 */
+export const MAX_PROPOSED_EXPENSES = 4
+
+export const PROPOSE_EXPENSES_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    expenses: {
+      type: 'array',
+      description: `這句話要記的支出，1 到 ${MAX_PROPOSED_EXPENSES} 筆。「午餐 300 晚餐 500」是兩筆，一次全部回傳。`,
+      items: EXPENSE_INPUT_SCHEMA,
+    },
+    corrects_draft: {
+      type: 'string',
+      description: '若這句話是在修正某張尚未確認的草稿，填該草稿的 nonce；否則不要填',
+    },
+  },
+  required: ['expenses'],
+}
+
+export const ANALYZE_RECEIPT_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    expense_ref: {
+      type: 'string',
+      description: '要重新閱讀收據的那一筆的 ref（8 碼）。不確定是哪一筆就不要填，系統會自己去全庫找',
+    },
+    question: { type: 'string', description: '使用者想知道的事情，例如「買了什麼」「幫我翻譯品項」' },
+  },
+  required: ['question'],
+}
+
+export const REPLY_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    text: { type: 'string', description: '要回給使用者的繁體中文訊息。條列式、簡短，適合在手機上閱讀' },
+  },
+  required: ['text'],
+}

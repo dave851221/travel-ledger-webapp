@@ -78,6 +78,7 @@ export interface PostbackEvent {
   replyToken: string
   source: EventSource
   postback: { data: string; params?: Record<string, string> }
+  timestamp?: number
 }
 
 /** 被加進群組／聊天室（M19）。回一段自我介紹，不然機器人進來之後一片安靜。 */
@@ -85,6 +86,7 @@ export interface JoinEvent {
   type: 'join'
   replyToken: string
   source: EventSource
+  timestamp?: number
 }
 
 /** 收得到但這支函式不處理的事件。列出來是為了讓 WebhookEvent 是個真的聯集。 */
@@ -93,6 +95,7 @@ export interface IgnoredEvent {
     | 'unsend' | 'videoPlayComplete' | 'beacon' | 'accountLink' | 'things'
   replyToken?: string
   source: EventSource
+  timestamp?: number
 }
 
 export type WebhookEvent = MessageEvent | PostbackEvent | JoinEvent | IgnoredEvent
@@ -148,7 +151,7 @@ export interface DraftExpense {
  */
 export interface PostbackData {
   /** 新版動作 */
-  act?: 'undo' | 'cur' | 'del' | 'save' | 'cancel'
+  act?: 'undo' | 'cur' | 'del' | 'upd' | 'save' | 'cancel'
   /** 舊版動作（save_expense / cancel） */
   action?: string
   /** nonce（新版短鍵） */
@@ -172,11 +175,26 @@ export interface PostbackData {
   trip_id?: string
 }
 
-/** line_chat_history 的 `pending` 列，content 存的就是這個 JSON。 */
+/**
+ * line_chat_history 的 `pending` 列，content 存的就是這個 JSON。
+ *
+ * `kind` 決定按下確認會發生什麼事：
+ *   `expense`（或沒有這個欄位，舊列都是這樣）→ 新增一筆，走 `act: 'save'`
+ *   `update` → 把 `eid` 那一筆改成 `exp` 的內容，走 `act: 'upd'`
+ *   `delete` → 軟刪除 `eid` 那一筆，走 `act: 'del'`
+ *
+ * ⚠️ 只有 `expense` 算「草稿」：update／delete 的列不可以被
+ *    `getOutstandingDrafts()` 撈出來，否則使用者打「取消」會取消到一張
+ *    他根本沒在看的修改卡，AI 也會拿它的 nonce 當 `corrects_draft`。
+ */
 export interface PendingDraft {
   /** nonce */
   n: string
-  exp: DraftExpense
+  kind?: 'expense' | 'update' | 'delete'
+  /** 要寫進去的內容。`delete` 沒有內容可寫，所以是選填。 */
+  exp?: DraftExpense
+  /** 要修改或刪除的既有支出 id（kind 為 update／delete 時才有） */
+  eid?: string
   /** 收據 photo id 或 Storage 路徑 */
   p?: string[]
   /** 這張草稿屬於哪個旅程 —— 換旅程後舊草稿必須失效，靠的就是它（M13） */
@@ -221,16 +239,15 @@ export interface SavedExpenseEntry {
 // Gemini
 // ============================================================
 
-export interface GeminiTextPart { text: string }
-export interface GeminiInlineDataPart {
-  inlineData: { mimeType: string; data: string }
-}
-export type GeminiPart = GeminiTextPart | GeminiInlineDataPart
-
-export interface GeminiContent {
-  role: 'user' | 'model'
-  parts: GeminiPart[]
-}
+// 往來的資料形狀（含 functionCall／functionResponse）定義在 _shared/gemini.ts ——
+// 那一層不碰 Deno.env，vitest 才測得動 function calling 迴圈。這裡原樣轉出，
+// 讓 line-webhook 這邊的 import 路徑不變。
+export type {
+  GeminiContent,
+  GeminiInlineDataPart,
+  GeminiPart,
+  GeminiTextPart,
+} from "../_shared/gemini.ts"
 
 /**
  * AI 回傳的支出內容。
@@ -267,19 +284,6 @@ export type ExpenseDraft = {
   payer_data: AmountMap
   split_details: AmountMap
   photo_ids?: string[]
-}
-
-/** 文字對話的回應：記帳、聊天／查詢，或請系統重新分析某張收據 */
-export interface TextResponse {
-  type: 'expense' | 'chat' | 'analyze_photo'
-  data?: AiExpenseData
-  /** type 為 chat 時的回覆內容 */
-  content?: string
-  /** analyze_photo 時的支出編號，例如 "#3" */
-  expense_ref?: string
-  question?: string
-  /** 這句話在修正哪一張尚未確認的草稿（填該草稿的 nonce） */
-  corrects_draft?: string
 }
 
 /** 收據 OCR 的回應 */

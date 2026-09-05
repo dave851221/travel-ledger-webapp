@@ -20,8 +20,11 @@ export interface OutstandingDraft {
   tripId: string
 }
 
+/** 一次看多少張 pending 卡。修改／刪除的確認卡也佔位子，所以比原本的 5 張寬鬆。 */
+const OUTSTANDING_SCAN_LIMIT = 10
+
 /**
- * 取出這個聊天目前「還沒被處理」的記帳草稿（最新的在前，最多 5 張）。
+ * 取出這個聊天目前「還沒被處理」的**記帳**草稿（最新的在前）。
  *
  * 「還沒被處理」＝ nonce 不在 line_processed_actions 裡，
  * 也就是使用者既沒按確認存入、也沒按取消，那張卡片還等在聊天室裡。
@@ -29,6 +32,10 @@ export interface OutstandingDraft {
  * 以前只找「有收據照片」的那一張，因為唯一的用途是逐項重新分帳。
  * 現在還要用來判斷「剛剛那筆改 500」「取消」指的是哪一張卡片，
  * 所以一律回傳，帶不帶照片由呼叫端自己篩。
+ *
+ * ⚠️ **只回 `kind` 為空或 `expense` 的列**。修改／刪除的確認卡也存在同一張表，
+ *    但它們不是草稿：被當成草稿的話，使用者打「取消」會取消到一張修改卡，
+ *    AI 也會拿它的 nonce 去填 `corrects_draft`，接著整張卡就無聲失效了。
  */
 export async function getOutstandingDrafts(sourceId: string): Promise<OutstandingDraft[]> {
   const { data: rows } = await supabase.from('line_chat_history')
@@ -36,7 +43,7 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
     .eq('line_user_id', sourceId)
     .eq('role', 'pending')
     .order('created_at', { ascending: false })
-    .limit(5)
+    .limit(OUTSTANDING_SCAN_LIMIT)
   if (!rows || rows.length === 0) return []
 
   const candidates: OutstandingDraft[] = []
@@ -44,7 +51,8 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
     try {
       const parsed = JSON.parse(row.content)
       const photoIds = Array.isArray(parsed.p) ? parsed.p : []
-      if (parsed.n) {
+      const kind = parsed.kind ?? 'expense'
+      if (parsed.n && kind === 'expense') {
         candidates.push({ nonce: parsed.n, exp: parsed.exp, photoIds, tripId: parsed.tid })
       }
     } catch { /* skip malformed */ }
@@ -151,6 +159,12 @@ export async function storePendingExpense(sourceId: string, nonce: string, data:
   })
 }
 
+/**
+ * 依 nonce 取回一張 pending 卡的完整內容。
+ *
+ * ⚠️ 與 `getOutstandingDrafts()` 不同，這裡**不**過濾 `kind` ——
+ *    `act: 'upd'` 與 `act: 'del'` 要靠它讀回修改／刪除卡的 `eid` 與 `exp`。
+ */
 export async function getPendingExpense(sourceId: string, nonce: string): Promise<PendingDraft | null> {
   const { data } = await supabase.from('line_chat_history')
     .select('content')

@@ -38,12 +38,13 @@ export async function replyMessage(replyToken: string, messages: OutgoingMessage
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[LINE] Reply Error: ${errorText}`);
+    // reply 失敗最常見的原因是 replyToken 過期（處理超過一分鐘，OCR 與語音都可能）。
+    // ⚠️ 改用 push 補送**原本那組 messages**，不要送一段錯誤文字 ——
+    //    以前這裡送的是錯誤訊息，於是使用者辛苦等來的記帳卡片整張消失，
+    //    只看到一串 LINE 的英文錯誤（N5、G22）。push 會計入推播額度，
+    //    但免費方案下這是罕見路徑，弄丟卡片的代價大得多。
     if (to) {
-      await fetch('https://api.line.me/v2/bot/message/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
-        body: JSON.stringify({ to, messages: [{ type: 'text', text: `⚠️ 訊息發送失敗：\n${errorText}` }] }),
-      })
+      await pushMessage(to, messages)
     }
   }
 }

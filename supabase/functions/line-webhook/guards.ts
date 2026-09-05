@@ -44,45 +44,26 @@ export {
 } from "../_shared/validate.ts"
 export type { CurrencySource, MutableExpense, TripDefaults } from "../_shared/validate.ts"
 
-/**
- * 判斷使用者是不是想刪除或修改支出。
- *
- * 這是純粹的「語意判斷」，不負責決定要不要攔截 —— 攔或不攔由路由層決定，
- * 因為同一句「剛剛那筆改 500」在有草稿與沒草稿時該走完全不同的路：
- *   有草稿 → 交給 AI 修正那張草稿
- *   沒草稿 → 列出已存檔的紀錄讓使用者點選（AI 沒有修改既有紀錄的能力）
- *
- * 要求同時出現動詞與受詞，避免「改天再說」「取消行程」這類誤判。
- */
-// 受詞不只有「那筆」這種正式說法。真機測試回報「剛剛那個改250」（T1）——
-// 使用者講的是同一件事，卻因為說成「那個」而整句漏掉，被當成一筆全新的支出記進去。
-// 指示代名詞與時間指稱都要算受詞；把關的是下面的動詞，不是這裡。
-const RECORD_NOUN =
-  /(支出|花費|帳|紀錄|記錄|這筆|那筆|上一筆|上上一筆|那個|這個|剛剛|剛才|上一個|前一個|最後一筆|最近一筆|最新一筆)/
-const DELETE_VERB = /(刪除|刪掉|刪了|移除|拿掉|去掉)/
 // 「改 500」「改500」這種「改 + 數字」是最常見的說法，必須涵蓋。
 // 不收單獨的「改」，否則「這筆帳我改天再處理」「剛剛那個改天再說」會被誤判。
 const EDIT_VERB = /(修改|編輯|更改|改成|改為|改到|改一下|改\s*\d)/
 /** 「這句話在講已經記過的東西不對」的其他說法 */
 const CORRECTION_HINT = /(不對|錯了|打錯|記錯|更正)/
 
-export function detectRecordIntent(text: string): 'delete' | 'edit' | null {
-  if (!RECORD_NOUN.test(text)) return null
-  if (DELETE_VERB.test(text)) return 'delete'
-  if (EDIT_VERB.test(text)) return 'edit'
-  return null
-}
-
 /**
  * 「這句話聽起來是想改某筆東西」的寬鬆判斷 —— 不要求受詞。
  *
- * 用途與 detectRecordIntent 不同，是 P8 的第二道防線（T1）：
- * AI 回了 type: expense，但如果現場沒有任何未確認的草稿、它也沒填 corrects_draft，
- * 而使用者這句話明明是在講「改」，那它多半是把「剛剛那個改250」當成新支出了 ——
- * 照著出卡片就會憑空多記一筆。這種時候改列編輯清單。
+ * P8 的防線（T1）：模型呼叫了 propose_expenses，但如果現場沒有任何未確認的草稿、
+ * 它也沒填 corrects_draft，而使用者這句話明明是在講「改」，
+ * 那它多半是把「剛剛那個改250」當成新支出了 —— 照著出卡片就會憑空多記一筆。
+ * 這種時候改列編輯清單。
  *
- * 刻意比 detectRecordIntent 寬鬆（不需要受詞），因為到這一步已經知道
- * 「沒有草稿可以修」，誤判的代價只是多看到一張清單，比重複記帳輕得多。
+ * ⚠️ 路由層原本還有一道 `detectRecordIntent()` 把這類句子攔在 AI 之前，
+ *    改用 function calling 之後那道**刻意移除**了 —— 現在「刪除昨天的拉麵」
+ *    要進得了 AI，模型才有機會用 propose_expense_delete 直接定位那一筆。
+ *
+ * 刻意寬鬆（不需要受詞）：到這一步已經知道「沒有草稿可以修」，
+ * 誤判的代價只是多看到一張清單，比重複記帳輕得多。
  */
 export function mentionsEditingExisting(text: string): boolean {
   if (!text) return false
@@ -136,12 +117,27 @@ export const CANCEL_DRAFT_KEYWORDS = [
 ]
 
 /**
- * AI 有時會回「已經幫您刪除了」「我已經修改好了」，但它根本做不到 ——
- * 這種假訊息比沒有功能更糟，使用者會以為帳已經改掉了。
- * 送出前先攔下來。
+ * AI 有時會回「已經幫您刪除了」「我已經修改好了」，但那不是真的 ——
+ * 修改與刪除現在只是「提議」，要使用者按下確認卡才會生效。
+ * 使用者信了就以為帳已經改掉，這種假訊息比沒有功能更糟，送出前先攔下來。
+ *
+ * ⚠️ regex 刻意只認**過去式的完成宣稱**，不能連未來式一起殺 ——
+ *    改用 function calling 之後，「確認後就會修改好」「按下去才會刪除」
+ *    是我們要模型講的正確說法，攔掉它等於逼模型改口說謊。
+ *    所以「會／可以／要／才／請」這些字眼在動詞前面時一律放行（下面的 (?<!…)）。
  */
-const FALSE_ACTION_CLAIM =
-  /(已經?(幫[你您])?(刪除|刪掉|移除|修改|更改|編輯|更新)|(刪除|刪掉|移除|修改|更改|編輯|更新)(好|完|了)|幫[你您](刪|改))/
+// 動詞前面出現這些字＝在講「之後會發生什麼」，不是完成宣稱。
+// 變長的 lookbehind 在 V8（Deno／Node）可以用。
+const FUTURE_HINT = '(?<!會|可以|能|要|才|請|想|需|後|再)'
+const ACTION_VERB = '(刪除|刪掉|移除|修改|更改|編輯|更新)'
+const FALSE_ACTION_CLAIM = new RegExp(
+  // 「已（經）刪除」「已經幫您修改」—— 「已」本身就是過去式，不需要再判斷
+  `(已經?(幫[你您])?${ACTION_VERB}`
+  // 「修改好了」「刪除了」，但「確認後就會修改好了」要放行
+  + `|${FUTURE_HINT}${ACTION_VERB}(好了|好囉|完了|完成了|了)`
+  // 「幫你刪了」「幫您改了」，但「按下去我就會幫你刪了」要放行
+  + `|${FUTURE_HINT}幫[你您](刪|改)了)`,
+)
 
 export function claimsCompletedAction(text: string): boolean {
   return FALSE_ACTION_CLAIM.test(text)

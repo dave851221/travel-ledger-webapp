@@ -8,6 +8,7 @@
 // ⚠️ 順序就是規格，不要重排：
 //    使用說明 → ID 綁定 → 放棄綁定 → 斷開 → 群組模式 → 記帳偏好 → 密碼驗證
 //    → （以下需已綁定）取消草稿 → 編輯清單 → 刪除清單 → 撤銷上一筆 → 快捷查詢
+//    以上全部走**精確關鍵字**比對；自然語言的記帳、查詢、修改與刪除一律落到 AI。
 //    密碼驗證那一關可以「不處理」而往下掉（群組裡沒 @ 的閒聊），
 //    快捷查詢之後也是 —— 兩者都會落到 AI 核心去。
 // ============================================================
@@ -15,11 +16,7 @@
 import { formatAmount, sumByCurrency } from "../../_shared/finance.ts"
 import { getSettlementPlan } from "../../_shared/tools/balance.ts"
 import { deleteExpense } from "../../_shared/tools/expenses.ts"
-import {
-  CANCEL_DRAFT_KEYWORDS,
-  detectRecordIntent,
-  stripSelfMentions,
-} from "../guards.ts"
+import { CANCEL_DRAFT_KEYWORDS, stripSelfMentions } from "../guards.ts"
 import {
   DELETE_LIST_KEYWORDS,
   EDIT_LIST_KEYWORDS,
@@ -333,25 +330,26 @@ if (isBinding) {
 
   const loadDrafts = ctx.loadDrafts
 
-  // 明確指令，或用自然語言表達的同一個意圖。
-  // 兩者都必須在進 AI 之前處理掉，否則會變成重複記帳或收到假的完成訊息。
-  const recordIntent = detectRecordIntent(cleanText)
+  // ⚠️ 只認**精確關鍵字**。用自然語言講的「刪除昨天的拉麵」「那筆改成 800」
+  //    一律往下掉到 AI —— 它現在有 propose_expense_update／propose_expense_delete，
+  //    可以直接定位到那一筆並出一張確認卡，比列一份最近 6 筆的清單有用得多。
+  //    （以前這裡有一道 `detectRecordIntent()` 把那些句子攔下來改列清單，
+  //    改用 function calling 之後那道連同函式一起移除了。）
   const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(cleanText)
   const isEditListKeyword = EDIT_LIST_KEYWORDS.includes(cleanText)
   const isCancelDraftKeyword = CANCEL_DRAFT_KEYWORDS.includes(cleanText)
 
-  // 同一句話在「有沒有未確認的草稿」時該走完全不同的路：
-  //   有草稿 → 「剛剛那筆改 500」是要修那張卡片（交給 AI），「取消」是要丟掉它
-  //   沒草稿 → 兩者都是在講已存檔的紀錄，只能列清單讓使用者點選
-  // 以前一律走清單，自我介紹宣傳的「剛剛那筆改 500」因此永遠到不了 AI（H2）。
+  // 「取消」在「有沒有未確認的草稿」時意思不一樣：
+  //   有草稿 → 丟掉那張卡片
+  //   沒草稿 → 那是在講已存檔的紀錄，交給 AI 去問清楚是哪一筆
   // 明確打「編輯支出」「刪除支出」「刪除上一筆」的人是要管理既有紀錄，不受草稿影響。
   const wantsDraftAction = !isDeleteListKeyword && !isEditListKeyword
     && !UNDO_KEYWORDS.includes(cleanText)
-    && (isCancelDraftKeyword || recordIntent !== null)
+    && isCancelDraftKeyword
   const drafts = wantsDraftAction ? await loadDrafts() : []
   const hasDraft = drafts.length > 0
 
-  if (hasDraft && (isCancelDraftKeyword || recordIntent === 'delete')) {
+  if (hasDraft && isCancelDraftKeyword) {
     const draft = drafts[0]
     await cancelDraft(sourceId, draft)
     const desc = draft.exp?.d ?? draft.exp?.description ?? '這筆'
@@ -368,22 +366,16 @@ if (isBinding) {
     return true
   }
 
-  const isDeleteListIntent = isDeleteListKeyword
-    || (recordIntent === 'delete' && !UNDO_KEYWORDS.includes(cleanText))
-  // 有草稿時「改 500」交給 AI 去修那張草稿，不要跳到已存檔紀錄的清單
-  const isEditListIntent = isEditListKeyword || (recordIntent === 'edit' && !hasDraft)
-
-  // 列出近期支出讓使用者點選編輯。
-  // 「剛剛那筆改 500」交給 AI 會變成再記一筆重複的支出 ——
-  // 它只會產生新的草稿，沒有能力修改已存檔的紀錄。
-  if (isEditListIntent) {
+  // 列出近期支出讓使用者點選編輯。只有明確打「編輯支出」才會走到這裡；
+  // 自然語言的修改交給 AI（它會出一張「✏️ 修改預覽」卡）。
+  if (isEditListKeyword) {
     await replyEditPicker({ tripId, sourceId, replyToken, boundQR })
     return true
   }
 
-  // 列出近期支出讓使用者點選刪除。
+  // 列出近期支出讓使用者點選刪除。同樣只認精確關鍵字。
   // 比「撤銷上一筆」好用：可以刪任何一筆，而不只是最後一筆。
-  if (isDeleteListIntent) {
+  if (isDeleteListKeyword) {
     const { data: recent } = await supabase.from('expenses')
       .select('id, description, amount, currency, date')
       .eq('trip_id', tripId)

@@ -128,6 +128,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | :--- | :--- |
 | `types.ts` | `ToolContext`（db + trip + today + actorName）、`ScopedContext`（只要 db 與 trip id，刪除／查詢用）、`ExpenseInput`、`PreparedExpense`、`JsonSchema` |
 | `schemas.ts` | 工具參數的 JSON Schema。**禁止** `additionalProperties`／`$ref`／`oneOf`／`anyOf`／STRING 的 `format`，`type` 一律小寫 —— Gemini 的 function declaration 不支援，帶了直接 400 |
+| `args.ts` | `toExpenseInput`／`toExpensePatch`／`toListFilters`／`optionalString` —— 把模型或 MCP 客戶端給的參數收斂成上面的型別。registry 與 LINE 的 function calling 迴圈共用同一份 |
 | `expenses.ts` | 上面那八支函式 |
 | `balance.ts` | `getBalance`／`getSettlementPlan`，包 `calculateMemberBalances`／`calculateSettlements` |
 | `trip.ts` | `getTrip`（不輸出 `access_code`） |
@@ -135,8 +136,29 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 這一層**不碰 `Deno.env`、不建 Supabase client**（client 由呼叫端放進 context），
 所以 vitest 能直接測 —— `expenses.test.ts` 用假的 client 撐起 `from().select().eq()…` 這條鏈。
-`registry.ts` 沒有被 `line-webhook` import（LINE 直接呼叫底層函式），
-所以它在 `check:functions` 裡是**獨立的進入點**，不然沒人用到的工具永遠不會被型別檢查。
+LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations 與 `runTool`；
+寫入類的 `create_expense` / `update_expense` / `delete_expense` **刻意不公開給模型**
+（那三支按下去就落地了，對話式管道一律要先出一張確認卡）。
+`registry.ts` 在 `check:functions` 裡仍是**獨立的進入點**，
+不然只有 MCP 會用到的那幾支工具永遠不會被型別檢查。
+
+### Gemini 的呼叫與 function calling 迴圈 `_shared/gemini.ts`
+
+`createGeminiClient({ apiKey, fetchImpl })` 是單一模型、單次呼叫的薄殼；
+`runToolLoop({ client, models, contents, declarations, terminalNames, execute, … })`
+是 LINE 文字路徑的骨幹（見下方「LINE Bot Edge Function」第 3 點）。
+這一層**不碰 `Deno.env`**（key 與 fetch 都由呼叫端注入），所以 `gemini.test.ts` 用假 client 就測得動。
+
+⚠️ **三條已查證的 API 限制，違反的症狀都很難看懂**：
+1. `generateContent` 不能同時帶 `tools` 與 `responseMimeType: application/json`
+   （Gemini 3 以外直接 400）。走工具的路徑因此不用 JSON mode，改 `toolConfig.functionCallingConfig.mode = 'ANY'`。
+2. Gemini 3 的 `functionCall` part 帶 `thoughtSignature`，下一輪必須**原樣送回**，而且**簽章綁定模型** ——
+   迴圈全程鎖定同一個模型，換模型時從**原始** contents 重來。
+3. `functionResponse.response` 必須是 JSON **物件**，陣列或字串包成 `{ result }`。
+
+400 一律把 body 讀出來 `console.error`；body 含 `thought_signature`／`function`／`tool` 字樣時
+丟 `FatalError`（schema 問題，換模型沒用），其餘可重試的丟 `RetryableError`。
+新程式碼一律 camelCase（`systemInstruction`、`toolConfig`、`functionDeclarations`）。
 
 ### 行程登錄檔模式
 
@@ -178,17 +200,17 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | `db.ts` | ~12 | service-role 的 Supabase client 單例 |
 | `util.ts` | ~95 | `runInBackground`、時區推測、`requiresAccessCode`、`isPendingExpired` |
 | `line-api.ts` | ~100 | 驗簽、reply／push、成員名稱、`downloadLineContent` |
-| `drafts.ts` | ~170 | 草稿的存取與失效（`line_chat_history` + `line_processed_actions`） |
-| `messages.ts` | ~315 | 快速回覆、Flex 卡片、LIFF 網址、自我介紹全文 |
-| `gemini.ts` | ~335 | 模型清單、response schema、system instruction、OCR／轉錄 |
-| `context.ts` | ~145 | `EventContext` 與 `buildEventContext`（一則事件只查一次） |
+| `drafts.ts` | ~185 | 草稿的存取與失效（`line_chat_history` + `line_processed_actions`）。只有 `kind` 為空或 `expense` 的列算草稿 |
+| `messages.ts` | ~470 | 快速回覆、Flex 卡片（記帳／✏️ 修改預覽／🗑 確認刪除）、LIFF 網址、自我介紹全文 |
+| `gemini.ts` | ~365 | 模型清單、OCR schema、system instruction、對模型公開的函式清單、OCR／轉錄 |
+| `context.ts` | ~155 | `EventContext` 與 `buildEventContext`（一則事件只查一次），含 `eventTimestamp` |
 | `types.ts` | ~350 | LINE 事件、postback、DB 列、Gemini 往來的型別 |
-| `guards.ts` | ~435 | 與 LINE 有關的純函式（見下） |
-| `handlers/postback.ts` | ~380 | undo / cur / del / save / cancel（寫入走 `_shared/tools/`） |
+| `guards.ts` | ~430 | 與 LINE 有關的純函式（見下） |
+| `handlers/postback.ts` | ~505 | undo / cur / del / **upd** / save / cancel（寫入走 `_shared/tools/`） |
 | `handlers/image.ts` | ~275 | 收據 OCR（驗證走 `prepareExpense`） |
 | `handlers/audio.ts` | ~55 | 語音轉文字（回傳 transcript 給文字路徑） |
 | `handlers/commands.ts` | ~640 | 群組觸發判斷 + 所有明確指令與快捷查詢 |
-| `handlers/ai-text.ts` | ~465 | AI 核心（驗證走 `prepareExpense`） |
+| `handlers/ai-text.ts` | ~735 | AI 核心：組 context → `runToolLoop` → 五個終結分支（驗證走 `prepareExpense`） |
 
 **import 方向是單向的，不要繞回去**：
 `config → db → line-api → drafts / messages / gemini → context → handlers/* → index`。
@@ -199,14 +221,14 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   未來接別的記帳管道也用得到：`extractJSON`、`toAmountMap`、`normalizeExpenseAmountMaps`、
   `normalizeName`、`resolveMember`、`resolveExpenseMembers`、`applyParticipantDefaults`、
   `resolveCategory`、`hasCurrencyHint`、`resolveCurrencyByRule`、`normalizeCurrency`、`normalizeDate`。
-- **`line-webhook/guards.ts`** —— 跟 LINE 這個管道有關的那些：`detectRecordIntent`、
+- **`line-webhook/guards.ts`** —— 跟 LINE 這個管道有關的那些：
   `mentionsEditingExisting`、`stripSelfMentions`、`claimsCompletedAction`、
   `summarizeHistoryEntry`、`summarizeTripExpenses`、`pickExpenseByRef`、`matchExpensesByQuestion`。
   它同時**原樣轉出** `validate.ts` 的全部內容，所以 `guards.test.ts` 一行都不必改。
 
 兩邊都由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
-`check:functions` 列了三個進入點（`line-webhook/index.ts`、`liff-notify/index.ts`、
-`_shared/tools/registry.ts`），其餘模組透過 import 一起被檢查。
+`check:functions` 列了四個進入點（`line-webhook/index.ts`、`liff-notify/index.ts`、
+`_shared/tools/registry.ts`、`_shared/gemini.ts`），其餘模組透過 import 一起被檢查。
 `guards.ts` 只 import `_shared/finance.ts`、`_shared/deps.ts`（Decimal）與 `_shared/validate.ts` ——
 `vitest.config.ts` 的 alias 用 `/^(?:\.\.?\/)+(?:_shared\/)?deps\.ts$/` 涵蓋所有相對寫法
 （`./deps.ts`、`../deps.ts`、`../_shared/deps.ts`、`../../deps.ts`）。
@@ -220,13 +242,27 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
    **驗證成功才**寫入 `line_user_states.current_trip_id`。
    切換旅程時原綁定會留著（`current_trip_id` 與 `pending_trip_id` 可同時有值），
    10 分鐘沒動作或輸入「取消綁定」就放棄；綁定／斷開成功都會 `supersedeAllDrafts()`
-3. **文字訊息**：先比對快捷指令（直接查 DB），其餘交給 Gemini 回傳結構化 JSON
-4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片
+3. **文字訊息**：先比對**精確**的快捷指令（直接查 DB），其餘全部交給
+   **Gemini function calling 迴圈**（`_shared/gemini.ts` 的 `runToolLoop`）。
+   模型可以先呼叫唯讀工具（`list_expenses`／`get_balance`／`get_settlement_plan`）把資料查清楚，
+   最後一定要呼叫一支終結函式：`propose_expenses`（1–4 張記帳卡，所以一句話記得了多筆）、
+   `propose_expense_update`（✏️ 修改預覽卡）、`propose_expense_delete`（🗑 確認刪除卡）、
+   `analyze_receipt`、`reply`。
+   ⚠️ **模型不能直接改資料庫**：所有寫入都要使用者按下卡片按鈕（第 5 點）。
+   `deadlineAt = event.timestamp + 45s`，以 **LINE 送出事件的時間**為準（排隊延遲要算進去）。
+   細節與踩過的限制見上面的 `_shared/gemini.ts` 段落與 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md) 第 14 章。
+4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片。
+   **OCR 路徑維持 JSON mode**（`askGemini` + `OCR_RESPONSE_SCHEMA`），不走工具迴圈
 4b. **語音訊息**：下載 m4a → Gemini 逐字轉錄 → **當成使用者打的字**走上面第 3 點的流程
    （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
-5. **Postback**：按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
+5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`。
+   按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
-   但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著
+   但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著。
+   `pending` 列以 `kind` 區分：空或 `expense` 是記帳草稿，`update`／`delete` 是 AI 的提議卡（另帶 `eid`）。
+   ⚠️ **只有 `expense` 算草稿** —— `getOutstandingDrafts()` 濾掉其餘的，
+   否則使用者打「取消」會取消到一張修改卡，AI 也會拿它的 nonce 去填 `corrects_draft`。
+   `upd` 不寫 `saved` 列（與 `liff-notify` 的 `mode === 'update'` 一致，見 J11）
 6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式。
    群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者，
    對話歷史也以「發言者：內容」的形式餵進 prompt。

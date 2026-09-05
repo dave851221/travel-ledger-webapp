@@ -1,8 +1,8 @@
 // ============================================================
 // handlers/postback.ts —— Flex 卡片按鈕（postback）
 //
-// 五種動作：undo（撤銷已存入）、cur（換個幣別重新出卡）、del（從清單刪除）、
-// save（確認存入）、cancel（取消草稿）。
+// 六種動作：undo（撤銷已存入）、cur（換個幣別重新出卡）、del（刪除既有支出）、
+// upd（套用 AI 提議的修改）、save（確認存入）、cancel（取消草稿或提議）。
 //
 // ⚠️ 防重複點擊的鎖是 line_processed_actions 的 PK 衝突：先寫 nonce 再做事。
 //    做不成的時候一定要 releaseNonce()，不然那張卡片連「✏️ 編輯」都會說已處理過。
@@ -10,7 +10,12 @@
 
 import { Decimal } from "../../_shared/deps.ts"
 import { calculateDistribution, DEFAULT_PRECISION } from "../../_shared/finance.ts"
-import { commitExpense, deleteExpense } from "../../_shared/tools/expenses.ts"
+import {
+  commitExpense,
+  commitExpenseUpdate,
+  deleteExpense,
+  resolveExpenseRef,
+} from "../../_shared/tools/expenses.ts"
 import { RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
@@ -25,8 +30,9 @@ import {
   buildDraftLiffUrl,
   buildExpenseCard,
   describeProcessedAction,
+  fieldLabel,
 } from "../messages.ts"
-import type { ScopedContext } from "../../_shared/tools/types.ts"
+import type { PreparedExpense, ScopedContext } from "../../_shared/tools/types.ts"
 import type { PrecisionConfig } from "../../_shared/types.ts"
 import type { DraftExpense, PostbackData, PostbackEvent } from "../types.ts"
 
@@ -172,18 +178,33 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     return
   }
 
-  // 從「刪除支出」清單點選的刪除
+  // 刪除既有支出。兩個來源：
+  //   ①「刪除支出」清單上的按鈕（只有 eid，沒有 nonce）
+  //   ② AI 的「🗑 確認刪除？」卡片（帶 nonce，要防連點）
   if (postbackData.act === 'del') {
     const expenseId = postbackData.eid
     if (!expenseId) {
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這筆支出。' }], sourceId)
       return
     }
+    // 有 nonce 才上鎖 —— 舊清單卡沒有 nonce，行為維持原樣
+    const delNonce = postbackData.n
+    if (delNonce) {
+      const { error: lockErr } = await supabase.from('line_processed_actions')
+        .insert({ nonce: delNonce, line_user_id: sourceId, action_type: 'delete' })
+      if (lockErr) {
+        const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', delNonce).maybeSingle()
+        await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+        return
+      }
+    }
     // 與 undo 走同一支 deleteExpense。⚠️ 這裡因此多了**旅程範圍**的保護：
     // 以前只比對 id，切換旅程後按舊清單上的按鈕會刪到別趟旅程的支出（J4）。
     const delResult = await deleteExpense(expenseId, toolScope(userState.current_trip_id))
 
     if (!delResult.ok) {
+      // 真的只是寫入失敗時把鎖放掉，使用者才還能再按一次
+      if (delResult.reason === 'update_failed') await releaseNonce(delNonce)
       if (delResult.reason === 'already_deleted') {
         await replyMessage(replyToken, [{
           type: 'text', text: `ℹ️ 「${delResult.description}」先前已經刪除了。`, quickReply: boundQR,
@@ -200,6 +221,109 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     await replyMessage(replyToken, [{
       type: 'text',
       text: `🗑 已刪除：${delResult.description}${by}\n\n24 小時內可到網頁的垃圾桶還原。`,
+      quickReply: boundQR,
+    }], sourceId)
+    return
+  }
+
+  // 套用 AI 提議的修改（「✏️ 修改預覽」卡片的「✅ 確認修改」）。
+  //
+  // ⚠️ 與 save 的差別是這條走 UPDATE 而不是 INSERT，而且**不寫 `saved` 列** ——
+  //    「取消上一筆」要撤的是最近**新增**的那一筆，把修改也記進去的話，
+  //    使用者說「取消上一筆」會撤掉一筆他剛改好的舊支出（與 liff-notify 的
+  //    mode === 'update' 同一個理由，見 J11／M11）。
+  if (postbackData.act === 'upd') {
+    const updNonce = postbackData.n
+    if (!updNonce) {
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 無效的操作資料，請重新說一次要改哪一筆。' }], sourceId)
+      return
+    }
+
+    // 先上鎖再做事（防連點）。已經套用過的話這裡就會衝突。
+    const { error: lockErr } = await supabase.from('line_processed_actions')
+      .insert({ nonce: updNonce, line_user_id: sourceId, action_type: 'update' })
+    if (lockErr) {
+      const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', updNonce).maybeSingle()
+      await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+      return
+    }
+
+    const pending = await getPendingExpense(sourceId, updNonce)
+    if (!pending || pending.kind !== 'update' || !pending.eid || !pending.exp) {
+      await releaseNonce(updNonce)
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這張修改卡的內容，請重新說一次要改哪一筆。' }], sourceId)
+      return
+    }
+
+    const updTripId = pending.tid || userState.current_trip_id as string
+    const { data: updTrip } = await supabase.from('trips').select('*').eq('id', updTripId).maybeSingle()
+    if (!updTrip) {
+      // 旅程被後台刪掉了，這張卡再也套不上去 —— 與 save 一致，鎖不放
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      return
+    }
+
+    // ⚠️ 一定要**重新讀**那一筆：卡片可能是十分鐘前發的，中間有人在網頁改過或刪掉了。
+    //    resolveExpenseRef 同時擋掉「不屬於這趟旅程」「已在垃圾桶」「是結清紀錄」。
+    const existing = await resolveExpenseRef(pending.eid, toolScope(updTripId), { allowSettlement: false })
+    if (!existing) {
+      await releaseNonce(updNonce)
+      await replyMessage(replyToken, [{
+        type: 'text',
+        text: '❌ 這筆支出已不存在（可能已被刪除，或不屬於目前這趟旅程）。',
+        quickReply: boundQR,
+      }], sourceId)
+      return
+    }
+
+    const src = pending.exp
+    const prepared: PreparedExpense = {
+      description: String(src.d ?? src.description ?? ''),
+      amount: parseFloat(String(src.a ?? src.amount ?? 0)) || 0,
+      currency: String(src.c ?? src.currency ?? ''),
+      date: String(src.dt ?? src.date ?? ''),
+      category: String(src.cat ?? src.category ?? ''),
+      payer_data: src.p ?? src.payer_data ?? {},
+      split_details: src.s ?? src.split_details ?? {},
+      adjustment_member: null,
+    }
+
+    // 封存、參與者為空與 Σ 檢查都在 commitExpenseUpdate 裡（與工具層共用同一份）
+    const updResult = await commitExpenseUpdate(existing.id, prepared, {
+      db: supabase, trip: updTrip, today: tripToday(updTrip), actorName: ctx.memberName,
+    })
+    if (!updResult.ok) {
+      // 封存是「這張卡永遠套不上去」，其餘放掉鎖讓使用者還能按取消或再試
+      if (updResult.reason !== 'archived') await releaseNonce(updNonce)
+      const text = updResult.reason === 'archived'
+        ? '❌ 此旅程已封存，無法修改支出。'
+        : updResult.reason === 'not_found'
+          ? '❌ 這筆支出已不存在，無法修改。'
+          : updResult.reason === 'empty_participants'
+            ? '😅 修改後的付款人或分攤成員是空的（可能是成員已被移除），無法套用。請按卡片上的「🌐 網頁編輯」處理。'
+            : '❌ 財務運算發生錯誤，請聯絡管理員。'
+      await replyMessage(replyToken, [{ type: 'text', text, quickReply: boundQR }], sourceId)
+      return
+    }
+
+    // 卡片是先前發的，這中間內容可能已經變過 —— 改了哪幾欄以「剛剛真正寫進去的」為準
+    const changed = ([
+      ['description', existing.description, prepared.description],
+      ['amount', Number(existing.amount) || 0, prepared.amount],
+      ['currency', existing.currency, prepared.currency],
+      ['date', existing.date, prepared.date],
+      ['category', existing.category, prepared.category],
+      ['payer_data', existing.payer_data ?? {}, prepared.payer_data],
+      ['split_data', existing.split_data ?? {}, prepared.split_details],
+    ] as [string, unknown, unknown][])
+      .filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after))
+      .map(([field]) => fieldLabel(field))
+
+    const by = speakerLabel ? `（由 ${speakerLabel} 修改）` : ''
+    const changedText = changed.length > 0 ? `\n改了：${changed.join('、')}` : '\n（內容與原本相同）'
+    await replyMessage(replyToken, [{
+      type: 'text',
+      text: `✏️ 已修改：${prepared.description}${by}${changedText}`,
       quickReply: boundQR,
     }], sourceId)
     return
@@ -349,7 +473,9 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     let photo_ids = postbackData.p ?? postbackData.photo_urls ?? []
     let trip_id = postbackData.trip_id ?? userState?.current_trip_id
 
-    // 從 pending 取得照片資訊（用於刪除 Storage 的照片）
+    // 從 pending 取得照片資訊（用於刪除 Storage 的照片）。
+    // AI 的修改／刪除提議卡（kind: 'update' / 'delete'）沒有照片，
+    // 所以下面只會上鎖並回一句「已取消」，那正是我們要的行為。
     if (photo_ids.length === 0 && nonce) {
       const pending = await getPendingExpense(sourceId, nonce)
       if (pending) {

@@ -100,9 +100,9 @@ export function buildDraftLiffUrl(tripId: string, nonce: string, sourceId: strin
 /**
  * 列出近期支出讓使用者點選編輯（每列一顆 LIFF「✏️ 編輯」）。
  *
- * 兩個呼叫端：明確的「編輯支出」／`detectRecordIntent` 判定的修改意圖，
- * 以及 P8 的第二道防線 —— AI 把「剛剛那個改250」當成新支出時（T1），
- * 用 `notice` 補一句話說明為什麼看到的是清單而不是卡片。
+ * 兩個呼叫端：明確打「編輯支出」，以及 P8 的防線 —— 模型把「剛剛那個改250」
+ * 當成新支出時（T1），用 `notice` 補一句話說明為什麼看到的是清單而不是卡片。
+ * 用自然語言講的修改現在會走到 AI 的「✏️ 修改預覽」卡，不再落到這裡。
  *
  * 清單本身依日期與建立時間倒序，剛存的那一筆一定在第一列，
  * 所以不需要另外做「直接開最新一筆」。
@@ -245,6 +245,154 @@ export function buildExpenseCard(opts: {
 }
 
 /**
+ * 一次修改動了哪些欄位，翻成使用者看得懂的字。
+ *
+ * key 用資料庫的欄位名（`prepareExpenseUpdate` 的 `changes` 就是那組），
+ * 認不得的欄位原樣顯示 —— 寧可露出英文欄位名，也不要默默漏掉一項異動。
+ */
+export const FIELD_LABELS: Record<string, string> = {
+  description: '描述',
+  amount: '金額',
+  currency: '幣別',
+  date: '日期',
+  category: '分類',
+  payer_data: '付款人',
+  split_data: '分攤',
+}
+
+export function fieldLabel(field: string): string {
+  return FIELD_LABELS[field] ?? field
+}
+
+/** 把 changes 裡的 before／after 印成一行。金額 map 印成「小明 300、阿華 200」。 */
+export function formatFieldValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '（空）'
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+    if (entries.length === 0) return '（空）'
+    return entries.map(([name, amount]) => `${name} ${amount}`).join('、')
+  }
+  return String(value)
+}
+
+/**
+ * 「✏️ 修改預覽」卡片（AI 提議修改既有支出時送出）。
+ *
+ * ⚠️ 這張卡與記帳草稿卡是**不同的東西**：它指向一筆已經存檔的支出，
+ *    按下確認走的是 `act: 'upd'`（UPDATE），不是 `act: 'save'`（INSERT）。
+ *    pending 列因此帶 `kind: 'update'` 與 `eid`，也不會被當成草稿（見 drafts.ts）。
+ *
+ * 「🌐 網頁編輯」開的是**修改前**的原內容 —— LIFF 頁每次都直接查資料庫（T2），
+ * 沒有辦法預先填入這裡提議的值。卡上有一行小字說明，免得使用者以為壞掉了。
+ */
+export function buildUpdatePreviewCard(opts: {
+  /** amount 傳「已經照旅程精度格式化好」的字串，卡片不再自己算 */
+  existing: { id: string; description: string; date: string; amount: string; currency: string }
+  changes: { field: string; before: unknown; after: unknown }[]
+  nonce: string
+  editUrl: string
+}): OutgoingMessage {
+  const { existing, changes, nonce, editUrl } = opts
+  const changeRows = changes.map((c) => ({
+    type: 'box', layout: 'vertical', margin: 'md',
+    contents: [
+      { type: 'text', text: fieldLabel(c.field), size: 'xs', color: '#aaaaaa' },
+      {
+        type: 'text',
+        text: `${formatFieldValue(c.before)} → ${formatFieldValue(c.after)}`,
+        size: 'sm', wrap: true,
+      },
+    ],
+  }))
+
+  return {
+    type: 'flex', altText: `確認修改: ${existing.description}`,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical',
+        contents: [
+          { type: 'text', text: '✏️ 修改預覽', weight: 'bold', color: '#E08A00', size: 'sm' },
+          { type: 'text', text: String(existing.description), weight: 'bold', size: 'xl', margin: 'md', wrap: true },
+          {
+            type: 'text',
+            text: `📅 ${existing.date} · 原本 ${existing.amount} ${existing.currency}`,
+            size: 'xs', color: '#aaaaaa', margin: 'xs', wrap: true,
+          },
+          { type: 'separator', margin: 'md' },
+          ...changeRows,
+          { type: 'separator', margin: 'lg' },
+          {
+            type: 'text',
+            text: '按「確認修改」才會真的改到帳本；「網頁編輯」開的是修改前的原內容。',
+            size: 'xxs', color: '#aaaaaa', margin: 'md', wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'button', style: 'primary', color: '#E08A00', action: { type: 'postback', label: '✅ 確認修改', data: JSON.stringify({ act: 'upd', n: nonce }) } },
+          {
+            type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
+              { type: 'button', style: 'primary', color: '#5AC8FA', action: { type: 'uri', label: '🌐 網頁編輯', uri: editUrl } },
+              { type: 'button', style: 'secondary', action: { type: 'postback', label: '❌ 取消', data: JSON.stringify({ act: 'cancel', n: nonce }) } },
+            ],
+          },
+        ],
+      },
+    },
+  }
+}
+
+/**
+ * 「🗑 確認刪除？」卡片（AI 提議刪除既有支出時送出）。
+ *
+ * 按鈕帶 `eid` 與 `n`：`eid` 是要刪的那一筆，`n` 是防連點的鎖。
+ * 「刪除支出」清單上的舊按鈕只有 `eid`，那條路徑照舊（見 handlers/postback.ts）。
+ */
+export function buildDeleteConfirmCard(opts: {
+  /** amount 傳「已經照旅程精度格式化好」的字串 */
+  existing: { id: string; description: string; date: string; amount: string; currency: string; category: string }
+  nonce: string
+}): OutgoingMessage {
+  const { existing, nonce } = opts
+  return {
+    type: 'flex', altText: `確認刪除: ${existing.description}`,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical',
+        contents: [
+          { type: 'text', text: '🗑 確認刪除？', weight: 'bold', color: '#D9534F', size: 'sm' },
+          { type: 'text', text: String(existing.description), weight: 'bold', size: 'xl', margin: 'md', wrap: true },
+          { type: 'text', text: `📅 ${existing.date} · 🏷️ ${existing.category}`, size: 'xs', color: '#aaaaaa', margin: 'xs' },
+          { type: 'separator', margin: 'md' },
+          {
+            type: 'box', layout: 'horizontal', margin: 'md', contents: [
+              { type: 'text', text: '總金額', color: '#aaaaaa', size: 'sm' },
+              { type: 'text', text: `${existing.amount} ${existing.currency}`, align: 'end', size: 'sm', weight: 'bold' },
+            ],
+          },
+          {
+            type: 'text',
+            text: '刪除後 24 小時內可到網頁的垃圾桶還原。',
+            size: 'xxs', color: '#aaaaaa', margin: 'lg', wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'vertical', spacing: 'sm',
+        contents: [
+          { type: 'button', style: 'primary', color: '#D9534F', action: { type: 'postback', label: '🗑 確認刪除', data: JSON.stringify({ act: 'del', eid: existing.id, n: nonce }) } },
+          { type: 'button', style: 'secondary', action: { type: 'postback', label: '❌ 取消', data: JSON.stringify({ act: 'cancel', n: nonce }) } },
+        ],
+      },
+    },
+  }
+}
+
+/**
  * 舊卡片被按下時要說清楚「為什麼按不動」。
  *
  * 以前一律回「此操作已處理過囉」，使用者看到的是一張自己從沒按過的卡片
@@ -256,6 +404,10 @@ export function describeProcessedAction(actionType: string | null | undefined): 
       return '⚠️ 此筆支出已於先前成功存入！'
     case 'cancel':
       return '⚠️ 這張卡片先前已經取消了。'
+    case 'update':
+      return '⚠️ 這筆修改先前已套用。'
+    case 'delete':
+      return '⚠️ 這筆支出先前已經刪除了。'
     case 'superseded':
       return '⚠️ 這張卡片已被較新的記帳建議取代，請改按新的那一張卡片。'
     default:
