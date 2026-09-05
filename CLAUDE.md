@@ -33,8 +33,10 @@ npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查
 ```
 
 提交前請跑 `npm run lint && npm test && npm run check:functions && npm run build`
-—— CI 這四關都會擋。測試涵蓋 `src/utils/` 的純函式、跨實作的契約比對，
-以及 LINE Bot 的 `line-webhook/guards.ts` 與它轉出的 `_shared/validate.ts`；沒有元件層級的測試。
+—— CI 這四關都會擋。測試涵蓋 `src/utils/` 的純函式、跨實作的契約比對、
+LINE Bot 的 `line-webhook/guards.ts` 與它轉出的 `_shared/validate.ts`，
+以及共用工具層 `_shared/tools/`（支出的驗證與更新、查詢過濾、工具 schema）；
+沒有元件層級的測試。
 
 `tsc` 只看得到 `src/`，Edge Function 是 Deno 程式碼，必須用 `check:functions`
 才檢查得到 —— 這個專案踩過「部署後靜默失效」的坑，別跳過這一關。
@@ -109,6 +111,33 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 `calculateMemberBalances`、`getRate`、`sumByCurrency`），漂移會直接讓 CI 失敗。
 `_shared/deps.ts` 那層間接就是為了讓測試能在 Node 下載入 Deno 的模組。
 
+### 共用工具層 `_shared/tools/`
+
+**支出的驗證與寫入統一走 `_shared/tools/expenses.ts` 的 `prepareExpense` / `commitExpense`**
+（更新走 `prepareExpenseUpdate` / `commitExpenseUpdate`，刪除／還原走 `deleteExpense` /
+`restoreExpense`，查詢走 `listExpenses` / `resolveExpenseRef`）。
+在它出現以前，同一段驗證在 `line-webhook` 裡有三份（OCR、文字、確認存入），
+改了其中一份而忘了另外兩份是這個專案反覆出現的 bug 型態。
+
+兩段式的分工要守住：`prepare*` **只算不寫**（LINE 的預覽卡片就跑在這個階段），
+`commit*` **只寫不猜**（重跑一次分帳與 Σ 檢查才落地，因為兩者之間可能隔了一天，成員早就變了）。
+`prepareExpense` 的 `reject` 有值時**仍然回傳正規化好的 expense** ——
+收據幣別沒有匯率時（M10）要靠它把辨識結果存成 pending，使用者才不必重拍。
+
+| 檔案 | 內容 |
+| :--- | :--- |
+| `types.ts` | `ToolContext`（db + trip + today + actorName）、`ScopedContext`（只要 db 與 trip id，刪除／查詢用）、`ExpenseInput`、`PreparedExpense`、`JsonSchema` |
+| `schemas.ts` | 工具參數的 JSON Schema。**禁止** `additionalProperties`／`$ref`／`oneOf`／`anyOf`／STRING 的 `format`，`type` 一律小寫 —— Gemini 的 function declaration 不支援，帶了直接 400 |
+| `expenses.ts` | 上面那八支函式 |
+| `balance.ts` | `getBalance`／`getSettlementPlan`，包 `calculateMemberBalances`／`calculateSettlements` |
+| `trip.ts` | `getTrip`（不輸出 `access_code`） |
+| `registry.ts` | `TOOLS`、`runTool`、`toGeminiFunctionDeclarations`。同一份定義同時給 Gemini function calling 與未來 MCP 的 `tools/list` 用（見 [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md)） |
+
+這一層**不碰 `Deno.env`、不建 Supabase client**（client 由呼叫端放進 context），
+所以 vitest 能直接測 —— `expenses.test.ts` 用假的 client 撐起 `from().select().eq()…` 這條鏈。
+`registry.ts` 沒有被 `line-webhook` import（LINE 直接呼叫底層函式），
+所以它在 `check:functions` 裡是**獨立的進入點**，不然沒人用到的工具永遠不會被型別檢查。
+
 ### 行程登錄檔模式
 
 `src/features/itinerary/registry.ts` 把旅程 UUID 對應到自訂 React 元件，
@@ -155,11 +184,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | `context.ts` | ~145 | `EventContext` 與 `buildEventContext`（一則事件只查一次） |
 | `types.ts` | ~350 | LINE 事件、postback、DB 列、Gemini 往來的型別 |
 | `guards.ts` | ~435 | 與 LINE 有關的純函式（見下） |
-| `handlers/postback.ts` | ~400 | undo / cur / del / save / cancel |
-| `handlers/image.ts` | ~315 | 收據 OCR |
+| `handlers/postback.ts` | ~380 | undo / cur / del / save / cancel（寫入走 `_shared/tools/`） |
+| `handlers/image.ts` | ~275 | 收據 OCR（驗證走 `prepareExpense`） |
 | `handlers/audio.ts` | ~55 | 語音轉文字（回傳 transcript 給文字路徑） |
-| `handlers/commands.ts` | ~645 | 群組觸發判斷 + 所有明確指令與快捷查詢 |
-| `handlers/ai-text.ts` | ~495 | AI 核心 |
+| `handlers/commands.ts` | ~640 | 群組觸發判斷 + 所有明確指令與快捷查詢 |
+| `handlers/ai-text.ts` | ~465 | AI 核心（驗證走 `prepareExpense`） |
 
 **import 方向是單向的，不要繞回去**：
 `config → db → line-api → drafts / messages / gemini → context → handlers/* → index`。
@@ -176,7 +205,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   它同時**原樣轉出** `validate.ts` 的全部內容，所以 `guards.test.ts` 一行都不必改。
 
 兩邊都由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
-`check:functions` 只列 `index.ts`，其餘模組透過 import 一起被檢查。
+`check:functions` 列了三個進入點（`line-webhook/index.ts`、`liff-notify/index.ts`、
+`_shared/tools/registry.ts`），其餘模組透過 import 一起被檢查。
 `guards.ts` 只 import `_shared/finance.ts`、`_shared/deps.ts`（Decimal）與 `_shared/validate.ts` ——
 `vitest.config.ts` 的 alias 用 `/^(?:\.\.?\/)+(?:_shared\/)?deps\.ts$/` 涵蓋所有相對寫法
 （`./deps.ts`、`../deps.ts`、`../_shared/deps.ts`、`../../deps.ts`）。

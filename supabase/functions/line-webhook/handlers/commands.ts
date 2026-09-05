@@ -12,7 +12,9 @@
 //    快捷查詢之後也是 —— 兩者都會落到 AI 核心去。
 // ============================================================
 
-import { formatAmount, calculateMemberBalances, calculateSettlements, sumByCurrency } from "../../_shared/finance.ts"
+import { formatAmount, sumByCurrency } from "../../_shared/finance.ts"
+import { getSettlementPlan } from "../../_shared/tools/balance.ts"
+import { deleteExpense } from "../../_shared/tools/expenses.ts"
 import {
   CANCEL_DRAFT_KEYWORDS,
   detectRecordIntent,
@@ -484,13 +486,10 @@ if (isBinding) {
       return true
     }
 
-    const description = targetById.get(undoable.expense_id)?.description || undoable.description || '該筆支出'
-    const { error } = await supabase.from('expenses')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', undoable.expense_id)
-      .eq('trip_id', tripId)
-      .is('deleted_at', null)
-    if (error) {
+    // 軟刪除走共用工具層，與卡片上的「↩️ 撤銷」「🗑 刪除」同一支
+    const undoResult = await deleteExpense(undoable.expense_id, { db: supabase, trip: { id: tripId } })
+    const description = undoResult.description || undoable.description || '該筆支出'
+    if (!undoResult.ok) {
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
       return true
     }
@@ -587,24 +586,21 @@ if (isBinding) {
   }
 
   if (cleanText === '結算') {
-    const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, precision_config').eq('id', tripId).single()
+    // 這裡取整列（而不是列舉欄位）是因為工具層要的是一個完整的 TripRow
+    const { data: trip } = await supabase.from('trips').select('*').eq('id', tripId).single()
     if (!trip) {
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
       return true
     }
-    const { data: allExp } = await supabase.from('expenses')
-      .select('amount, currency, payer_data, split_data')
-      .eq('trip_id', tripId).is('deleted_at', null)
-    const baseCurrency = trip.base_currency
-    // 餘額與匯率換算走 _shared/finance.ts 的共用實作（M14）——
-    // 網頁的 useTripStats 呼叫的是同一支的前端版本，兩份由契約測試比對。
-    // 以前兩邊各寫各的 rate 判斷（這裡是 `currency === base ? 1 : rates[...]`，
-    // 前端是 `rates[...] || 1`），rates[base] 不等於 1 時會算出不同的結算結果。
-    // 所有紀錄（含結清）都要計入餘額，所以上面的查詢刻意沒有濾掉 is_settlement。
-    const { grandTotal, missingRateCurrencies } = calculateMemberBalances(
-      allExp ?? [], trip.members, trip.rates, baseCurrency,
-    )
-    const settlements = calculateSettlements(grandTotal)
+    // 餘額、匯率換算與結清路徑全部走共用工具層（_shared/tools/balance.ts），
+    // 它底下是 _shared/finance.ts 的實作（M14）—— 網頁的 useTripStats 呼叫的是
+    // 同一支的前端版本，兩份由契約測試比對。以前兩邊各寫各的 rate 判斷
+    // （這裡是 `currency === base ? 1 : rates[...]`、前端是 `rates[...] || 1`），
+    // rates[base] 不等於 1 時會算出不同的結算結果。
+    // 結清紀錄也要計入餘額，那件事在 getSettlementPlan 裡面決定。
+    const { baseCurrency, settlements, missingRateCurrencies } = await getSettlementPlan({
+      db: supabase, trip, today: tripToday(trip), actorName: ctx.memberName,
+    })
     // 有幣別被當成 1:1 換算時要講出來，否則結算金額默默失真
     const rateWarning = missingRateCurrencies.length > 0
       ? `\n\n⚠️ ${missingRateCurrencies.join('、')} 沒有設定匯率，已當成 1:1 折算，結果會失真。`

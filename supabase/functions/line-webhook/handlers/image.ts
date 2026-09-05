@@ -9,19 +9,9 @@
 //    讓使用者選一個幣別就能直接存入，不必重拍。
 // ============================================================
 
-import { Decimal } from "../../_shared/deps.ts"
-import { calculateDistribution, DEFAULT_PRECISION } from "../../_shared/finance.ts"
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
-import {
-  applyParticipantDefaults,
-  extractJSON,
-  normalizeCurrency,
-  normalizeDate,
-  normalizeExpenseAmountMaps,
-  resolveCategory,
-  resolveCurrencyByRule,
-  resolveExpenseMembers,
-} from "../guards.ts"
+import { extractJSON } from "../guards.ts"
+import { prepareExpense } from "../../_shared/tools/expenses.ts"
 import { isRateLimit, RATE_LIMIT_MSG, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
@@ -30,8 +20,8 @@ import { askGemini, GEMINI_OCR_MODELS, OCR_RESPONSE_SCHEMA } from "../gemini.ts"
 import { downloadLineContent, replyMessage } from "../line-api.ts"
 import { buildDraftLiffUrl, buildExpenseCard } from "../messages.ts"
 import { runInBackground } from "../util.ts"
-import type { PrecisionConfig } from "../../_shared/types.ts"
-import type { ExpenseDraft, ImageMessageEvent, OcrResponse } from "../types.ts"
+import type { ExpenseInput } from "../../_shared/tools/types.ts"
+import type { ImageMessageEvent, OcrResponse } from "../types.ts"
 
 /** 處理一張收據照片。呼叫端已經確認 ctx.isBound。 */
 export async function handleImage(ctx: EventContext, event: ImageMessageEvent): Promise<void> {
@@ -161,17 +151,21 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       return
     }
     if (res.type === 'expense') {
-      // normalizeExpenseAmountMaps 之後金額欄位一定是 map，才收斂成 ExpenseDraft
-      const expense = res.data as ExpenseDraft
+      // 驗證與分帳整段走共用工具層（_shared/tools/expenses.ts），與文字路徑、
+      // 「確認存入」用的是同一份實作 —— 以前這段在三個地方各寫一次。
+      // OCR 沒有使用者文字可以驗證 stated，sourceText 傳 null 代表直接採信（T3）。
+      const prepared = prepareExpense(
+        (res.data ?? {}) as unknown as ExpenseInput,
+        trip,
+        { today, actorName: memberName, sourceText: null },
+      )
+      const expense = prepared.expense
 
-      normalizeExpenseAmountMaps(expense)
-
-      // 成員名稱：先嘗試對應回正式名稱（暱稱、大小寫、部分符合都能救回來）。
-      // 對不上的名字由 resolveExpenseMembers 從 map 裡拿掉，後面的
-      // applyParticipantDefaults 會補上旅程預設 —— 照片留著、卡片照出，
+      // 成員名稱：prepareExpense 會先嘗試對應回正式名稱（暱稱、大小寫、部分符合
+      // 都能救回來），對不上的從 map 裡拿掉並補上旅程預設 —— 照片留著、卡片照出，
       // 使用者按「✏️ 編輯」改就好（M10）。
       // 以前是刪照片、要人家重傳一次，只為了改一個名字。
-      const { unresolved } = resolveExpenseMembers(expense, trip.members)
+      const unresolved = prepared.unresolvedMembers
       const memberWarning = unresolved.length > 0
         ? `⚠️ 收據的分帳裡有對不上的名字：${unresolved.join('、')}\n`
           + `（目前成員：${trip.members.join('、')}）\n`
@@ -179,28 +173,18 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         : null
       if (unresolved.length > 0) console.warn(`[OCR] Unresolvable members: ${unresolved.join(', ')}`)
 
-      // 幣別與日期的把關。以前這兩個欄位是 AI 講什麼就寫什麼，
-      // 幻想出來的幣別會讓金額在統計時默默失真，錯誤的年份則會讓支出跑到別的月份去。
-      // 幣別先走規則（T3）：AI 說 none 就一律用旅程的記帳預設幣別。
-      // OCR 沒有使用者文字可以驗證 stated，所以 text 傳 null 代表直接採信。
-      const ocrRule = resolveCurrencyByRule(expense.currency, expense.currency_source, null, trip)
-      if (ocrRule.overrode) {
-        console.log(`[CURRENCY] OCR said ${expense.currency} (source=${expense.currency_source}), using ${ocrRule.currency}`)
-      }
-      expense.currency = ocrRule.currency
-      const ocrCurrency = normalizeCurrency(expense.currency, trip)
-      if (ocrCurrency.reject) {
+      if (prepared.reject) {
         // 這趟旅程沒有這個幣別的匯率。直接存下去統計會以 1:1 換算而失真，
         // 所以還是不能存 —— 但**照片要留著**（M10）。
         // 以前是連照片一起刪掉，使用者設好匯率後還得把收據重拍一次。
         // 改成把辨識結果暫存起來，附上「以 XXX 存入」的快速回覆讓他當場選一個幣別。
+        // （prepareExpense 被拒時仍回傳正規化好的內容，所以這裡直接存得下去。）
         const available = Object.keys(trip.rates ?? {})
-        applyParticipantDefaults(expense, trip, memberName)
         const pendingNonce = Math.random().toString(36).substring(2, 10)
         await storePendingExpense(sourceId, pendingNonce, {
           exp: {
             d: expense.description, a: expense.amount, c: expense.currency,
-            dt: normalizeDate(expense.date, today).date, cat: expense.category,
+            dt: expense.date, cat: expense.category,
             p: expense.payer_data, s: expense.split_details,
           },
           p: [messageId], tid: tripId,
@@ -215,7 +199,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         }))
         await replyMessage(replyToken, [{
           type: 'text',
-          text: `${ocrCurrency.reject}\n\n📷 收據已經先幫你留著了，選一個幣別就能直接存入（金額不會換算）。`,
+          text: `${prepared.reject}\n\n📷 收據已經先幫你留著了，選一個幣別就能直接存入（金額不會換算）。`,
           quickReply: {
             items: [
               ...currencyItems,
@@ -225,32 +209,11 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         }], sourceId)
         return
       }
-      expense.currency = ocrCurrency.currency
-      const ocrDate = normalizeDate(expense.date, today)
-      expense.date = ocrDate.date
-      // 分類也要驗（M18）：AI 回「美食」但旅程只有「餐飲」時，
-      // 以前會原封不動存進去，網頁的分類統計就多出一個永遠選不到的欄位（F7）。
-      const ocrCategory = resolveCategory(expense.category, trip.categories, trip.default_category)
-      expense.category = ocrCategory.category
-      const ocrWarnings = [memberWarning, ocrCurrency.warning, ocrCategory.warning, ocrDate.warning].filter(Boolean) as string[]
-
-      // AI 偶爾會回空的付款人或分攤，卡片會出現整片空白的區塊，
-      // 按下確認才在 Σ 檢查那裡爆掉。先套上與網頁快速記帳一致的預設值（H6）。
-      // 補上的預設值只是 0 佔位：分配時必須改傳 {} 當 lockedData，
-      // 否則 0 會被 calculateDistribution 當成「鎖定金額」，整筆餘額落到調整成員身上。
-      const { filledPayer, filledSplit } = applyParticipantDefaults(expense, trip, memberName)
-
-      const precision = (trip?.precision_config as PrecisionConfig | null)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
-      expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
-      const payerMembers = Object.keys(expense.payer_data)
-      const splitMembers = Object.keys(expense.split_details)
-      const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
-      if (payerMembers.length > 0) {
-        expense.payer_data = calculateDistribution(expense.amount, payerMembers, filledPayer ? {} : expense.payer_data, payerMembers[0], precision)
-      }
-      if (splitMembers.length > 0) {
-        expense.split_details = calculateDistribution(expense.amount, splitMembers, filledSplit ? {} : expense.split_details, adjustMember, precision)
-      }
+      // 幣別、日期、分類的把關與付款人／分攤的預設值都在 prepareExpense 裡做完了
+      // （幻想出來的幣別會讓金額在統計時默默失真，錯誤的年份會讓支出跑到別的月份去，
+      //  不存在的分類會在網頁統計多出一個永遠選不到的欄位 —— M18、F7）。
+      // 成員警告是 OCR 專屬的，排在最前面。
+      const ocrWarnings = [memberWarning, ...prepared.warnings].filter(Boolean) as string[]
 
       const photo_ids = [messageId]
       const nonce = Math.random().toString(36).substring(2, 10)

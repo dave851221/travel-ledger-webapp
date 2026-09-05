@@ -11,21 +11,14 @@
 //    AI 只看得到最近 10 筆，讓它自己加總一定是錯的（M6）。
 // ============================================================
 
-import { Decimal } from "../../_shared/deps.ts"
-import { calculateDistribution, DEFAULT_PRECISION, formatAmount } from "../../_shared/finance.ts"
+import { formatAmount } from "../../_shared/finance.ts"
+import { prepareExpense } from "../../_shared/tools/expenses.ts"
 import {
-  applyParticipantDefaults,
   claimsCompletedAction,
   extractJSON,
   matchExpensesByQuestion,
   mentionsEditingExisting,
-  normalizeCurrency,
-  normalizeDate,
-  normalizeExpenseAmountMaps,
   pickExpenseByRef,
-  resolveCategory,
-  resolveCurrencyByRule,
-  resolveExpenseMembers,
   summarizeHistoryEntry,
   summarizeTripExpenses,
 } from "../guards.ts"
@@ -46,7 +39,8 @@ import {
 import { pushMessage, replyMessage } from "../line-api.ts"
 import { buildDraftLiffUrl, buildExpenseCard, replyEditPicker } from "../messages.ts"
 import { runInBackground } from "../util.ts"
-import type { ExpenseRow, PrecisionConfig } from "../../_shared/types.ts"
+import type { ExpenseInput } from "../../_shared/tools/types.ts"
+import type { ExpenseRow } from "../../_shared/types.ts"
 
 /** 近期支出與全庫搜尋只 select 這幾個欄位 */
 type RecentExpense = Pick<
@@ -55,7 +49,6 @@ type RecentExpense = Pick<
 >
 import type {
   ChatHistoryRow,
-  ExpenseDraft,
   GeminiContent,
   PhotoSelectResponse,
   TextResponse,
@@ -245,9 +238,6 @@ ${draftSummary || '（沒有等待確認的草稿）'}
     })
     const res = JSON.parse(extractJSON(aiResponse)) as TextResponse
     if (res.type === 'expense') {
-      // normalizeExpenseAmountMaps 之後金額欄位一定是 map，才收斂成 ExpenseDraft
-      const expense = res.data as ExpenseDraft
-
       // 第二道防線（T1）：使用者說的是「改」，現場卻沒有任何可以修的草稿，
       // AI 也沒指名 corrects_draft —— 那它是把「剛剛那個改250」誤當成新支出了，
       // 照著出卡片會憑空多記一筆。改列已存檔紀錄的編輯清單。
@@ -265,10 +255,19 @@ ${draftSummary || '（沒有等待確認的草稿）'}
         return
       }
 
-      normalizeExpenseAmountMaps(expense)
+      // 驗證與分帳整段走共用工具層（_shared/tools/expenses.ts），與 OCR 路徑、
+      // 「確認存入」用的是同一份實作。sourceText 給使用者的原話 ——
+      // 幣別宣稱 stated 時要拿它驗一次，文字裡真的有幣別字眼才採信（T3）。
+      const prepared = prepareExpense(
+        (res.data ?? {}) as unknown as ExpenseInput,
+        trip,
+        { today, actorName: memberName, sourceText: cleanText },
+      )
+      const expense = prepared.expense
 
-      // 同上：先試著把暱稱對應回正式名稱
-      const { unresolved: unknownMembers } = resolveExpenseMembers(expense, trip.members)
+      // 先試著把暱稱對應回正式名稱，真的對不上才退回請使用者重講。
+      // （OCR 路徑只警告 —— 那邊照片已經上傳，重拍的代價比重打一句話大得多。）
+      const unknownMembers = prepared.unresolvedMembers
       if (unknownMembers.length > 0) {
         console.warn(`[TEXT] Unknown members detected: ${unknownMembers.join(', ')}`)
         await replyMessage(replyToken, [{
@@ -279,46 +278,15 @@ ${draftSummary || '（沒有等待確認的草稿）'}
         return
       }
 
-      // 幣別與日期的把關，與 OCR 路徑相同。
-      // 幣別先走規則（T3）：小模型常把 context 裡的「結算主幣」當成該填的值，
-      // 「夾娃娃300」在主幣 TWD／預設 JPY 的旅程就會出 TWD 的卡片。
-      // 這裡不信 AI 的判斷 —— stated 還要文字裡真的有幣別字眼才算數。
-      const textRule = resolveCurrencyByRule(expense.currency, expense.currency_source, cleanText, trip)
-      if (textRule.overrode) {
-        console.log(`[CURRENCY] AI said ${expense.currency} (source=${expense.currency_source}) but "${cleanText}" has no currency hint, using ${textRule.currency}`)
-      }
-      expense.currency = textRule.currency
-      const textCurrency = normalizeCurrency(expense.currency, trip)
-      if (textCurrency.reject) {
+      // 這趟旅程沒有這個幣別的匯率 —— 存下去統計會以 1:1 換算而失真。
+      // （文字路徑沒有照片要留，直接請使用者換一個幣別就好。）
+      if (prepared.reject) {
         await replyMessage(replyToken, [{
-          type: 'text', text: textCurrency.reject, quickReply: boundQR,
+          type: 'text', text: prepared.reject, quickReply: boundQR,
         }], sourceId)
         return
       }
-      expense.currency = textCurrency.currency
-      const textDate = normalizeDate(expense.date, today)
-      expense.date = textDate.date
-      // 分類的把關，與 OCR 路徑相同（M18）
-      const textCategory = resolveCategory(expense.category, trip.categories, trip.default_category)
-      expense.category = textCategory.category
-      const textWarnings = [textCurrency.warning, textCategory.warning, textDate.warning].filter(Boolean) as string[]
-
-      // AI 偶爾會回空的付款人或分攤，補上與網頁快速記帳一致的預設值（H6）
-      // 補上的預設值只是 0 佔位：分配時必須改傳 {} 當 lockedData，
-      // 否則 0 會被 calculateDistribution 當成「鎖定金額」，整筆餘額落到調整成員身上。
-      const { filledPayer, filledSplit } = applyParticipantDefaults(expense, trip, memberName)
-
-      const precision = (trip.precision_config as PrecisionConfig | null)?.[expense.currency] ?? DEFAULT_PRECISION[expense.currency] ?? 2
-      expense.amount = new Decimal(expense.amount || 0).toDecimalPlaces(precision).toNumber()
-      const payerMembers = Object.keys(expense.payer_data)
-      const splitMembers = Object.keys(expense.split_details)
-      const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
-      if (payerMembers.length > 0) {
-        expense.payer_data = calculateDistribution(expense.amount, payerMembers, filledPayer ? {} : expense.payer_data, payerMembers[0], precision)
-      }
-      if (splitMembers.length > 0) {
-        expense.split_details = calculateDistribution(expense.amount, splitMembers, filledSplit ? {} : expense.split_details, adjustMember, precision)
-      }
+      const textWarnings = prepared.warnings
 
       // AI 指名要修正哪一張草稿？只有對得上的 nonce 才算數。
       const correctsNonce = String(res.corrects_draft ?? '').trim()
@@ -337,7 +305,7 @@ ${draftSummary || '（沒有等待確認的草稿）'}
       // 計程車那筆就會掛著別人的發票（H1）。
       const photo_ids = correctedDraft && correctedDraft.photoIds.length > 0
         ? correctedDraft.photoIds
-        : (expense.photo_ids || [])
+        : ((res.data as { photo_ids?: string[] } | undefined)?.photo_ids ?? [])
 
       // 摘要要帶 nonce，AI 下一輪才有辦法指名它要修正哪一張
       const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, nonce }, null, 2)}`

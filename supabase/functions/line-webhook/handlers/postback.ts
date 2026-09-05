@@ -10,8 +10,9 @@
 
 import { Decimal } from "../../_shared/deps.ts"
 import { calculateDistribution, DEFAULT_PRECISION } from "../../_shared/finance.ts"
+import { commitExpense, deleteExpense } from "../../_shared/tools/expenses.ts"
 import { RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
-import type { EventContext } from "../context.ts"
+import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import {
   getPendingExpense,
@@ -25,8 +26,17 @@ import {
   buildExpenseCard,
   describeProcessedAction,
 } from "../messages.ts"
-import type { AmountMap, PrecisionConfig } from "../../_shared/types.ts"
+import type { ScopedContext } from "../../_shared/tools/types.ts"
+import type { PrecisionConfig } from "../../_shared/types.ts"
 import type { DraftExpense, PostbackData, PostbackEvent } from "../types.ts"
+
+/**
+ * 刪除／還原只需要「哪個資料庫、哪一趟旅程」，為它們多查一次整趟旅程並不划算。
+ * ctx.isBound 是呼叫端的前提，所以 current_trip_id 必定有值。
+ */
+function toolScope(tripId: string | null): ScopedContext {
+  return { db: supabase, trip: { id: tripId as string } }
+}
 
 /** 處理一則 postback。呼叫端已經確認 ctx.isBound。 */
 export async function handlePostback(ctx: EventContext, event: PostbackEvent): Promise<void> {
@@ -54,37 +64,26 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到可撤銷的記錄。' }], sourceId)
       return
     }
-    const { data: target } = await supabase.from('expenses')
-      .select('description, deleted_at')
-      .eq('id', expenseId)
-      .eq('trip_id', userState.current_trip_id)
-      .maybeSingle()
-    const description = target?.description || postbackData.d || '該筆支出'
-
-    if (!target) {
-      await replyMessage(replyToken, [{
-        type: 'text', text: '❌ 找不到這筆支出，可能已被永久刪除，或不屬於目前綁定的旅程。',
-      }], sourceId)
-      return
-    }
-    // 已經撤銷過就別再 UPDATE 一次：deleted_at 被刷新的話，
+    // 軟刪除走共用工具層：旅程範圍與「已經在垃圾桶裡就不要再 UPDATE 一次」
+    // 都在 deleteExpense 裡面 —— deleted_at 被刷新的話，
     // 網頁垃圾桶的 24 小時保留期會整個重算（H3）。
-    if (target.deleted_at) {
-      await replyMessage(replyToken, [{
-        type: 'text', text: `ℹ️ 「${description}」先前已經撤銷了。`, quickReply: boundQR,
-      }], sourceId)
+    const undoResult = await deleteExpense(expenseId, toolScope(userState.current_trip_id))
+    const description = undoResult.description || postbackData.d || '該筆支出'
+
+    if (!undoResult.ok) {
+      const text = undoResult.reason === 'not_found'
+        ? '❌ 找不到這筆支出，可能已被永久刪除，或不屬於目前綁定的旅程。'
+        : undoResult.reason === 'already_deleted'
+          ? `ℹ️ 「${description}」先前已經撤銷了。`
+          : '❌ 撤銷失敗，請至網頁手動刪除。'
+      // 「找不到」與「撤銷失敗」都是異常狀況，維持原本不附快速回覆的樣子
+      const message = undoResult.reason === 'already_deleted'
+        ? { type: 'text', text, quickReply: boundQR }
+        : { type: 'text', text }
+      await replyMessage(replyToken, [message], sourceId)
       return
     }
-
-    const { error } = await supabase.from('expenses')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', expenseId)
-      .is('deleted_at', null)
-    if (error) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 撤銷失敗，請至網頁手動刪除。' }], sourceId)
-    } else {
-      await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}`, quickReply: boundQR }], sourceId)
-    }
+    await replyMessage(replyToken, [{ type: 'text', text: `↩️ 已撤銷：${description}`, quickReply: boundQR }], sourceId)
     return
   }
 
@@ -180,32 +179,29 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這筆支出。' }], sourceId)
       return
     }
-    const { data: target } = await supabase.from('expenses')
-      .select('description, deleted_at').eq('id', expenseId).maybeSingle()
+    // 與 undo 走同一支 deleteExpense。⚠️ 這裡因此多了**旅程範圍**的保護：
+    // 以前只比對 id，切換旅程後按舊清單上的按鈕會刪到別趟旅程的支出（J4）。
+    const delResult = await deleteExpense(expenseId, toolScope(userState.current_trip_id))
 
-    if (!target) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 這筆支出已不存在。' }], sourceId)
+    if (!delResult.ok) {
+      if (delResult.reason === 'already_deleted') {
+        await replyMessage(replyToken, [{
+          type: 'text', text: `ℹ️ 「${delResult.description}」先前已經刪除了。`, quickReply: boundQR,
+        }], sourceId)
+      } else if (delResult.reason === 'not_found') {
+        await replyMessage(replyToken, [{ type: 'text', text: '❌ 這筆支出已不存在。' }], sourceId)
+      } else {
+        await replyMessage(replyToken, [{ type: 'text', text: '❌ 刪除失敗，請至網頁操作。' }], sourceId)
+      }
       return
     }
-    if (target.deleted_at) {
-      await replyMessage(replyToken, [{
-        type: 'text', text: `ℹ️ 「${target.description}」先前已經刪除了。`, quickReply: boundQR,
-      }], sourceId)
-      return
-    }
 
-    const { error } = await supabase.from('expenses')
-      .update({ deleted_at: new Date().toISOString() }).eq('id', expenseId)
-    if (error) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 刪除失敗，請至網頁操作。' }], sourceId)
-    } else {
-      const by = speakerLabel ? `（由 ${speakerLabel} 刪除）` : ''
-      await replyMessage(replyToken, [{
-        type: 'text',
-        text: `🗑 已刪除：${target.description}${by}\n\n24 小時內可到網頁的垃圾桶還原。`,
-        quickReply: boundQR,
-      }], sourceId)
-    }
+    const by = speakerLabel ? `（由 ${speakerLabel} 刪除）` : ''
+    await replyMessage(replyToken, [{
+      type: 'text',
+      text: `🗑 已刪除：${delResult.description}${by}\n\n24 小時內可到網頁的垃圾桶還原。`,
+      quickReply: boundQR,
+    }], sourceId)
     return
   }
 
@@ -258,87 +254,68 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
 
     const photo_urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
 
-    const { data: trip } = await supabase.from('trips')
-      .select('precision_config, members, is_archived, default_payer, default_split_members')
-      .eq('id', trip_id).single()
+    const { data: trip } = await supabase.from('trips').select('*').eq('id', trip_id).single()
 
     if (!trip) {
-      // 旅程可能已被刪除（見 docs/DB_MAINTENANCE.md），此時舊卡片的按鈕不該讓整個函式崩掉
+      // 旅程可能已被刪除（見 docs/DB_MAINTENANCE.md），此時舊卡片的按鈕不該讓整個函式崩掉。
+      // ⚠️ 這一路與「已封存」都刻意**不** releaseNonce：那張卡片本來就再也存不進去了。
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId);
       return;
     }
-    if (trip.is_archived) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 此旅程已封存，無法新增支出。' }], sourceId);
-      return;
-    }
 
-    // 卡片產生時一定填好了 currency，只是短鍵／長鍵兩種來源在型別上都是選填
-    const currency = expense.currency as string
-    const precision = (trip.precision_config as PrecisionConfig | null)?.[currency] ?? DEFAULT_PRECISION[currency] ?? 2
-    const numAmount = new Decimal(parseFloat(String(expense.amount)) || 0).toDecimalPlaces(precision).toNumber()
-    const payerMembers = Object.keys(expense.payer_data).filter(m => trip.members.includes(m))
-    const splitMembers = Object.keys(expense.split_details).filter(m => trip.members.includes(m))
+    // 封存、成員過濾（M12）、Σ 檢查與 insert 全部在 commitExpense 裡 ——
+    // 與 OCR／文字路徑的 prepareExpense 同屬一份共用工具層。
+    // 卡片產生時一定填好了幣別與日期，只是短鍵／長鍵兩種來源在型別上都是選填。
+    const saveResult = await commitExpense({
+      description: expense.description ?? '',
+      amount: parseFloat(String(expense.amount)) || 0,
+      currency: String(expense.currency ?? ''),
+      date: String(expense.date ?? ''),
+      category: String(expense.category ?? ''),
+      payer_data: expense.payer_data,
+      split_details: expense.split_details,
+      adjustment_member: null,
+    }, {
+      db: supabase, trip, today: tripToday(trip), actorName: ctx.memberName,
+    }, { photoUrls: photo_urls })
 
-    // 空的付款人或分攤名單過去會一路走到「Σ != 總額」，
-    // 使用者收到的是「財務運算發生錯誤，請聯絡管理員」這種毫無頭緒的訊息。
-    // 卡片產生時已經補過預設值（applyParticipantDefaults），
-    // 走到這裡還是空的多半是成員在存檔前被刪掉了，只能請使用者重新編輯。
-    if (payerMembers.length === 0 || splitMembers.length === 0) {
-      console.warn(`[SAVE] Empty participants after filtering. trip=${trip_id}`)
-      // 沒有存成功就把 nonce 放掉，卡片上的按鈕才還能用（不然連「✏️ 編輯」都會說已處理過）
+    if (!saveResult.ok) {
+      // 存不進去的三種情況都要把 nonce 放掉，卡片上的按鈕才還能用
+      // （不然連我們自己叫使用者去按的「✏️ 編輯」都會說已處理過）。
+      // 封存與旅程不見則維持現狀不放 —— 那張卡片已經沒有出路了。
+      if (saveResult.reason === 'archived' || saveResult.reason === 'trip_missing') {
+        const text = saveResult.reason === 'archived'
+          ? '❌ 此旅程已封存，無法新增支出。'
+          : '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。'
+        await replyMessage(replyToken, [{ type: 'text', text }], sourceId)
+        return
+      }
+
       await releaseNonce(nonce)
-      await replyMessage(replyToken, [{
-        type: 'text',
-        text: '😅 這筆的付款人或分攤成員是空的（可能是成員已被移除），無法存入。\n\n請按卡片上的「✏️ 編輯」補上，或直接重說一次。',
-        quickReply: boundQR,
-      }], sourceId)
+      if (saveResult.reason === 'empty_participants') {
+        // 卡片產生時已經補過預設值（applyParticipantDefaults），
+        // 走到這裡還是空的多半是成員在存檔前被刪掉了，只能請使用者重新編輯。
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: '😅 這筆的付款人或分攤成員是空的（可能是成員已被移除），無法存入。\n\n請按卡片上的「✏️ 編輯」補上，或直接重說一次。',
+          quickReply: boundQR,
+        }], sourceId)
+      } else if (saveResult.reason === 'dropped_members') {
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: `😅 這張卡片上的「${(saveResult.dropped ?? []).join('、')}」已經不在旅程成員裡了，不能就這樣存入 —— `
+            + `他的那一份會被默默算到別人頭上。\n\n`
+            + `目前成員：${trip.members.join('、')}\n\n`
+            + `請按卡片上的「✏️ 編輯」重新分攤，或直接重說一次。`,
+          quickReply: boundQR,
+        }], sourceId)
+      } else {
+        await replyMessage(replyToken, [{ type: 'text', text: `❌ 財務運算發生錯誤，請聯絡管理員。` }], sourceId)
+      }
       return
     }
 
-    // 卡片上有、但成員清單裡已經沒有的名字（M12）。
-    //
-    // ⚠️ 不能默默存下去：被移除的人的份額會被 calculateDistribution
-    //    當成餘數加到調整成員身上，Σ 仍然等於總額，所以下面的檢查也攔不住 ——
-    //    帳面上完全正常，只是有個人平白多背了一份。
-    const droppedPayers = Object.keys(expense.payer_data).filter(m => !trip.members.includes(m))
-    const droppedSplits = Object.keys(expense.split_details).filter(m => !trip.members.includes(m))
-    const dropped = [...new Set([...droppedPayers, ...droppedSplits])]
-    if (dropped.length > 0) {
-      console.warn(`[SAVE] Members no longer in trip: ${dropped.join(', ')}`)
-      await releaseNonce(nonce)
-      await replyMessage(replyToken, [{
-        type: 'text',
-        text: `😅 這張卡片上的「${dropped.join('、')}」已經不在旅程成員裡了，不能就這樣存入 —— `
-          + `他的那一份會被默默算到別人頭上。\n\n`
-          + `目前成員：${trip.members.join('、')}\n\n`
-          + `請按卡片上的「✏️ 編輯」重新分攤，或直接重說一次。`,
-        quickReply: boundQR,
-      }], sourceId)
-      return
-    }
-
-    const adjustMember = payerMembers.find(m => splitMembers.includes(m)) ?? splitMembers[0]
-    const finalPayerData = calculateDistribution(numAmount, payerMembers, expense.payer_data, payerMembers[0], precision)
-    const finalSplitData = calculateDistribution(numAmount, splitMembers, expense.split_details, adjustMember, precision)
-
-    const checkSum = (data: AmountMap) => Object.values(data).reduce((a, b) => a.plus(new Decimal(b)), new Decimal(0))
-    const payerSum = checkSum(finalPayerData)
-    const splitSum = checkSum(finalSplitData)
-    const target = new Decimal(numAmount).toDecimalPlaces(precision)
-
-    if (!payerSum.equals(target) || !splitSum.equals(target)) {
-      console.error(`[CRITICAL_VALIDATION_ERROR] Sum mismatch. P:${payerSum}, S:${splitSum}, T:${target}`)
-      // 同上：沒存成功就把鎖放掉，卡片還能重按或改用「✏️ 編輯」
-      await releaseNonce(nonce)
-      await replyMessage(replyToken, [{ type: 'text', text: `❌ 財務運算發生錯誤，請聯絡管理員。` }], sourceId)
-      return
-    }
-
-    const { data: savedExpense } = await supabase.from('expenses').insert({
-      trip_id: trip_id, description: expense.description, amount: target.toNumber(), currency: expense.currency,
-      payer_data: finalPayerData, split_data: finalSplitData, date: expense.date, category: expense.category,
-      photo_urls: photo_urls, adjustment_member: adjustMember
-    }).select('id').single()
+    const savedExpense = { id: saveResult.id }
 
     // 記錄 expense_id 供文字指令「取消上一筆」使用。
     // ⚠️ 必須 await：Edge Runtime 會在回應送出後中止未完成的 promise，

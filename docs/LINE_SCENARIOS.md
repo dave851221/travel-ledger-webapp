@@ -257,7 +257,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | J1 | 撤銷上一筆 | `取消上一筆`／`撤銷上一筆`／`刪除上一筆` | 軟刪除最近一筆由 LINE 存入的支出 | ✅ | P6 `UNDO_KEYWORDS` |
 | J2 | 連續兩次撤銷 | `取消上一筆` × 2 | 撤銷兩筆不同的支出 | ✅ 取最近 5 筆 `saved`，撤第一筆尚未刪除的 | P6 |
 | J3 | 撤銷群組裡別人記的 | B 說 `取消上一筆`，最近是 A 記的 | 允許，訊息標明「原由 A 記錄」 | ✅ 刻意設計 | P6 |
-| J4 | 刪除清單 | `刪除支出` | 列最近 8 筆，各一顆「🗑 刪除」 | ✅ | P6 `DELETE_LIST_KEYWORDS` |
+| J4 | 刪除清單 | `刪除支出` | 列最近 8 筆，各一顆「🗑 刪除」 | ✅ 按鈕的刪除已改走 `deleteExpense`，**因此多了旅程範圍的保護**：切換旅程後按舊清單上的按鈕，只會回「這筆支出已不存在」，不會刪到別趟旅程的支出 | P6 `DELETE_LIST_KEYWORDS`、P1 del |
 | J5 | 編輯清單 | `編輯支出` | 列最近 6 筆，各一顆 LIFF「✏️ 編輯」 | ✅ 網址改為只帶 `id` 與 `u`（T2） | P6 `EDIT_LIST_KEYWORDS`、`replyEditPicker` |
 | J6 | 自然語言刪除／修改已存檔 | `把昨天那筆刪掉`、`那筆帳改成 800`、`剛才那個刪掉` | 攔下並列清單，不進 AI | ✅ **沒有未確認草稿時**才攔（有草稿時走 I1／I6）；受詞已含「那個／這個／剛剛／剛才／上一個／最近一筆」（T1） | `detectRecordIntent` + `getOutstandingDrafts` |
 | J7 | AI 假稱已刪除 | AI 回「已經幫您刪除了」 | 換成誠實說明 | ✅ | `claimsCompletedAction` |
@@ -265,7 +265,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | J9 | 用描述定位 | `刪除昨天的拉麵` | 直接找到那筆 | ❌ 只會列清單 | — |
 | J10 | 清單裡出現結清紀錄 | 網頁結清後 `編輯支出` | 結清紀錄不該出現 | ✅ 兩個清單都加了 `.not('is_settlement','is',true)`；`ExpenseModal` 也改為沿用原值 | P6 查詢、`ExpenseModal` |
 | J11 | LIFF 編輯舊支出後說 `取消上一筆` | 編輯三天前的支出 → `取消上一筆` | 應撤最近「新增」的 | ✅ M11 已修：`ExpenseModal` 改帶 `mode: 'update' \| 'insert'`，`liff-notify` 只有 insert 才寫 `saved`；更新的推播文字改成「✏️ 已透過 LIFF 更新」且不附「撤銷」按鈕 | `liff-notify`、`ExpenseModal` |
-| J12 | 刪除已刪除的 | 清單按兩次同一筆 | 第二次說「先前已經刪除了」 | ✅ | P1 del |
+| J12 | 刪除已刪除的 | 清單按兩次同一筆 | 第二次說「先前已經刪除了」 | ✅ 改由 `_shared/tools/expenses.ts` 的 `deleteExpense` 統一把關 | P1 del |
 | J13 | `saved` 紀錄沒寫進去 | Edge Runtime 提早結束 | 撤銷仍指向正確那筆 | ✅ 這一筆改為 `await`，其餘背景工作走 `runInBackground`（`EdgeRuntime.waitUntil`） | P1 save |
 | J14 | 編輯清單網址過長 | 多成員、多照片、長描述 | 清單正常送出 | ✅ T2 已修（M2 提前做）：網址只剩 `tripId`／`id`／`u`，固定百餘字元，與支出內容無關 | `buildEditLiffUrl` |
 | J15 | 刪除清單裡的 LIFF 編輯已存支出 | 從清單開 LIFF 改金額 | UPDATE 而非 INSERT | ✅ payload 帶 `id` | `LiffEdit.decoded.id` |
@@ -273,6 +273,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | J17 | 撤銷時支出已被網頁硬刪 | — | 回「找不到」而不是成功 | ✅ 兩處都先 SELECT 再決定回覆（查無 → 「找不到這筆支出」） | P1 undo、P6 |
 | J18 | 沒草稿時用「那個」「剛剛」指稱要改 | 存檔後 `剛剛那個改250` | 列編輯清單，**不可以**多記一筆 | ✅ T1 已修，兩層防線：①`detectRecordIntent` 的受詞加了指示代名詞，路由層就攔下；②真的進了 AI 且它回 `expense` 時，若沒有任何未確認草稿、沒填 `corrects_draft`、`mentionsEditingExisting()` 又為 true，改列清單並加註「如果其實是要新記一筆，請不要用『改』來描述」 | `guards.ts`、P6、P8、`replyEditPicker` |
 | J19 | 改完再按同一顆編輯看到新資料 | 從清單開 LIFF 改成 800 存檔 → 回 LINE 再按同一列的「✏️ 編輯」 | 表單顯示 800 | ✅ T2 已修：`LiffEdit` 每次開啟都用 `id` 直接查 DB。找不到或 `deleted_at` 非空就顯示「這筆支出已被刪除或不存在」 | `LiffEdit` |
+| J20 | 工具層改支出時換幣別 | `update_expense` 把 USD 100.50 改成 JPY | 金額與分帳依**新幣別的精度**重算（100.50 → 101，分攤重新湊回 101） | ⚠️ 已知差異：網頁的 `ExpenseModal` 換幣別時只換標籤、不改精度。工具層這樣做是為了讓 Σ 一定等於總額；目前只有 `_shared/tools/registry.ts` 的 `update_expense` 會走到，LINE 還沒有入口（P3 才接） | `prepareExpenseUpdate` |
 
 ---
 
