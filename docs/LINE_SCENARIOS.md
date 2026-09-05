@@ -12,7 +12,7 @@
 以後改 Bot 邏輯前，先掃過相關章節；改完後逐條驗證。要加新功能，先在這裡加情境再動手。
 
 依據的程式版本：H1–H12、第 12 章的 Feature F、第 13 章的 T1–T4 都已實作完成（2026-09-04），
-第 14 章的 **Feature G（文字路徑改 Gemini function calling）已於 2026-09-05 完成，尚未部署**；
+第 14 章的 **Feature G（文字路徑改 Gemini function calling）已於 2026-09-05 完成並部署上線**；
 第 10.2 節的 **M1–M19 已全部完成**（M2 隨 T2；M1/M3/M5–M8/M10–M13/M16–M19 於 2026-09-05；
 M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 文中提到的行號來自修正前的 `index.ts`，現在已經漂移，請一律以函式名與註解關鍵字為準。
@@ -654,7 +654,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 > **狀態（2026-09-04）**：T3 → T1 → T4 → T2 **已全部實作完成**，每個 T 都跑過
 > `lint / test / check:functions / build` 四關。下面的修法內容保留下來當作
 > 「為什麼要這樣寫」的紀錄。對應的情境列（含新增的 J18、J19、D10、K23、K24、K25）已更新。
-> ⚠️ **尚未部署**：T1／T3／T4 只動 Edge Function，T2 前端與 Edge Function 必須同時上線。
+> ✅ **已部署**（2026-09-05）：前端與 Edge Function 都已上線。
 
 ### T1　「剛剛那個改 250」沒有草稿時被當成新支出，重複記了一筆
 
@@ -750,7 +750,7 @@ T3 → T1 → T4 → T2。前三個只動 Edge Function，可以一起部署驗�
 
 ## 14. Feature G：文字路徑改用 Gemini function calling
 
-> **狀態（2026-09-05）**：✅ 已實作，尚未部署（Edge Function 要另外 `npm run fn:deploy`）。
+> **狀態（2026-09-05）**：✅ 已實作並部署上線，已通過真機回歸（見本章末的驗證紀錄）。
 > 迴圈在 [`_shared/gemini.ts`](../supabase/functions/_shared/gemini.ts)（由 `gemini.test.ts` 看守），
 > 函式清單在 `line-webhook/gemini.ts`，分派在 `handlers/ai-text.ts`。
 > **OCR 路徑（`handlers/image.ts`）維持 JSON mode 不動。**

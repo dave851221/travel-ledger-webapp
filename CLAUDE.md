@@ -72,7 +72,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 - **路由**：HashRouter，base path `/travel-ledger-webapp/`（對應 GitHub Pages）
 - **頁面流程**：`Home` → `TripPortal`（通行碼關卡）→ `Dashboard`
-- **`Dashboard.tsx`** 是主畫面，目前約 **1460 行**，包含 **6 個分頁**：
+- **`Dashboard.tsx`** 是主畫面，目前約 **1270 行**，包含 **6 個分頁**：
   帳目（ledger）、統計（stats）、結算（settlement）、行程（itinerary）、
   回收桶（recycle）、其他旅程（siblings，同 `category` 的旅程）。
   所有 Supabase 即時訂閱、旅程狀態、六個 Modal 與 30 個 `useState` 都在這一個元件裡。

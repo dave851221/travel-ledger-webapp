@@ -16,6 +16,51 @@ LINE Bot 的記帳、刪除與結算都走它（見 CLAUDE.md 的「共用工具
 
 ---
 
+## 0. 現在能不能接？（一句話：還不行）
+
+**不行 —— 現在還沒有任何對外的網址可以讓 MCP 客戶端連進來。**
+
+「工具層」與「傳輸層」是兩件事：
+
+| 層 | 負責什麼 | 狀態 |
+| :--- | :--- | :--- |
+| 工具實作層 | 記一筆帳要驗證什麼、金額怎麼分、餘額怎麼算 | ✅ `_shared/tools/`，已上線 |
+| 傳輸層（transport） | 別人**怎麼連進來**、怎麼問「你有哪些工具」、怎麼呼叫、怎麼證明自己有權限 | ❌ 還沒有 |
+
+現在那些工具只有一個呼叫端：LINE Bot 的 Edge Function，它是在**自己的行程裡**
+直接 import 進來用的（`import { createExpense } from '../_shared/tools/…'`）。
+外面的 Claude Desktop、Claude Code 或任何 MCP 客戶端沒有辦法 import 一個
+跑在 Supabase 上的 TypeScript 檔案 —— 它們講的是 MCP 這個協定，
+需要一個聽得懂 JSON-RPC 的網址。
+
+要能接，還差三件具體的東西：
+
+1. **一支 `supabase/functions/mcp-server/`**：實作 MCP 的 Streamable HTTP transport，
+   把 `tools/list`（回報有哪些工具）與 `tools/call`（實際執行）對應到
+   `_shared/tools/registry.ts` 的 `TOOLS` 與 `runTool()`。
+   工具的 `inputSchema` 已經是標準 JSON Schema，可以直接回給客戶端，不必再寫一份。
+2. **§3 的 `trip_access_tokens` 表與網頁上的產生／撤銷介面**：
+   沒有它就無法回答「連進來的這個人可以碰哪一趟旅程」。
+   工具層已經為此鋪好路 —— 它不自己建 Supabase client，
+   而是由呼叫端把 client 與旅程放進 `ToolContext` 傳進去，
+   所以權限可以在進入工具之前就鎖死。
+3. **在客戶端登錄那個網址**（例如 Claude Desktop 的設定檔）。
+
+工作量主要在第 1、2 項，第 3 項只是貼一行設定。
+
+### 那現在想從別的地方記帳，有什麼替代方案？
+
+- **手錶或手機用 LINE 的語音輸入**對機器人講話。這是今天就能用的，
+  而且文字路徑已經支援自然語言的修改、刪除與查詢（Feature G），
+  體驗未必比 MCP 差。詳見 §5 的評估。
+- **自己寫程式打 Supabase**：知道 anon key 與旅程 UUID 就能直接讀寫
+  （因為 RLS 目前全開，見 [`ROADMAP.md`](ROADMAP.md) 風險 1）。
+  但這條路**繞過了工具層的所有驗證**，分帳的餘數、幣別、成員名稱都得自己算對，
+  不建議 —— 專案在財務計算上吃過重複實作漂移的虧。
+
+
+---
+
 ## 1. 為什麼是 MCP
 
 這份文件寫下來的時候，所有 AI 記帳能力都綁在 `line-webhook` 這支 Edge Function 裡：
@@ -166,7 +211,7 @@ supabase/functions/
 │   ├── finance.ts      ← 唯一的 calculateDistribution
 │   └── types.ts
 ├── line-webhook/       ← LINE transport：訊息解析 + Flex 卡片
-└── mcp-server/         ← MCP transport：JSON-RPC（尚未實作）
+└── mcp-server/         ← MCP transport：JSON-RPC（❌ 尚未實作，見 §0）
 ```
 
 工具層刻意**不碰 `Deno.env`、不建 Supabase client**：client 與旅程由呼叫端

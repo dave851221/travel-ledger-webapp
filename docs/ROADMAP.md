@@ -40,7 +40,7 @@ RLS 政策全部是 `FOR ALL USING (true)`（見 [`supabase/schema/05_policies.s
 
 方案 2 改動較小但會動到大量前端查詢，尚未排程。
 
-### 2. ~~垃圾桶的 24 小時判斷依賴客戶端時間~~（已解決，2026-09-07）
+### 2. ~~垃圾桶的 24 小時判斷依賴客戶端時間~~（已解決，2026-09-05）
 
 **已修**：保留期的切割改由資料庫的 `now()` 決定，兩支 STABLE 的 RPC
 `list_trip_trash()` / `list_expired_trash()` 分別回傳「保留期內」與「已過期」兩份清單，
@@ -100,7 +100,8 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
 
 ### 短期
 
-- 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
+- 前端 `Dashboard.tsx` 約 1270 行，持續拆分成分頁元件與 hooks。
+  （資料存取已經抽成 `useTripData` / `useTripStats` / `useTrash`，剩下的是六個分頁的 JSX 與各自的 state。）
 - ~~Edge Function 模組化~~ **已完成**：`index.ts` 從 2778 行縮到約 110 行，
   拆成 `config` / `db` / `util` / `line-api` / `drafts` / `messages` / `gemini` / `context`
   與 `handlers/` 底下的五支路徑處理器；LINE webhook 事件、postback、DB 列與 Gemini
@@ -115,7 +116,8 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
   文字路徑改用 Gemini function calling，模型可以自己呼叫 `list_expenses` / `get_balance` /
   `get_settlement_plan` 查資料，並用 `propose_expense_update` / `propose_expense_delete`
   提議修改或刪除（一律要使用者按確認卡才生效）；`propose_expenses` 一次最多 4 筆。
-  ⚠️ **尚未部署** —— Edge Function 要另外 `npm run fn:deploy`。
+  ✅ 已部署並通過真機回歸（2026-09-05）：五個終結函式與多輪查詢路徑都跑過，
+  零錯誤、零模型 fallback、平均回應 1.3 秒。
 - LINE Bot 尚未支援：**多品項收據拆帳**（一張收據拆成好幾筆，或指定某幾個品項給某個人；
   現在只能靠「收據草稿 + 文字重新分帳」逐項講）。
   LINE 的 `imageSet`（相簿多選被視為同一組）也還沒處理，多頁收據會變成多筆（G4）。
@@ -128,7 +130,12 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
 ### 中期
 
 - **MCP Server**：讓記帳不再侷限於 LINE，可直接由 Claude / Gemini 等 AI 呼叫。
-  設計見 [`MCP_SERVER_DESIGN.md`](MCP_SERVER_DESIGN.md)。最終目標是透過手錶呼叫 AI 記帳。
+  **工具層已經做完**（`_shared/tools/`，LINE Bot 正在用），剩下的是傳輸層與認證：
+  一支 `mcp-server` Edge Function（`tools/list` + `tools/call` 接到 `registry.ts`）
+  與 `trip_access_tokens` 表加上網頁的產生／撤銷介面。
+  在這兩件事做完之前，外部的 MCP 客戶端**沒有辦法連進來** ——
+  缺口與替代方案見 [`MCP_SERVER_DESIGN.md`](MCP_SERVER_DESIGN.md) 第 0 節。
+  最終目標是透過手錶呼叫 AI 記帳。
 - **行程規劃整合**：把記帳與每日行程（景點導航）結合。
 
 ### 長期

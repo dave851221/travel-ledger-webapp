@@ -280,6 +280,10 @@ Yoshi! Yoshi!
 
 ## 3. 技術規格與實作細節
 
+- **查日誌時看什麼**：AI 迴圈每一步都有一行。中間的查詢是
+  `[AI] <模型> r<第幾輪> → <工具名> <參數>`（例如 `r1 → list_expenses {"keyword":"牛"}`），
+  最後收尾的是 `[AI] <模型> → <終結函式名>`。答錯或找錯支出時，
+  這兩行就能還原模型查了什麼、憑什麼那樣判斷。用 MCP 的 `query_logs` 撈。
 - **檔案分工**: `index.ts` 只做驗簽、解析、建 `EventContext` 與分派（約 110 行）；
   五條路徑各自在 [`handlers/`](../supabase/functions/line-webhook/handlers/)
   （`postback.ts`、`image.ts`、`audio.ts`、`commands.ts`、`ai-text.ts`），
