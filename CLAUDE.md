@@ -147,8 +147,9 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 `stripSelfMentions`、`pickExpenseByRef`、`matchExpensesByQuestion`），
 由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
 `check:functions` 只列 `index.ts`，`guards.ts` 透過 import 一起被檢查。
-`guards.ts` 只 import `_shared/finance.ts` 與 `_shared/deps.ts`（Decimal）——
-`vitest.config.ts` 的 alias 同時涵蓋 `./deps.ts` 與 `../_shared/deps.ts` 兩種寫法。
+`guards.ts` 只 import `_shared/finance.ts`、`_shared/deps.ts`（Decimal）與 `_shared/validate.ts` ——
+`vitest.config.ts` 的 alias 用 `/^(?:\.\.?\/)+(?:_shared\/)?deps\.ts$/` 涵蓋所有相對寫法
+（`./deps.ts`、`../deps.ts`、`../_shared/deps.ts`、`../../deps.ts`）。
 
 處理流程：
 

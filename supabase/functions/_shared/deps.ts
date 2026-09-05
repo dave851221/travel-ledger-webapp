@@ -5,3 +5,4 @@
 // 直接在各處寫 https:// import 就做不到這件事。
 
 export { default as Decimal } from 'https://esm.sh/decimal.js@10.4.3';
+export { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';

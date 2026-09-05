@@ -10,3 +10,7 @@ declare module 'papaparse';
 declare module 'https://esm.sh/decimal.js@10.4.3' {
   export { default } from 'decimal.js';
 }
+
+declare module 'https://esm.sh/@supabase/supabase-js@2.39.3' {
+  export { createClient, type SupabaseClient } from '@supabase/supabase-js';
+}

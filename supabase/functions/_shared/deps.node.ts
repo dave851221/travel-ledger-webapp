@@ -2,3 +2,4 @@
 // 正式部署時 Deno 只會看到 deps.ts，這個檔案不會被打包。
 
 export { default as Decimal } from 'decimal.js';
+export { createClient, type SupabaseClient } from '@supabase/supabase-js';
