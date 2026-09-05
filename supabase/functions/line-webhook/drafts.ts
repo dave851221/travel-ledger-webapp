@@ -10,11 +10,12 @@
 
 import { RECEIPTS_BUCKET } from "./config.ts"
 import { supabase } from "./db.ts"
+import type { DraftExpense, PendingDraft } from "./types.ts"
 
 /** 一張還等在聊天室裡、使用者既沒確認也沒取消的記帳草稿 */
 export interface OutstandingDraft {
   nonce: string
-  exp: any
+  exp: DraftExpense
   photoIds: string[]
   tripId: string
 }
@@ -53,7 +54,7 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
   const { data: used } = await supabase.from('line_processed_actions')
     .select('nonce')
     .in('nonce', candidates.map(c => c.nonce))
-  const usedSet = new Set((used ?? []).map((u: any) => u.nonce))
+  const usedSet = new Set((used ?? []).map((u: { nonce: string }) => u.nonce))
 
   return candidates.filter(c => !usedSet.has(c.nonce))
 }
@@ -142,7 +143,7 @@ export async function cancelDraft(
 }
 
 // 將待確認支出暫存於 chat_history，讓 postback 只傳 nonce（避免 300 bytes 上限）
-export async function storePendingExpense(sourceId: string, nonce: string, data: any) {
+export async function storePendingExpense(sourceId: string, nonce: string, data: Omit<PendingDraft, 'n'>) {
   await supabase.from('line_chat_history').insert({
     line_user_id: sourceId,
     role: 'pending',
@@ -150,7 +151,7 @@ export async function storePendingExpense(sourceId: string, nonce: string, data:
   })
 }
 
-export async function getPendingExpense(sourceId: string, nonce: string): Promise<any | null> {
+export async function getPendingExpense(sourceId: string, nonce: string): Promise<PendingDraft | null> {
   const { data } = await supabase.from('line_chat_history')
     .select('content')
     .eq('line_user_id', sourceId)

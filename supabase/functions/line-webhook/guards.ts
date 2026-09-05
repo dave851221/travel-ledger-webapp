@@ -42,7 +42,7 @@ export {
   resolveMember,
   toAmountMap,
 } from "../_shared/validate.ts"
-export type { CurrencySource, TripDefaults } from "../_shared/validate.ts"
+export type { CurrencySource, MutableExpense, TripDefaults } from "../_shared/validate.ts"
 
 /**
  * 判斷使用者是不是想刪除或修改支出。

@@ -34,7 +34,7 @@ npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查
 
 提交前請跑 `npm run lint && npm test && npm run check:functions && npm run build`
 —— CI 這四關都會擋。測試涵蓋 `src/utils/` 的純函式、跨實作的契約比對，
-以及 LINE Bot 的 `supabase/functions/line-webhook/guards.ts`；沒有元件層級的測試。
+以及 LINE Bot 的 `line-webhook/guards.ts` 與它轉出的 `_shared/validate.ts`；沒有元件層級的測試。
 
 `tsc` 只看得到 `src/`，Edge Function 是 Deno 程式碼，必須用 `check:functions`
 才檢查得到 —— 這個專案踩過「部署後靜默失效」的坑，別跳過這一關。
@@ -139,17 +139,49 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 ### LINE Bot Edge Function
 
-`supabase/functions/line-webhook/index.ts`（約 2400 行，Deno）負責路由、DB 存取與 LINE API；
-沒有副作用的純函式都在同目錄的 **`guards.ts`**（`extractJSON`、`toAmountMap`、`resolveMember`、
-`resolveExpenseMembers`、`normalizeCurrency`、`resolveCurrencyByRule`、`resolveCategory`、
-`normalizeDate`、`applyParticipantDefaults`、`detectRecordIntent`、`mentionsEditingExisting`、
-`claimsCompletedAction`、`summarizeHistoryEntry`、`summarizeTripExpenses`、
-`stripSelfMentions`、`pickExpenseByRef`、`matchExpensesByQuestion`），
-由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
-`check:functions` 只列 `index.ts`，`guards.ts` 透過 import 一起被檢查。
+`supabase/functions/line-webhook/` 是一組模組，不再是單一檔案（原本 index.ts 有 2778 行）。
+**`index.ts` 只剩約 110 行**：驗簽、解析事件、建 `EventContext`、分派。
+
+| 檔案 | 行數 | 內容 |
+| :--- | ---: | :--- |
+| `index.ts` | ~110 | 進入點。驗簽 → 解析 → `buildEventContext` → 分派 |
+| `config.ts` | ~45 | env、`WEBAPP_URL`、`RECEIPTS_BUCKET`、TTL、所有路由關鍵字表 |
+| `db.ts` | ~12 | service-role 的 Supabase client 單例 |
+| `util.ts` | ~95 | `runInBackground`、時區推測、`requiresAccessCode`、`isPendingExpired` |
+| `line-api.ts` | ~100 | 驗簽、reply／push、成員名稱、`downloadLineContent` |
+| `drafts.ts` | ~170 | 草稿的存取與失效（`line_chat_history` + `line_processed_actions`） |
+| `messages.ts` | ~315 | 快速回覆、Flex 卡片、LIFF 網址、自我介紹全文 |
+| `gemini.ts` | ~335 | 模型清單、response schema、system instruction、OCR／轉錄 |
+| `context.ts` | ~145 | `EventContext` 與 `buildEventContext`（一則事件只查一次） |
+| `types.ts` | ~350 | LINE 事件、postback、DB 列、Gemini 往來的型別 |
+| `guards.ts` | ~435 | 與 LINE 有關的純函式（見下） |
+| `handlers/postback.ts` | ~400 | undo / cur / del / save / cancel |
+| `handlers/image.ts` | ~315 | 收據 OCR |
+| `handlers/audio.ts` | ~55 | 語音轉文字（回傳 transcript 給文字路徑） |
+| `handlers/commands.ts` | ~645 | 群組觸發判斷 + 所有明確指令與快捷查詢 |
+| `handlers/ai-text.ts` | ~495 | AI 核心 |
+
+**import 方向是單向的，不要繞回去**：
+`config → db → line-api → drafts / messages / gemini → context → handlers/* → index`。
+
+沒有副作用的純函式分成兩處：
+
+- **`_shared/validate.ts`** —— 純粹在驗證「AI 回傳的東西能不能信」，與 LINE 無關，
+  未來接別的記帳管道也用得到：`extractJSON`、`toAmountMap`、`normalizeExpenseAmountMaps`、
+  `normalizeName`、`resolveMember`、`resolveExpenseMembers`、`applyParticipantDefaults`、
+  `resolveCategory`、`hasCurrencyHint`、`resolveCurrencyByRule`、`normalizeCurrency`、`normalizeDate`。
+- **`line-webhook/guards.ts`** —— 跟 LINE 這個管道有關的那些：`detectRecordIntent`、
+  `mentionsEditingExisting`、`stripSelfMentions`、`claimsCompletedAction`、
+  `summarizeHistoryEntry`、`summarizeTripExpenses`、`pickExpenseByRef`、`matchExpensesByQuestion`。
+  它同時**原樣轉出** `validate.ts` 的全部內容，所以 `guards.test.ts` 一行都不必改。
+
+兩邊都由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
+`check:functions` 只列 `index.ts`，其餘模組透過 import 一起被檢查。
 `guards.ts` 只 import `_shared/finance.ts`、`_shared/deps.ts`（Decimal）與 `_shared/validate.ts` ——
 `vitest.config.ts` 的 alias 用 `/^(?:\.\.?\/)+(?:_shared\/)?deps\.ts$/` 涵蓋所有相對寫法
 （`./deps.ts`、`../deps.ts`、`../_shared/deps.ts`、`../../deps.ts`）。
+`_shared/types.ts` 是 Edge Function 端的 `TripRow` / `ExpenseRow`，欄位複製自
+`src/types/index.ts`（不能 import 前端檔案）—— **改前端的 `Trip` / `Expense` 時記得同步**。
 
 處理流程：
 

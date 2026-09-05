@@ -11,6 +11,11 @@ import { WEBAPP_URL } from "./config.ts"
 import { supabase } from "./db.ts"
 import { replyMessage } from "./line-api.ts"
 import { formatAmount, sumByCurrency } from "../_shared/finance.ts"
+import type { ExpenseRow } from "../_shared/types.ts"
+import type { ExpenseCardData, OutgoingMessage, QuickReply } from "./types.ts"
+
+/** replyEditPicker 那份清單每一列讀得到的欄位 */
+type PickerRow = Pick<ExpenseRow, "id" | "description" | "amount" | "currency" | "date">
 
 /** 編輯「旅程 AI 記帳偏好」的 LIFF 頁網址（Feature F） */
 export function preferenceLiffUrl(tripId: string): string {
@@ -47,7 +52,7 @@ export function getQuickReply(
       ]
     }
   }
-  const items: any[] = [
+  const items: QuickReply['items'] = [
     { type: "action", action: { type: "message", label: "📅 今日支出", text: "今日支出" } },
     { type: "action", action: { type: "message", label: "📊 本月支出", text: "本月支出" } },
     { type: "action", action: { type: "message", label: "💰 結算", text: "結算" } },
@@ -79,7 +84,7 @@ export function getQuickReply(
  *      多成員、長描述、多照片時整張清單會直接發不出去（J14）。
  *    舊格式 LiffEdit 仍然看得懂，已發出去的卡片不會壞。
  */
-export function buildEditLiffUrl(expense: any, tripId: string, sourceId: string): string {
+export function buildEditLiffUrl(expense: { id: string }, tripId: string, sourceId: string): string {
   return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&id=${expense.id}&u=${encodeURIComponent(sourceId)}`
 }
 
@@ -106,7 +111,7 @@ export async function replyEditPicker(opts: {
   tripId: string
   sourceId: string
   replyToken: string
-  boundQR: { items: any[] }
+  boundQR: QuickReply
   notice?: string
 }): Promise<void> {
   const { tripId, sourceId, replyToken, boundQR, notice } = opts
@@ -129,8 +134,8 @@ export async function replyEditPicker(opts: {
     return
   }
 
-  const rows: any[] = []
-  recent.forEach((e: any, idx: number) => {
+  const rows: OutgoingMessage[] = []
+  recent.forEach((e: PickerRow, idx: number) => {
     if (idx > 0) rows.push({ type: 'separator', margin: 'md' })
     rows.push({
       type: 'box', layout: 'horizontal', margin: 'md', spacing: 'sm', alignItems: 'center',
@@ -178,16 +183,16 @@ export async function replyEditPicker(opts: {
  * 改一個按鈕就得記得改三個地方。
  */
 export function buildExpenseCard(opts: {
-  expense: any
+  expense: ExpenseCardData
   title: string
   altText: string
   heroUrl?: string | null
   nonce: string
   webUrl: string
   liffUrl: string
-}): any {
+}): OutgoingMessage {
   const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl } = opts
-  const amountRows = (data: Record<string, unknown>) =>
+  const amountRows = (data: Record<string, unknown> | undefined) =>
     Object.entries(data ?? {}).map(([name, amt]) => ({
       type: "box", layout: "horizontal",
       contents: [

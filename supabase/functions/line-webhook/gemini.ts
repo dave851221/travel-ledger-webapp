@@ -12,6 +12,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { GEMINI_API_KEY } from "./config.ts"
 import { downloadLineContent } from "./line-api.ts"
 import { extractJSON } from "../_shared/validate.ts"
+import type { GeminiContent, GeminiInlineDataPart } from "./types.ts"
 
 /**
  * 給 AI 的成員別名提示。
@@ -29,7 +30,7 @@ export function memberAliasHint(members: string[]): string {
 }
 
 /** 下載收據照片並轉成 Gemini 需要的 inlineData */
-export async function fetchPhotoPart(photoUrl: string): Promise<any | null> {
+export async function fetchPhotoPart(photoUrl: string): Promise<GeminiInlineDataPart | null> {
   try {
     const res = await fetch(photoUrl)
     if (!res.ok) {
@@ -183,7 +184,7 @@ export interface AskGeminiOptions {
   temperature?: number
 }
 
-export async function askGemini(contents: any[], options: AskGeminiOptions = {}) {
+export async function askGemini(contents: GeminiContent[], options: AskGeminiOptions = {}) {
   const {
     useJsonMode = true,
     models = GEMINI_FALLBACK_MODELS,
@@ -270,7 +271,7 @@ export async function analyzeReceiptPhoto(
   question: string,
   expenseLabel: string,
 ): Promise<string> {
-  const parts: any[] = []
+  const parts: GeminiInlineDataPart[] = []
   for (const url of photoUrls) {
     const part = await fetchPhotoPart(url)
     if (part) parts.push(part)

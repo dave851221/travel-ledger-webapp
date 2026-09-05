@@ -7,6 +7,7 @@
 
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET } from "./config.ts"
+import type { OutgoingMessage } from "./types.ts"
 
 export async function verifySignature(body: string, signature: string | null): Promise<boolean> {
   if (!signature || !LINE_CHANNEL_SECRET) return false
@@ -17,7 +18,7 @@ export async function verifySignature(body: string, signature: string | null): P
   return await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(body))
 }
 
-export async function pushMessage(to: string, messages: any[]) {
+export async function pushMessage(to: string, messages: OutgoingMessage[]) {
   console.log(`[LINE] Pushing to ${to}...`)
   const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
@@ -27,7 +28,7 @@ export async function pushMessage(to: string, messages: any[]) {
   if (!res.ok) console.error(`[LINE] Push Error: ${await res.text()}`)
 }
 
-export async function replyMessage(replyToken: string, messages: any[], to?: string) {
+export async function replyMessage(replyToken: string, messages: OutgoingMessage[], to?: string) {
   console.log(`[LINE] Replying to ${replyToken}...`)
   const res = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',

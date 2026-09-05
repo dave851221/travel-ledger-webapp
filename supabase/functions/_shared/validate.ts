@@ -12,6 +12,24 @@
 //    加了 DB 或 fetch 就不再是純函式，vitest 也就測不動了。
 // ============================================================
 
+/**
+ * 三支「就地修改」的函式（normalizeExpenseAmountMaps、resolveExpenseMembers、
+ * applyParticipantDefaults）看得到的支出。
+ *
+ * 金額欄位剛從 AI 回來時是 response_schema 產生的陣列、正規化之後才是 map，
+ * 所以只能是 `Record<string, unknown>`；呼叫端在正規化之後才把同一個物件
+ * 當成收斂好的草稿來用（見 line-webhook/types.ts 的 ExpenseDraft）。
+ *
+ * ⚠️ 用 `type` 而不是 `interface` 是必要的：只有 type alias 會取得隱含的
+ *    index signature，呼叫端傳自己的具名型別進來才不會被拒絕。
+ */
+export type MutableExpense = {
+  payer_data?: Record<string, unknown>
+  split_details?: Record<string, unknown>
+  split_data?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 /** Gemini 偶爾會用 markdown code block 包裝 JSON，此函式負責安全提取 */
 export function extractJSON(text: string): string {
   const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -33,9 +51,9 @@ export function toAmountMap(value: unknown): Record<string, number> {
   const out: Record<string, number> = {}
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const member = String((entry as any)?.member ?? '').trim()
+      const member = String((entry as { member?: unknown })?.member ?? '').trim()
       if (!member) continue
-      out[member] = (out[member] ?? 0) + (Number((entry as any)?.amount) || 0)
+      out[member] = (out[member] ?? 0) + (Number((entry as { amount?: unknown })?.amount) || 0)
     }
     return out
   }
@@ -48,7 +66,7 @@ export function toAmountMap(value: unknown): Record<string, number> {
 }
 
 /** 就地把 expense 的金額欄位正規化成 map */
-export function normalizeExpenseAmountMaps(expense: any): void {
+export function normalizeExpenseAmountMaps(expense: MutableExpense | null | undefined): void {
   if (!expense) return
   expense.payer_data = toAmountMap(expense.payer_data)
   expense.split_details = toAmountMap(expense.split_details ?? expense.split_data)
@@ -92,7 +110,7 @@ export function resolveMember(name: string, members: string[]): string | null {
  * 回傳對應後的物件，以及真的對不上的名字。
  */
 export function resolveExpenseMembers(
-  expense: any,
+  expense: MutableExpense | null | undefined,
   members: string[],
 ): { unresolved: string[] } {
   const unresolved: string[] = []
@@ -140,7 +158,7 @@ export interface TripDefaults {
  * 時必須把 lockedData 換成 {}（0 會被當成鎖定金額，整筆餘額會落到調整成員身上）。
  */
 export function applyParticipantDefaults(
-  expense: any,
+  expense: MutableExpense | null | undefined,
   trip: TripDefaults,
   speakerName?: string | null,
 ): { filledPayer: boolean; filledSplit: boolean } {

@@ -6,6 +6,14 @@
 // ============================================================
 
 import { PENDING_BIND_TTL_MS } from "./config.ts"
+import type { EdgeRuntimeGlobal } from "./types.ts"
+
+/** getTripTimezone 只讀得到這幾個欄位 */
+export interface TimezoneSource {
+  timezone?: string | null
+  base_currency?: string | null
+  rates?: Record<string, number> | null
+}
 
 /**
  * 讓非同步工作在回應送出後仍跑得完。
@@ -16,7 +24,7 @@ import { PENDING_BIND_TTL_MS } from "./config.ts"
  * 真正依賴結果的（例如 saved）請直接 await，其餘交給這裡。
  */
 export function runInBackground(work: PromiseLike<unknown>): void {
-  const runtime = (globalThis as any).EdgeRuntime
+  const runtime = (globalThis as { EdgeRuntime?: EdgeRuntimeGlobal }).EdgeRuntime
   const promise = Promise.resolve(work).catch((err) => console.error('[BG_TASK]', err))
   if (runtime && typeof runtime.waitUntil === 'function') {
     runtime.waitUntil(promise)
@@ -42,7 +50,7 @@ export const CURRENCY_TIMEZONE: Record<string, string> = {
  *
  * 沒設定時才退回舊的猜法（先主幣別、再 rates 裡的其他幣別），行為與以前相同。
  */
-export function getTripTimezone(trip: any): string {
+export function getTripTimezone(trip: TimezoneSource | null | undefined): string {
   const explicit = String(trip?.timezone ?? '').trim()
   // 只接受 Intl 認得的字串：欄位是自由文字，存了錯的值會讓 DateTimeFormat 直接丟例外
   if (explicit && isValidTimezone(explicit)) return explicit
@@ -50,7 +58,7 @@ export function getTripTimezone(trip: any): string {
 
   const candidates = [trip?.base_currency, ...Object.keys(trip?.rates || {})]
   for (const cur of candidates) {
-    if (CURRENCY_TIMEZONE[cur]) return CURRENCY_TIMEZONE[cur]
+    if (cur && CURRENCY_TIMEZONE[cur]) return CURRENCY_TIMEZONE[cur]
   }
   return 'UTC'
 }

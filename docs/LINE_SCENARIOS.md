@@ -15,8 +15,10 @@
 M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 文中提到的行號來自修正前的 `index.ts`，現在已經漂移，請一律以函式名與註解關鍵字為準。
 
-純函式現在集中在 `supabase/functions/line-webhook/guards.ts`（由 `guards.test.ts` 看守），
-`index.ts` 只留路由、DB 存取與 LINE API 呼叫。
+純函式現在分在 `supabase/functions/_shared/validate.ts`（AI 回傳內容的驗證）與
+`line-webhook/guards.ts`（與 LINE 有關的判斷與摘要），兩者都由 `guards.test.ts` 看守。
+其餘邏輯已拆成模組：`index.ts` 只剩驗簽、解析、建 context 與分派，
+五條路徑在 `line-webhook/handlers/` 底下（模組清單見 [`../CLAUDE.md`](../CLAUDE.md)）。
 
 ---
 
@@ -29,7 +31,9 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | ❌ | 未支援 |
 | 🐛 | 有 bug，見第 4 章對應編號（H = 高優先、M = 中低優先） |
 
-`index.ts` 的處理順序（每個 webhook event 依序通過，命中就 `continue`）：
+處理順序（每個 webhook event 依序通過，命中就結束這一則）。
+下表的 P0 在 `context.ts`，P1 起分別在 `handlers/postback.ts`、`image.ts`、`audio.ts`、
+`commands.ts`、`ai-text.ts`；`index.ts` 只負責照這個順序分派：
 
 | 順序 | 進入點 | 關鍵字／函式 |
 | :--- | :--- | :--- |

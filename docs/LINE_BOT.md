@@ -2,8 +2,8 @@
 
 本文件深入說明 Travel Ledger WebApp 專屬 LINE Bot（耀西）的行為邏輯、架構設計與程式碼說明。
 
-實作位於 `supabase/functions/line-webhook/index.ts`。
-開發者若修改機器人邏輯或自我介紹，請務必同步更新本文件與 `index.ts`。
+實作位於 `supabase/functions/line-webhook/`（模組清單見 [`../CLAUDE.md`](../CLAUDE.md) 的架構段）。
+開發者若修改機器人邏輯或自我介紹，請務必同步更新本文件與對應的模組。
 
 ## 1. 核心行為與功能
 - **自然語言記帳**: 透過 Gemini AI 解析使用者的自然語言輸入（例如：「午餐 500 迪哥付的」），自動轉化為結構化的記帳資料。支援追溯性指令，如「剛剛那筆改 500」，AI 會參考尚未確認的草稿清單進行修正（見下方「草稿的修正與取消」）。
@@ -229,7 +229,7 @@
 - **封存保護**: 機器人會檢查旅程的 `is_archived` 狀態。若已封存，則僅提供查詢與聊天功能，禁止新增支出。
 
 ## 2. 機器人自我介紹 (Self Introduction)
-*注意：若修改以下自我介紹內容，請務必一字不漏地同步更新至 `index.ts` 中的 `BOT_SELF_INTRODUCTION` 變數。*
+*注意：若修改以下自我介紹內容，請務必一字不漏地同步更新至 `messages.ts` 中的 `BOT_SELF_INTRODUCTION` 變數。*
 
 ```text
 您好！我是您的旅遊記帳小幫手「耀西」
@@ -264,15 +264,17 @@
 Yoshi! Yoshi!
 ```
 
-## 3. 技術規格與實作細節 (`index.ts`)
-- **檔案分工**: 路由、DB 存取與 LINE API 呼叫在 `index.ts`；
-  沒有副作用的純函式（`extractJSON`、`toAmountMap`、`resolveMember`、`resolveExpenseMembers`、
-  `normalizeCurrency`、`resolveCurrencyByRule`、`normalizeDate`、`detectRecordIntent`、
-  `mentionsEditingExisting`、`claimsCompletedAction`、`summarizeHistoryEntry`、
-  `applyParticipantDefaults`、`pickExpenseByRef`、`matchExpensesByQuestion`、
-  `summarizeTripExpenses`、`stripSelfMentions`、`resolveCategory`）在
-  [`guards.ts`](../supabase/functions/line-webhook/guards.ts)，由 `guards.test.ts` 看守。
-  改這些行為請連同測試一起改。`check:functions` 只列 `index.ts`，`guards.ts` 透過 import 一起被檢查。
+## 3. 技術規格與實作細節
+
+- **檔案分工**: `index.ts` 只做驗簽、解析、建 `EventContext` 與分派（約 110 行）；
+  五條路徑各自在 [`handlers/`](../supabase/functions/line-webhook/handlers/)
+  （`postback.ts`、`image.ts`、`audio.ts`、`commands.ts`、`ai-text.ts`），
+  共用的東西在 `config.ts`／`db.ts`／`util.ts`／`line-api.ts`／`drafts.ts`／`messages.ts`／`gemini.ts`。
+  沒有副作用的純函式在 [`_shared/validate.ts`](../supabase/functions/_shared/validate.ts)（AI 回傳內容的驗證）
+  與 [`guards.ts`](../supabase/functions/line-webhook/guards.ts)（與 LINE 有關的判斷與摘要），
+  兩者都由 `guards.test.ts` 看守 —— 改這些行為請連同測試一起改。
+  `check:functions` 只列 `index.ts`，其餘模組透過 import 一起被檢查。
+  完整的模組清單與 import 方向見 [`../CLAUDE.md`](../CLAUDE.md)。
 - **狀態管理**: 透過 `line_user_states` 維護綁定狀態（`current_trip_id`／`pending_trip_id`／
   `pending_at`）與群組觸發模式；`last_active_at` 每次收到事件時由 `runInBackground()` 更新
   （在 M1 之前它是從未被寫過的死欄位）；

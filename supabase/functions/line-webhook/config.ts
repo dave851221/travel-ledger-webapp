@@ -22,7 +22,7 @@ export const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.gith
 export const RECEIPTS_BUCKET = 'travel-images'
 
 export const RATE_LIMIT_MSG = '⚠️ AI 服務暫時達到免費使用量上限，請隔天再試。'
-export const isRateLimit = (e: any) => String(e?.message).startsWith('RATE_LIMIT:')
+export const isRateLimit = (e: unknown) => String((e as { message?: unknown } | null)?.message).startsWith('RATE_LIMIT:')
 
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
 export const CHAT_HISTORY_TURNS = 8

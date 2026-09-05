@@ -101,9 +101,12 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
 ### 短期
 
 - 前端 `Dashboard.tsx` 已超過 1400 行，持續拆分成分頁元件與 hooks。
-- Edge Function 模組化：純函式已抽到 `line-webhook/guards.ts` 並有測試，
-  但 `index.ts` 仍是兩千行的路由單檔。並為 LINE webhook 事件與
-  Gemini 回應補上真正的型別（那些 `any` 在 ESLint 是 warning，見 `eslint.config.js`）。
+- ~~Edge Function 模組化~~ **已完成**：`index.ts` 從 2778 行縮到約 110 行，
+  拆成 `config` / `db` / `util` / `line-api` / `drafts` / `messages` / `gemini` / `context`
+  與 `handlers/` 底下的五支路徑處理器；LINE webhook 事件、postback、DB 列與 Gemini
+  往來都有具名型別（`line-webhook/types.ts`、`_shared/types.ts`），
+  `supabase/functions/` 底下已經沒有任何 `no-explicit-any` warning
+  （只剩 `guards.test.ts` 裡的 6 個）。
 - LINE Bot 尚未支援：以自然語言直接定位並修改／刪除既有支出（只能走清單按鈕或撤銷最近一筆）、
   多品項收據拆帳、任意條件的支出查詢。
   查詢已經好很多 —— 【全趟彙總】把總額、每人收支、各分類、逐日合計與最大金額
