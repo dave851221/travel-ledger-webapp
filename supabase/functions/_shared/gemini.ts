@@ -305,6 +305,9 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
         // 只有讀取工具：依**同順序**執行，組成一個 user turn 的多個 functionResponse
         const responses: GeminiPart[] = []
         for (const call of calls) {
+          // 查詢工具也留一行：出問題時光看日誌就知道模型查了什麼、查到第幾輪。
+          // 終結函式在呼叫端記，這裡只補上中間這幾步。
+          console.log(`[AI] ${model} r${round + 1} → ${call.name} ${JSON.stringify(call.args ?? {}).substring(0, 200)}`)
           let result: unknown
           try {
             result = await execute(call.name, call.args)
