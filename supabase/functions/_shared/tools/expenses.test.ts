@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
+  commitExpense,
+  commitExpenseUpdate,
   deleteExpense,
   listExpenses,
   prepareExpense,
   prepareExpenseUpdate,
   resolveExpenseRef,
 } from './expenses.ts';
-import type { ExpenseRow, ScopedContext, TripRow } from './types.ts';
+import type { ExpenseRow, ScopedContext, ToolContext, TripRow } from './types.ts';
 
 /**
  * 工具層是「一筆支出怎麼進到資料庫」的唯一實作 —— 在它出現以前，
@@ -484,5 +486,54 @@ describe('deleteExpense', () => {
     expect(result).toEqual({ ok: true, description: '晚餐' });
     expect(calls.some(c => c.method === 'eq' && c.args[0] === 'trip_id')).toBe(true);
     expect(calls.some(c => c.method === 'update')).toBe(true);
+  });
+});
+
+// ============================================================
+// commitExpense
+// ============================================================
+
+describe('commitExpense', () => {
+  const PREPARED = {
+    description: '晚餐', amount: 900, currency: 'JPY', date: TODAY, category: '餐飲',
+    payer_data: { 代杰: 900 }, split_details: { 代杰: 300, 小明: 300, Amy: 300 },
+    adjustment_member: null,
+  };
+
+  /** insert().select().single() 的結果由呼叫端指定 */
+  function makeInsertDb(result: { data: unknown; error: unknown }) {
+    const builder: Record<string, unknown> = {};
+    for (const m of ['from', 'insert', 'select']) builder[m] = () => builder;
+    builder.single = () => Promise.resolve(result);
+    return { db: builder, trip: TRIP, today: TODAY, actorName: null } as unknown as ToolContext;
+  }
+
+  it('寫入成功回傳新 id', async () => {
+    const result = await commitExpense(PREPARED, makeInsertDb({ data: { id: 'new-1' }, error: null }));
+    expect(result).toMatchObject({ ok: true, id: 'new-1' });
+  });
+
+  it('資料庫回錯誤時不能當成存入', async () => {
+    const result = await commitExpense(PREPARED, makeInsertDb({ data: null, error: { message: 'boom' } }));
+    expect(result).toEqual({ ok: false, reason: 'insert_failed' });
+  });
+
+  it('金額為 0 的不寫入', async () => {
+    const zero = { ...PREPARED, amount: 0, payer_data: { 代杰: 0 }, split_details: { 代杰: 0 } };
+    const result = await commitExpense(zero, makeInsertDb({ data: { id: 'new-1' }, error: null }));
+    expect(result).toEqual({ ok: false, reason: 'invalid_amount' });
+  });
+});
+
+describe('commitExpenseUpdate', () => {
+  const ctxFor = () => ({ db: {}, trip: TRIP, today: TODAY, actorName: null }) as unknown as ToolContext;
+
+  it('卡片上的成員已被移除時不套用（份額會從結算消失）', async () => {
+    const result = await commitExpenseUpdate('x1', {
+      description: '晚餐', amount: 900, currency: 'JPY', date: TODAY, category: '餐飲',
+      payer_data: { 路人甲: 900 }, split_details: { 代杰: 450, 路人甲: 450 },
+      adjustment_member: null,
+    }, ctxFor());
+    expect(result).toEqual({ ok: false, reason: 'dropped_members', dropped: ['路人甲'] });
   });
 });

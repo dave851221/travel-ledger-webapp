@@ -46,6 +46,29 @@ type ListRow = Pick<ExpenseRow, "id" | "description" | "amount" | "currency" | "
 type SummaryRow = Pick<ExpenseRow, "description" | "amount" | "currency" | "category">
 type DatedSummaryRow = SummaryRow & Pick<ExpenseRow, "date">
 
+/** 依日期分組列出的支出最多列幾筆。合計一律用全部的列算，這裡只限制「列出來」的部分。 */
+const MAX_LISTED_ROWS = 40
+
+/**
+ * 依日期分組的清單文字。
+ *
+ * ⚠️ 以前是在 SQL 端 limit(30)／limit(50)，再拿被截斷的那批算「合計」——
+ *    旅程稍微熱鬧一點，合計就默默少算，畫面上也看不出來。
+ *    現在全部撈回來算合計，只有逐筆清單截斷，並講明省略了幾筆。
+ */
+function listByDate(rows: DatedSummaryRow[], precisionConfig: Record<string, number>): string {
+  const byDate: Record<string, DatedSummaryRow[]> = {}
+  rows.slice(0, MAX_LISTED_ROWS).forEach((e) => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e) })
+  const lines: string[] = []
+  Object.entries(byDate).forEach(([date, exps]) => {
+    lines.push(`📌 ${date.substring(5)}`)
+    exps.forEach((e) => lines.push(`  • ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}`))
+  })
+  const omitted = rows.length - MAX_LISTED_ROWS
+  if (omitted > 0) lines.push(`…另有 ${omitted} 筆較早的未列出（合計已包含）`)
+  return lines.join('\n')
+}
+
 /**
  * 決定這則文字訊息要不要處理，並算出後面所有比對要用的 cleanText。
  *
@@ -528,18 +551,11 @@ if (isBinding) {
       .select('description, amount, currency, category, date')
       .eq('trip_id', tripId).gte('date', fromDate)
       .is('deleted_at', null).not('is_settlement', 'is', true)
-      .order('date', { ascending: false }).limit(30)
+      .order('date', { ascending: false }).order('created_at', { ascending: false })
     if (!weekExp || weekExp.length === 0) {
       await replyMessage(replyToken, [{ type: 'text', text: '📊 近 7 天內尚無支出記錄。', quickReply: boundQR }], sourceId)
     } else {
-      const byDate: Record<string, DatedSummaryRow[]> = {}
-      weekExp.forEach((e: DatedSummaryRow) => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e) })
-      const lines: string[] = []
-      Object.entries(byDate).forEach(([date, exps]) => {
-        lines.push(`📌 ${date.substring(5)}`)
-        exps.forEach((e) => lines.push(`  • ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}`))
-      })
-      await replyMessage(replyToken, [{ type: 'text', text: `📊 近 7 天支出\n\n${lines.join('\n')}\n\n共 ${weekExp.length} 筆 · 合計 ${formatTotals(weekExp, precisionConfig)}`, quickReply: boundQR }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: `📊 近 7 天支出\n\n${listByDate(weekExp, precisionConfig)}\n\n共 ${weekExp.length} 筆 · 合計 ${formatTotals(weekExp, precisionConfig)}`, quickReply: boundQR }], sourceId)
     }
     return true
   }
@@ -558,19 +574,12 @@ if (isBinding) {
       .select('description, amount, currency, category, date')
       .eq('trip_id', tripId).gte('date', monthStart)
       .is('deleted_at', null).not('is_settlement', 'is', true)
-      .order('date', { ascending: false }).limit(50)
+      .order('date', { ascending: false }).order('created_at', { ascending: false })
     if (!monthExp || monthExp.length === 0) {
       await replyMessage(replyToken, [{ type: 'text', text: `📊 本月（${monthStart.substring(0, 7)}）尚無支出記錄。`, quickReply: boundQR }], sourceId)
     } else {
-      const byDate: Record<string, DatedSummaryRow[]> = {}
-      monthExp.forEach((e: DatedSummaryRow) => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e) })
-      const lines: string[] = []
-      Object.entries(byDate).forEach(([date, exps]) => {
-        lines.push(`📌 ${date.substring(5)}`)
-        exps.forEach((e) => lines.push(`  • ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}`))
-      })
       const totalStr = formatTotals(monthExp, precisionConfig)
-      let text = `📊 本月支出（${monthStart.substring(0, 7)}）\n\n${lines.join('\n')}\n\n共 ${monthExp.length} 筆 · 合計 ${totalStr}`
+      let text = `📊 本月支出（${monthStart.substring(0, 7)}）\n\n${listByDate(monthExp, precisionConfig)}\n\n共 ${monthExp.length} 筆 · 合計 ${totalStr}`
       if (text.length > 4900) text = text.substring(0, 4900) + '\n...(過多省略)'
       await replyMessage(replyToken, [{ type: 'text', text, quickReply: boundQR }], sourceId)
     }

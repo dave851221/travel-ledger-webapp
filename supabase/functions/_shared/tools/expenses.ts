@@ -234,6 +234,8 @@ export async function commitExpense(
 
   const precision = expensePrecision(trip, prepared.currency)
   const target = new Decimal(parseFloat(String(prepared.amount)) || 0).toDecimalPlaces(precision)
+  // 0 或負數多半是 AI 沒抓到金額（「晚餐」沒講多少錢）；存下去 Σ 檢查也攔不住
+  if (!target.greaterThan(0)) return { ok: false, reason: 'invalid_amount' }
   const numAmount = target.toNumber()
   const adjustMember = pickAdjustmentMember(payerMembers, splitMembers)
 
@@ -245,7 +247,7 @@ export async function commitExpense(
     return { ok: false, reason: 'sum_mismatch' }
   }
 
-  const { data: saved } = await ctx.db.from('expenses').insert({
+  const { data: saved, error: insertError } = await ctx.db.from('expenses').insert({
     trip_id: trip.id,
     description: prepared.description,
     amount: numAmount,
@@ -257,6 +259,12 @@ export async function commitExpense(
     photo_urls: opts.photoUrls ?? [],
     adjustment_member: adjustMember,
   }).select('id').single()
+
+  // 寫入失敗不能當成存入：以前這裡不看 error，LINE 會回「✅ 已存入」而帳本裡什麼都沒有
+  if (insertError) {
+    console.error(`[SAVE] Insert failed. trip=${trip.id}`, insertError)
+    return { ok: false, reason: 'insert_failed' }
+  }
 
   return { ok: true, id: saved?.id ?? null, adjustment_member: adjustMember }
 }
@@ -402,8 +410,18 @@ export async function commitExpenseUpdate(
     return { ok: false, reason: 'empty_participants' }
   }
 
+  // 修改卡可能是一段時間前發的，中間成員被移除了（與 commitExpense 的 M12 同一個理由）：
+  // 照樣寫下去的話，那個人的份額會從結算裡消失
+  const members = trip.members ?? []
+  const dropped = [...new Set([...payerMembers, ...splitMembers].filter((m) => !members.includes(m)))]
+  if (dropped.length > 0) {
+    console.warn(`[UPDATE] Members no longer in trip: ${dropped.join(', ')}`)
+    return { ok: false, reason: 'dropped_members', dropped }
+  }
+
   const precision = expensePrecision(trip, prepared.currency)
   const target = new Decimal(parseFloat(String(prepared.amount)) || 0).toDecimalPlaces(precision)
+  if (!target.greaterThan(0)) return { ok: false, reason: 'invalid_amount' }
   if (!sumsMatch(prepared.payer_data, target) || !sumsMatch(prepared.split_details, target)) {
     console.error(`[CRITICAL_VALIDATION_ERROR] Update sum mismatch. expense=${expenseId}`)
     return { ok: false, reason: 'sum_mismatch' }

@@ -185,9 +185,10 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         setDropTarget(null);
 
         const defaultPayers = (trip.default_payer ?? []).filter(m => trip.members.includes(m));
+        // currentUser 可能是已被改名或移除的舊名字，不是成員就不能當付款人（與 quickAdd 一致）
         const activePayers = defaultPayers.length > 0
           ? new Set(defaultPayers)
-          : new Set([currentUser || trip.members[0]]);
+          : new Set([currentUser && trip.members.includes(currentUser) ? currentUser : trip.members[0]]);
         setPayerActive(activePayers);
         setPayerLocked(new Set());
         setPayerData({});

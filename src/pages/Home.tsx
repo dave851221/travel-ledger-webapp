@@ -150,7 +150,11 @@ const Home: React.FC = () => {
 
     try {
       setSubmitting(true);
-      const membersArray = newTrip.members.split(',').map(m => m.trim()).filter(Boolean);
+      // 全形逗號與頓號也要認：中文輸入法打出來的多半是「，」「、」，
+      // 以前只切半形逗號，「小明，小華」會變成一位叫「小明，小華」的成員
+      const membersArray = [...new Set(
+        newTrip.members.split(/[,，、]/).map(m => m.trim()).filter(Boolean)
+      )];
       
       const { data, error } = await supabase
         .from('trips')
@@ -345,7 +349,7 @@ const Home: React.FC = () => {
           </div>
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              參與人員 <span className="text-[9px] font-normal opacity-60 ml-2">(以半形逗號隔開)</span>
+              參與人員 <span className="text-[9px] font-normal opacity-60 ml-2">(以逗號或頓號隔開)</span>
             </label>
             <input
               required

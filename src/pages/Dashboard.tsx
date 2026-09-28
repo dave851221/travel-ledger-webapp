@@ -112,6 +112,21 @@ const Dashboard: React.FC = () => {
     else setIsWelcomeSelectorOpen(true);
   }, [loading, savedUser]);
 
+  // 記住的身分可能已經不是成員了（在設定頁被改名或移除）。
+  // 留著舊名字的話，新增支出會把一個不存在的人預設成付款人，那筆錢就從結算裡消失。
+  // 改名時 SettingsModal 已經更新了 localStorage，重讀一次就能跟上新名字。
+  useEffect(() => {
+    if (!trip || !currentUser || trip.members.includes(currentUser)) return;
+    const stored = localStorage.getItem(`me_${id}`);
+    if (stored && trip.members.includes(stored)) {
+      setCurrentUser(stored);
+    } else {
+      localStorage.removeItem(`me_${id}`);
+      setCurrentUser(null);
+      setIsWelcomeSelectorOpen(true);
+    }
+  }, [trip, currentUser, id]);
+
   useEffect(() => {
     if (trip?.name) document.title = `${trip.name} - 旅遊小本本`;
   }, [trip?.name]);
@@ -267,7 +282,9 @@ const Dashboard: React.FC = () => {
     // Sort dates descending
     const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
     return sortedDates.map(date => {
-      const d = new Date(date);
+      // 補上時間讓它以本地時區解析；`new Date('YYYY-MM-DD')` 是 UTC 午夜，
+      // 在 UTC 以西的時區（例如美國）會顯示成前一天的星期
+      const d = new Date(`${date}T00:00:00`);
       const dayName = chineseDays[d.getDay()];
       return { 
         date, 

@@ -408,6 +408,17 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
     return
   }
 
+  // 金額是 0 或負數：多半是句子裡沒講多少錢（「晚餐」），出一張 0 元的卡片只會讓人困惑
+  const noAmount = prepared.find(p => !(p.expense.amount > 0))
+  if (noAmount) {
+    await replyMessage(replyToken, [{
+      type: 'text',
+      text: `😅「${noAmount.expense.description || '這筆'}」多少錢呢？請連金額一起說，例如「晚餐 300」。`,
+      quickReply: boundQR,
+    }], sourceId)
+    return
+  }
+
   const webUrl = `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`
   const cards: OutgoingMessage[] = []
   const pendingWrites: Promise<unknown>[] = []
@@ -504,6 +515,12 @@ async function proposeExpenseUpdate(scope: AiScope, args: ToolArgs, extraText?: 
   }
   if (result.reject) {
     await replyMessage(replyToken, [{ type: 'text', text: result.reject, quickReply: boundQR }], sourceId)
+    return
+  }
+  if (!(result.expense.amount > 0)) {
+    await replyMessage(replyToken, [{
+      type: 'text', text: '😅 金額必須大於 0。要改成多少呢？例如「改成 500」。', quickReply: boundQR,
+    }], sourceId)
     return
   }
   // 出一張「什麼都沒改」的卡片只會讓人困惑，直接說明

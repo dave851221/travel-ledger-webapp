@@ -26,6 +26,7 @@ import Modal from './Modal';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV } from '../utils/finance';
+import Decimal from 'decimal.js';
 
 /**
  * 旅程時區的候選清單（M4）。
@@ -84,8 +85,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [aiPreference, setAiPreference] = useState(trip.ai_preference || '');
   const [copied, setCopied] = useState(false);
   
-  // Track renames: { oldName: newName }
-  const [memberRenames, setMemberRenames] = useState<Record<string, string>>({});
+  // 每一列成員在資料庫裡的原名（新加的成員是 null），與 members 同索引。
+  // ⚠️ 不能拿 trip.members[index] 當原名：刪掉前面的成員後索引就錯位了，
+  //    改名會套到別人的支出 JSONB 上。
+  const [memberOrigins, setMemberOrigins] = useState<(string | null)[]>([...trip.members]);
   
   const [ratesStr, setRatesStr] = useState<Record<string, string>>({});
   const [precisionStr, setPrecisionStr] = useState<Record<string, string>>({});
@@ -122,7 +125,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
       setDefaultPayer(trip.default_payer || []);
       setDefaultSplitMembers(trip.default_split_members || []);
-      setMemberRenames({});
+      setMemberOrigins([...trip.members]);
 
       const rStr: Record<string, string> = {};
       Object.keys(trip.rates).forEach(k => rStr[k] = trip.rates[k].toString());
@@ -206,16 +209,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   };
 
   const handleMemberRename = (index: number, newName: string) => {
-    const oldName = trip.members[index];
-    if (!oldName) return; 
-
+    const prevName = members[index];
     const updatedMembers = [...members];
     updatedMembers[index] = newName;
     setMembers(updatedMembers);
-
-    if (trip.members.includes(oldName)) {
-      setMemberRenames(prev => ({ ...prev, [oldName]: newName }));
-    }
+    // 預設付款人／分攤存的也是名字，要跟著改，否則存檔後預設值會默默消失
+    const follow = (list: string[]) => list.map(x => (x === prevName ? newName : x));
+    setDefaultPayer(follow);
+    setDefaultSplitMembers(follow);
   };
 
   const handleSave = async () => {
@@ -239,6 +240,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         finalPrecision[k] = val;
       });
 
+      // 成員名稱是支出 JSONB 的 key：空白或重複的名字會讓兩個人的帳混在一起
+      const finalMembers = members.map(m => m.trim());
+      if (finalMembers.some(m => !m)) throw new Error('成員名稱不能是空白');
+      if (new Set(finalMembers).size !== finalMembers.length) throw new Error('成員名稱不能重複');
+
+      const renamePairs: [string, string][] = [];
+      memberOrigins.forEach((origin, i) => {
+        if (origin && origin !== finalMembers[i]) renamePairs.push([origin, finalMembers[i]]);
+      });
+      const onlyMembers = (list: string[]) => list.map(m => m.trim()).filter(m => finalMembers.includes(m));
+
       const { error: updateError } = await supabase
         .from('trips')
         .update({
@@ -246,7 +258,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           // 留空即代表移除密碼；統一存成 NULL，避免出現兩種「無密碼」表示法
           access_code: accessCode.trim() || null,
           is_archived: isArchived,
-          members,
+          members: finalMembers,
           categories,
           category: tripCategory.trim() || null,
           // 留空即代表沒有偏好；與 access_code 同樣的正規化慣例，統一存成 NULL
@@ -258,14 +270,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           timezone: timezone.trim() || null,
           default_currency: defaultCurrency,
           default_category: defaultCategory,
-          default_payer: defaultPayer,
-          default_split_members: defaultSplitMembers
+          default_payer: onlyMembers(defaultPayer),
+          default_split_members: onlyMembers(defaultSplitMembers)
         })
         .eq('id', trip.id);
 
       if (updateError) throw updateError;
 
-      const renamePairs = Object.entries(memberRenames).filter(([oldN, newN]) => oldN !== newN);
       if (renamePairs.length > 0) {
         const { data: expensesData, error: fetchErr } = await supabase
           .from('expenses')
@@ -273,30 +284,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           .eq('trip_id', trip.id);
 
         if (!fetchErr && expensesData) {
+          // 所有改名同時套用（而不是一對一對依序改），A、B 互換名字時才不會互相覆蓋
+          const renameMap = new Map(renamePairs);
+          const renameKeys = (data: Record<string, number>) => {
+            const out: Record<string, number> = {};
+            Object.entries(data ?? {}).forEach(([k, v]) => { out[renameMap.get(k) ?? k] = v; });
+            return out;
+          };
+
           for (const exp of expensesData) {
-            let needsUpdate = false;
-            const newPayerData = { ...exp.payer_data };
-            const newSplitData = { ...exp.split_data };
-            let newAdjMember = exp.adjustment_member;
+            const adj: string | null = exp.adjustment_member;
+            const touched = Object.keys({ ...exp.payer_data, ...exp.split_data })
+              .some(k => renameMap.has(k)) || (!!adj && renameMap.has(adj));
+            const newPayerData = renameKeys(exp.payer_data);
+            const newSplitData = renameKeys(exp.split_data);
+            const newAdjMember = adj ? (renameMap.get(adj) ?? adj) : adj;
 
-            renamePairs.forEach(([oldN, newN]) => {
-              if (newPayerData[oldN] !== undefined) {
-                newPayerData[newN] = newPayerData[oldN];
-                delete newPayerData[oldN];
-                needsUpdate = true;
-              }
-              if (newSplitData[oldN] !== undefined) {
-                newSplitData[newN] = newSplitData[oldN];
-                delete newSplitData[oldN];
-                needsUpdate = true;
-              }
-              if (newAdjMember === oldN) {
-                newAdjMember = newN;
-                needsUpdate = true;
-              }
-            });
-
-            if (needsUpdate) {
+            if (touched) {
               await supabase
                 .from('expenses')
                 .update({ 
@@ -310,11 +314,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         }
 
         const savedMe = localStorage.getItem(`me_${trip.id}`);
-        renamePairs.forEach(([oldN, newN]) => {
-          if (savedMe === oldN) {
-            localStorage.setItem(`me_${trip.id}`, newN);
-          }
-        });
+        const renamedMe = savedMe ? renamePairs.find(([oldN]) => oldN === savedMe)?.[1] : undefined;
+        if (renamedMe) localStorage.setItem(`me_${trip.id}`, renamedMe);
       }
       
       onSuccess();
@@ -327,18 +328,70 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   };
 
   const addMember = () => {
-    if (newMember && !members.includes(newMember)) {
-      setMembers([...members, newMember]);
+    const name = newMember.trim();
+    if (name && !members.includes(name)) {
+      setMembers([...members, name]);
+      setMemberOrigins([...memberOrigins, null]);
       setNewMember('');
     }
   };
 
-  const removeMember = (m: string) => {
-    if (members.length > 1) {
-      setMembers(members.filter(item => item !== m));
-    } else {
+  // 移除仍出現在支出裡的成員，他的付款與分攤會從結算中消失（calculateMemberBalances 只算成員），
+  // 其他人的帳就對不起來了。與 removeCurrency 一樣，先確認沒有紀錄用到他（含垃圾桶內、可能被還原的）。
+  const removeMember = async (index: number) => {
+    setError(null);
+    if (members.length <= 1) {
       setError('至少需要一位成員');
+      return;
     }
+    // 還沒存檔的新成員不可能出現在任何支出裡；已存在的成員要用資料庫裡的原名查
+    const origin = memberOrigins[index];
+    if (origin) {
+      if (!supabase) return;
+      const { data, error: fetchErr } = await supabase
+        .from('expenses')
+        .select('payer_data, split_data')
+        .eq('trip_id', trip.id);
+      if (fetchErr) {
+        setError('檢查成員使用狀況失敗：' + fetchErr.message);
+        return;
+      }
+      const used = (data || []).filter((e: { payer_data: Record<string, number> | null; split_data: Record<string, number> | null }) =>
+        (e.payer_data?.[origin] ?? 0) !== 0 || (e.split_data?.[origin] ?? 0) !== 0
+      ).length;
+      if (used > 0) {
+        setError(`已有 ${used} 筆紀錄用到 ${origin}，請先改掉這些紀錄的付款／分攤才能移除（改名不受影響）`);
+        return;
+      }
+    }
+    setMembers(members.filter((_, i) => i !== index));
+    setMemberOrigins(memberOrigins.filter((_, i) => i !== index));
+  };
+
+  // 換主幣別時匯率要跟著換算：rates 的意思是「1 幣別 = ? 主幣別」，
+  // 主幣別一換而匯率不動的話，所有統計與結算都會算錯。
+  // 舊主幣別對自己的匯率依定義是 1（與 getRate 一致），不看 ratesStr 裡寫了什麼。
+  const changeBaseCurrency = (next: string) => {
+    setError(null);
+    if (next === baseCurrency) return;
+    const effective = (code: string) => (code === baseCurrency ? 1 : parseFloat(ratesStr[code]));
+    const pivot = effective(next);
+    if (!isFinite(pivot) || pivot <= 0) {
+      setBaseCurrency(next);
+      setError(`${next} 的匯率不是有效數字，無法自動換算，請手動重新填寫所有匯率`);
+      return;
+    }
+    const rebased: Record<string, string> = {};
+    Object.keys(ratesStr).forEach(code => {
+      const r = effective(code);
+      rebased[code] = code === next
+        ? '1'
+        : isFinite(r) && r > 0
+          ? new Decimal(r).dividedBy(pivot).toSignificantDigits(6).toString()
+          : ratesStr[code];
+    });
+    setRatesStr(rebased);
+    setBaseCurrency(next);
   };
 
   const addCategory = () => {
@@ -562,7 +615,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-black text-xs sm:text-sm shrink-0">{m.charAt(0)}</div>
                       <input type="text" className="flex-1 bg-transparent font-black text-sm sm:text-base outline-none focus:text-blue-600" value={m} onChange={e => handleMemberRename(idx, e.target.value)} placeholder="成員姓名" />
                     </div>
-                    <button onClick={() => removeMember(m)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={16} /></button>
+                    <button onClick={() => removeMember(idx)}className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={16} /></button>
                   </div>
                 ))}
               </div>
@@ -637,7 +690,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <div className="p-4 sm:p-6 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/30">
                   <label className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">當前主幣別</label>
                   <div className="relative mt-1 sm:mt-2">
-                    <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-blue-700 dark:text-blue-300 outline-none cursor-pointer appearance-none" value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
+                    <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-blue-700 dark:text-blue-300 outline-none cursor-pointer appearance-none" value={baseCurrency} onChange={e => changeBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
                     <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-blue-300 pointer-events-none" />
                   </div>
                 </div>
@@ -651,6 +704,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
               </div>
               <div className="space-y-4 sm:space-y-6">
                 <div className="flex items-center justify-between px-1"><label className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest">幣別與匯率配置</label><span className="text-[9px] sm:text-xs text-slate-400 font-bold">(1 幣別 = ? {baseCurrency})</span></div>
+                {baseCurrency !== trip.base_currency && (
+                  <p className="text-[9px] sm:text-[10px] text-amber-600 dark:text-amber-400 font-bold px-1">
+                    主幣別已從 {trip.base_currency} 改為 {baseCurrency}，下面的匯率已自動換算成「1 幣別 = ? {baseCurrency}」，存檔前請確認。
+                  </p>
+                )}
                 <div className="space-y-3 sm:space-y-4">
                   {Object.keys(ratesStr).map(code => (
                     <div key={code} className="p-4 sm:p-6 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl sm:rounded-[2rem] shadow-sm space-y-4 sm:space-y-5">

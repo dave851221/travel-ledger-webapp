@@ -139,6 +139,8 @@ export type CommitFailureReason =
   | 'empty_participants'
   | 'dropped_members'
   | 'sum_mismatch'
+  | 'insert_failed'
+  | 'invalid_amount'
 
 export type CommitExpenseResult =
   | {
@@ -152,11 +154,17 @@ export type CommitExpenseResult =
   }
   | { ok: false; reason: CommitFailureReason; dropped?: string[] }
 
-export type UpdateFailureReason = 'not_found' | 'archived' | 'empty_participants' | 'sum_mismatch'
+export type UpdateFailureReason =
+  | 'not_found'
+  | 'archived'
+  | 'empty_participants'
+  | 'dropped_members'
+  | 'sum_mismatch'
+  | 'invalid_amount'
 
 export type CommitUpdateResult =
   | { ok: true; id: string }
-  | { ok: false; reason: UpdateFailureReason }
+  | { ok: false; reason: UpdateFailureReason; dropped?: string[] }
 
 export type DeleteFailureReason = 'not_found' | 'already_deleted' | 'update_failed'
 

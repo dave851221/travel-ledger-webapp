@@ -123,6 +123,8 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       return
     }
     if (!Object.prototype.hasOwnProperty.call(curTrip.rates ?? {}, chosen)) {
+      // 沒有換出新卡片，舊的鎖要放掉 —— 否則同一則訊息上的其他幣別按鈕與「❌ 取消」都會說已處理過
+      await releaseNonce(oldNonce)
       await replyMessage(replyToken, [{ type: 'text', text: `❌ 這趟旅程沒有 ${chosen} 的匯率，請先到網頁設定。` }], sourceId)
       return
     }
@@ -301,7 +303,12 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
           ? '❌ 這筆支出已不存在，無法修改。'
           : updResult.reason === 'empty_participants'
             ? '😅 修改後的付款人或分攤成員是空的（可能是成員已被移除），無法套用。請按卡片上的「🌐 網頁編輯」處理。'
-            : '❌ 財務運算發生錯誤，請聯絡管理員。'
+            : updResult.reason === 'dropped_members'
+              ? `😅 這張修改卡上的「${(updResult.dropped ?? []).join('、')}」已經不在旅程成員裡了，不能就這樣套用。\n\n`
+                + `目前成員：${(updTrip.members ?? []).join('、')}\n\n請重新說一次要怎麼改，或按「🌐 網頁編輯」。`
+              : updResult.reason === 'invalid_amount'
+                ? '😅 修改後的金額必須大於 0，無法套用。請重新說一次要改成多少。'
+                : '❌ 財務運算發生錯誤，請聯絡管理員。'
       await replyMessage(replyToken, [{ type: 'text', text, quickReply: boundQR }], sourceId)
       return
     }
@@ -432,6 +439,16 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
             + `目前成員：${trip.members.join('、')}\n\n`
             + `請按卡片上的「✏️ 編輯」重新分攤，或直接重說一次。`,
           quickReply: boundQR,
+        }], sourceId)
+      } else if (saveResult.reason === 'invalid_amount') {
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: '😅 這筆的金額是 0（可能沒辨識到金額），不能存入。\n\n請按卡片上的「✏️ 編輯」補上金額，或直接重說一次，例如「晚餐 300」。',
+          quickReply: boundQR,
+        }], sourceId)
+      } else if (saveResult.reason === 'insert_failed') {
+        await replyMessage(replyToken, [{
+          type: 'text', text: '❌ 寫入資料庫失敗，這筆還沒存進去。請稍後再按一次「確認存入」。', quickReply: boundQR,
         }], sourceId)
       } else {
         await replyMessage(replyToken, [{ type: 'text', text: `❌ 財務運算發生錯誤，請聯絡管理員。` }], sourceId)
