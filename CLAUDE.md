@@ -79,8 +79,12 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   **這是專案最大的技術債**，新增功能時優先考慮抽成獨立元件而非繼續往裡面塞。
 - **`ExpenseModal.tsx`**：支出新增與編輯。付款人/分攤的鎖定機制、多幣別、
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
+  ⚠️ 表單只在「開啟的那一刻」或 `editData` 換了才灌初始值（`initializedFor` ref）——
+  Dashboard 回到前景就會重抓 trip，跟著 `trip.members` 重設會把填到一半的內容清掉。
 - **`SettingsModal.tsx`**：旅程設定（成員、匯率、精度、分類、預設值、CSV 匯出、LINE 短碼）。
   **所有旅程層級的寫入都在這裡**，Dashboard 只負責重新抓取。
+  成員改名走 RPC `rename_trip_members`（成員清單與所有支出 JSONB 在同一個 transaction 裡改），
+  不要再改回前端逐筆 update —— 中途斷線會留下一半舊名字的支出。
 - **`LiffEdit.tsx`**：獨立頁面，透過 LIFF 嵌在 LINE App 的 WebView 中，把資料餵給
   `ExpenseModal` 重用整個編輯器。三種進入方式，優先序 `id` > `n` > `data`：
   `?id=<expenseId>` 直接查 DB（每次開啟都是最新內容）、`?n=<nonce>` 從
@@ -298,6 +302,9 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 - **JSONB 欄位**：`payer_data` 與 `split_data` 是 `{ 成員名稱: 金額 }`，
   key 是**純字串顯示名稱**（例如 `"代杰"`）而非 ID。因此改成員名稱時必須把所有支出的
   JSONB 一起改寫（`SettingsModal.tsx` 已有實作）。
+- **記帳預設值一律走 `src/utils/tripDefaults.ts`**（`getDefaultCurrency`／`getDefaultCategory`），
+  不要直接讀 `trip.default_currency`／`default_category`：舊資料可能指向已刪掉的幣別或分類。
+- **Enter 送出一律用 `isSubmitEnter()`**（`src/utils/keyboard.ts`），否則注音選字的 Enter 會被當成送出。
 - **`Trip.category` 與 `Trip.categories` 是兩回事**：前者是旅程自己的分組（首頁分組用），
   後者是這趟旅程的支出分類清單。
 - **`photo_urls` 存的是 Storage 路徑而非完整 URL**，每個顯示的地方都要自行加上

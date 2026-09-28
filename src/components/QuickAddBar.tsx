@@ -4,6 +4,7 @@ import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import { buildQuickAddDraft, parseQuickAddInput } from '../utils/quickAdd';
 import { formatAmount } from '../utils/finance';
+import { isSubmitEnter } from '../utils/keyboard';
 
 interface QuickAddBarProps {
   trip: Trip;
@@ -32,8 +33,11 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
   const [saving, setSaving] = useState(false);
 
   const parsed = useMemo(() => parseQuickAddInput(input), [input]);
-  const currency = trip.default_currency || trip.base_currency;
-  const category = trip.default_category || trip.categories[0] || '其他';
+  // 預覽直接用實際要存入的草稿，才不會顯示已被移除的預設付款人或舊幣別
+  const preview = useMemo(
+    () => (parsed ? buildQuickAddDraft(input, trip, currentUser) : null),
+    [parsed, input, trip, currentUser],
+  );
 
   const submit = async () => {
     if (saving) return;
@@ -83,7 +87,7 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (isSubmitEnter(e)) { e.preventDefault(); submit(); }
           }}
           placeholder="拉麵 3000"
           className="flex-1 min-w-0 bg-transparent outline-none font-bold text-sm py-1.5"
@@ -114,12 +118,14 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
 
       {/* 讓使用者在按下去之前就知道會存成什麼。
           手機寬度有限，所以只列必要資訊並讓它自然換行。 */}
-      {parsed && (
+      {preview && (
         <p className="text-[10px] font-bold text-slate-400 px-2 leading-relaxed">
-          {parsed.description || category} ·{' '}
-          {formatAmount(parsed.amount, currency, trip.precision_config)} {currency} · {category} ·{' '}
-          {(trip.default_payer?.length ? trip.default_payer.join('、') : currentUser || trip.members[0])}付
-          {trip.default_split_members?.length ? `・${trip.default_split_members.length} 人分攤` : '・全員均分'}
+          {preview.description} ·{' '}
+          {formatAmount(preview.amount, preview.currency, trip.precision_config)} {preview.currency} · {preview.category} ·{' '}
+          {Object.keys(preview.payer_data).join('、')}付
+          {Object.keys(preview.split_data).length === trip.members.length
+            ? '・全員均分'
+            : `・${Object.keys(preview.split_data).length} 人分攤`}
         </p>
       )}
     </div>

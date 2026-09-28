@@ -57,7 +57,7 @@ const TripPortal: React.FC = () => {
 
     try {
       const { data: isValid, error } = await supabase
-        .rpc('verify_trip_code', { p_trip_id: id, p_code: code });
+        .rpc('verify_trip_code', { p_trip_id: id, p_code: code.trim() });
 
       if (error) throw error;
 
@@ -106,7 +106,7 @@ const TripPortal: React.FC = () => {
             <input
               type="password"
               maxLength={6}
-              placeholder="請輸入 4-6 位密碼"
+              placeholder="請輸入密碼"
               className="w-full text-center text-2xl tracking-[0.5em] placeholder:tracking-normal placeholder:text-sm px-4 py-4 rounded-xl border-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 outline-none transition-all"
               value={code}
               onChange={e => setCode(e.target.value)}
@@ -120,8 +120,9 @@ const TripPortal: React.FC = () => {
               </div>
             )}
 
+            {/* 建立旅程與設定頁都沒有限制最短長度，這裡若要求至少 4 碼，設了短密碼的人會完全進不去 */}
             <button
-              disabled={loading || code.length < 4}
+              disabled={loading || !code.trim()}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="animate-spin" size={20} /> : '確認進入'}

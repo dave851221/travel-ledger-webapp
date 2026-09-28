@@ -344,6 +344,21 @@ const Dashboard: React.FC = () => {
     );
   }
 
+  // 查無此旅程時 useTripData 已經導回首頁；還走到這裡代表是網路問題，讓使用者自己重試
+  if (!trip) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-950 flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <p className="text-slate-500 font-bold text-sm">無法載入旅程資料，請確認網路連線後再試一次。</p>
+        <button
+          onClick={() => { refetchTrip(); refetchExpenses(); refetchDeleted(); }}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-black px-6 py-3 rounded-xl shadow-lg transition-all active:scale-95 text-sm"
+        >
+          重新載入
+        </button>
+      </div>
+    );
+  }
+
   const ItineraryComponent = id ? getItineraryComponent(id) : null;
   const showItineraryTab = id ? hasItinerary(id) : false;
 

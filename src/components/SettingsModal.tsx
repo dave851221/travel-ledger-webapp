@@ -26,6 +26,7 @@ import Modal from './Modal';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV } from '../utils/finance';
+import { isSubmitEnter } from '../utils/keyboard';
 import Decimal from 'decimal.js';
 
 /**
@@ -251,6 +252,32 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       });
       const onlyMembers = (list: string[]) => list.map(m => m.trim()).filter(m => finalMembers.includes(m));
 
+      // 預設幣別／分類必須還存在，否則新增的支出會記在沒有匯率的幣別上（統計以 1:1 換算）
+      const finalDefaultCurrency = defaultCurrency === baseCurrency || finalRates[defaultCurrency] !== undefined
+        ? defaultCurrency
+        : baseCurrency;
+      const finalDefaultCategory = categories.includes(defaultCategory) ? defaultCategory : (categories[0] ?? null);
+
+      // 改名要把成員清單與所有支出 JSONB 的 key 一起改，必須在同一個 transaction 裡完成：
+      // 以前是前端先存 trips 再一筆一筆改支出，中途斷線就會留下一半舊名字的支出，
+      // 那些錢從結算裡消失（calculateMemberBalances 只算成員清單裡的人）。
+      if (renamePairs.length > 0) {
+        const { error: renameErr } = await supabase.rpc('rename_trip_members', {
+          p_trip_id: trip.id,
+          p_members: finalMembers,
+          p_renames: Object.fromEntries(renamePairs),
+        });
+        if (renameErr) throw renameErr;
+
+        // 改名已經落地。下面的設定若存失敗、使用者再按一次儲存時，
+        // 不能再套一次同樣的改名（A、B 互換名字時會被換回去）
+        setMemberOrigins(finalMembers);
+
+        const savedMe = localStorage.getItem(`me_${trip.id}`);
+        const renamedMe = savedMe ? renamePairs.find(([oldN]) => oldN === savedMe)?.[1] : undefined;
+        if (renamedMe) localStorage.setItem(`me_${trip.id}`, renamedMe);
+      }
+
       const { error: updateError } = await supabase
         .from('trips')
         .update({
@@ -268,8 +295,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           base_currency: baseCurrency,
           // 留空 = 自動（依幣別推測）；與 access_code 同樣的正規化慣例，統一存成 NULL
           timezone: timezone.trim() || null,
-          default_currency: defaultCurrency,
-          default_category: defaultCategory,
+          default_currency: finalDefaultCurrency,
+          default_category: finalDefaultCategory,
           default_payer: onlyMembers(defaultPayer),
           default_split_members: onlyMembers(defaultSplitMembers)
         })
@@ -277,47 +304,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
       if (updateError) throw updateError;
 
-      if (renamePairs.length > 0) {
-        const { data: expensesData, error: fetchErr } = await supabase
-          .from('expenses')
-          .select('*')
-          .eq('trip_id', trip.id);
-
-        if (!fetchErr && expensesData) {
-          // 所有改名同時套用（而不是一對一對依序改），A、B 互換名字時才不會互相覆蓋
-          const renameMap = new Map(renamePairs);
-          const renameKeys = (data: Record<string, number>) => {
-            const out: Record<string, number> = {};
-            Object.entries(data ?? {}).forEach(([k, v]) => { out[renameMap.get(k) ?? k] = v; });
-            return out;
-          };
-
-          for (const exp of expensesData) {
-            const adj: string | null = exp.adjustment_member;
-            const touched = Object.keys({ ...exp.payer_data, ...exp.split_data })
-              .some(k => renameMap.has(k)) || (!!adj && renameMap.has(adj));
-            const newPayerData = renameKeys(exp.payer_data);
-            const newSplitData = renameKeys(exp.split_data);
-            const newAdjMember = adj ? (renameMap.get(adj) ?? adj) : adj;
-
-            if (touched) {
-              await supabase
-                .from('expenses')
-                .update({ 
-                  payer_data: newPayerData, 
-                  split_data: newSplitData, 
-                  adjustment_member: newAdjMember 
-                })
-                .eq('id', exp.id);
-            }
-          }
-        }
-
-        const savedMe = localStorage.getItem(`me_${trip.id}`);
-        const renamedMe = savedMe ? renamePairs.find(([oldN]) => oldN === savedMe)?.[1] : undefined;
-        if (renamedMe) localStorage.setItem(`me_${trip.id}`, renamedMe);
-      }
-      
       onSuccess();
       onClose();
     } catch (err) {
@@ -395,8 +381,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   };
 
   const addCategory = () => {
-    if (newCategory && !categories.includes(newCategory)) {
-      setCategories([...categories, newCategory]);
+    const cat = newCategory.trim();
+    if (cat && !categories.includes(cat)) {
+      setCategories([...categories, cat]);
       setNewCategory('');
     }
   };
@@ -437,6 +424,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
     setRatesStr(Object.fromEntries(Object.entries(ratesStr).filter(([k]) => k !== code)));
     setPrecisionStr(Object.fromEntries(Object.entries(precisionStr).filter(([k]) => k !== code)));
+    // 下拉選單會看起來跳到第一個選項，但 state 還是舊值 —— 不改掉的話會把刪掉的幣別存成預設
+    if (defaultCurrency === code) setDefaultCurrency(baseCurrency);
+  };
+
+  const removeCategory = (cat: string) => {
+    const next = categories.filter(c => c !== cat);
+    setCategories(next);
+    if (defaultCategory === cat) setDefaultCategory(next[0] ?? '');
   };
 
   return (
@@ -605,7 +600,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           {activeTab === 'members' && (
             <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
               <div className="flex gap-2 sm:gap-3">
-                <input type="text" placeholder="新增成員" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newMember} onChange={e => setNewMember(e.target.value)} onKeyDown={e => e.key === 'Enter' && addMember()} />
+                <input type="text" placeholder="新增成員" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newMember} onChange={e => setNewMember(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addMember()} />
                 <button onClick={addMember} className="px-4 sm:px-5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg active:scale-95"><Plus size={20} strokeWidth={3} /></button>
               </div>
               <div className="space-y-3 sm:space-y-4">
@@ -747,14 +742,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 </div>
               </div>
               <div className="flex gap-2 sm:gap-3">
-                <input type="text" placeholder="新增類別" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCategory()} />
+                <input type="text" placeholder="新增類別" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addCategory()} />
                 <button onClick={addCategory} className="px-4 sm:px-5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg active:scale-95"><Plus size={20} strokeWidth={3} /></button>
               </div>
               <div className="flex flex-wrap gap-2 sm:gap-3">
                 {categories.map(cat => (
                   <div key={cat} className="flex items-center gap-2 sm:gap-3 px-3 py-1.5 sm:px-5 sm:py-2.5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-full shadow-sm group hover:border-blue-200 transition-all">
                     <span className="text-xs sm:text-base font-black text-slate-700 dark:text-slate-200">{cat}</span>
-                    <button onClick={() => setCategories(categories.filter(c => c !== cat))} className="text-slate-300 hover:text-rose-500 transition-colors"><X size={14} /></button>
+                    <button onClick={() => removeCategory(cat)} className="text-slate-300 hover:text-rose-500 transition-colors"><X size={14} /></button>
                   </div>
                 ))}
               </div>

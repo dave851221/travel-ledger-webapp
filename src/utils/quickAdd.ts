@@ -1,6 +1,7 @@
 import type { Trip } from '../types';
 import { calculateDistribution, getCurrencyPrecision } from './finance';
 import { getLocalDateString } from './date';
+import { getDefaultCategory, getDefaultCurrency } from './tripDefaults';
 
 export interface QuickAddDraft {
   description: string;
@@ -59,8 +60,8 @@ export const buildQuickAddDraft = (
   const parsed = parseQuickAddInput(input);
   if (!parsed) return null;
 
-  const currency = trip.default_currency || trip.base_currency;
-  const category = trip.default_category || trip.categories[0] || '其他';
+  const currency = getDefaultCurrency(trip);
+  const category = getDefaultCategory(trip);
   const precision = getCurrencyPrecision(currency, trip.precision_config);
 
   const defaultPayers = (trip.default_payer ?? []).filter((m) => trip.members.includes(m));

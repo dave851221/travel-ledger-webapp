@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { RECEIPTS_BUCKET } from '../utils/storage';
+import { isNotFoundError } from '../utils/supabaseErrors';
 
 export interface UseTripDataResult {
   trip: Trip | null;
@@ -76,7 +77,9 @@ export const useTripData = (
       fetchSiblingTrips(data?.category, id);
     } catch (err) {
       console.error(err);
-      onMissingRef.current();
+      // 只有真的查無此旅程才導回首頁；網路暫時不通時保留畫面上的舊資料，
+      // 等下一次 realtime 事件或回到前景再重抓
+      if (isNotFoundError(err)) onMissingRef.current();
     }
   }, [id, fetchSiblingTrips]);
 

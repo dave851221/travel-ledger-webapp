@@ -21,6 +21,7 @@ import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
+import { getDefaultCategory, getDefaultCurrency } from '../utils/tripDefaults';
 import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
@@ -136,80 +137,89 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   // first render, React batches the setSplitData/setPayerData from init AFTER
   // the recalc effects. Non-functional setters overwrite functional ones,
   // ensuring editData values are not zeroed out by the initial-state recalc pass.
+  //
+  // 只在「開啟的那一刻」或「換了一筆要編輯的資料」時灌入初始值。
+  // Dashboard 在回到前景（手機開相機／相簿選照片回來就會觸發）與別人存設定時都會重抓 trip，
+  // trip.members 每次都是新陣列；若跟著它重設，使用者填到一半的內容會整個被清掉。
+  const initializedFor = useRef<{ editData: Expense | null | undefined } | null>(null);
   useEffect(() => {
-    if (isOpen) {
-      setError(null);
-      setLoading(false);
-      if (editData) {
-        // --- Edit Mode ---
-        setDescription(editData.description);
-        setAmount(editData.amount.toString());
-        setCurrency(editData.currency);
-        setDate(editData.date);
-        setCategory(editData.category);
-        setAdjustmentMember(editData.adjustment_member);
-        setPhotoList((editData.photo_urls || []).map(url => ({ kind: 'existing' as const, key: url, url })));
-        setDragIndex(null);
-        setDropTarget(null);
-
-        // Set Payers (only check if amount > 0)
-        const activePayers = Object.entries(editData.payer_data)
-          .filter(([, v]) => (Number(v) || 0) !== 0)
-          .map(([m]) => m);
-        const pActive = new Set(activePayers);
-        setPayerActive(pActive);
-        setPayerData(editData.payer_data);
-        setPayerLocked(new Set());
-        payerBaselineRef.current =
-          `${editData.amount}|${[...pActive].sort().join(',')}`;
-
-        // Set Splitters (only check if amount > 0)
-        const activeSplitters = Object.entries(editData.split_data)
-          .filter(([, v]) => (Number(v) || 0) !== 0)
-          .map(([m]) => m);
-        const sActive = new Set(activeSplitters);
-        setSplitActive(sActive);
-        setSplitData(editData.split_data);
-        setSplitLocked(new Set());
-        splitBaselineRef.current =
-          `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
-      } else {
-        // --- New Mode ---
-        setDescription('');
-        setAmount('');
-        setCurrency(trip.default_currency || trip.base_currency);
-        setDate(getLocalDateString());
-        setCategory(trip.default_category || trip.categories[0] || '其他');
-        setPhotoList([]);
-        setDragIndex(null);
-        setDropTarget(null);
-
-        const defaultPayers = (trip.default_payer ?? []).filter(m => trip.members.includes(m));
-        // currentUser 可能是已被改名或移除的舊名字，不是成員就不能當付款人（與 quickAdd 一致）
-        const activePayers = defaultPayers.length > 0
-          ? new Set(defaultPayers)
-          : new Set([currentUser && trip.members.includes(currentUser) ? currentUser : trip.members[0]]);
-        setPayerActive(activePayers);
-        setPayerLocked(new Set());
-        setPayerData({});
-        payerBaselineRef.current = null;
-
-        const defaultSplit = trip.default_split_members?.length
-          ? new Set(trip.default_split_members.filter(m => trip.members.includes(m)))
-          : new Set(trip.members);
-        setSplitActive(defaultSplit.size > 0 ? defaultSplit : new Set(trip.members));
-        setSplitLocked(new Set());
-        setSplitData({});
-        splitBaselineRef.current = null;
-
-        // adjMember: 優先 currentUser（若在預設付款人中）→ 第一個預設付款人 → 第一位成員
-        const adjMember = activePayers.has(currentUser || '')
-          ? currentUser!
-          : [...activePayers][0] ?? trip.members[0];
-        setAdjustmentMember(adjMember);
-      }
+    if (!isOpen) {
+      initializedFor.current = null;
+      return;
     }
-  }, [isOpen, editData, trip.members, currentUser, trip.base_currency]);
+    if (initializedFor.current && initializedFor.current.editData === editData) return;
+    initializedFor.current = { editData };
+    setError(null);
+    setLoading(false);
+    if (editData) {
+      // --- Edit Mode ---
+      setDescription(editData.description);
+      setAmount(editData.amount.toString());
+      setCurrency(editData.currency);
+      setDate(editData.date);
+      setCategory(editData.category);
+      setAdjustmentMember(editData.adjustment_member);
+      setPhotoList((editData.photo_urls || []).map(url => ({ kind: 'existing' as const, key: url, url })));
+      setDragIndex(null);
+      setDropTarget(null);
+
+      // Set Payers (only check if amount > 0)
+      const activePayers = Object.entries(editData.payer_data)
+        .filter(([, v]) => (Number(v) || 0) !== 0)
+        .map(([m]) => m);
+      const pActive = new Set(activePayers);
+      setPayerActive(pActive);
+      setPayerData(editData.payer_data);
+      setPayerLocked(new Set());
+      payerBaselineRef.current =
+        `${editData.amount}|${[...pActive].sort().join(',')}`;
+
+      // Set Splitters (only check if amount > 0)
+      const activeSplitters = Object.entries(editData.split_data)
+        .filter(([, v]) => (Number(v) || 0) !== 0)
+        .map(([m]) => m);
+      const sActive = new Set(activeSplitters);
+      setSplitActive(sActive);
+      setSplitData(editData.split_data);
+      setSplitLocked(new Set());
+      splitBaselineRef.current =
+        `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
+    } else {
+      // --- New Mode ---
+      setDescription('');
+      setAmount('');
+      setCurrency(getDefaultCurrency(trip));
+      setDate(getLocalDateString());
+      setCategory(getDefaultCategory(trip));
+      setPhotoList([]);
+      setDragIndex(null);
+      setDropTarget(null);
+
+      const defaultPayers = (trip.default_payer ?? []).filter(m => trip.members.includes(m));
+      // currentUser 可能是已被改名或移除的舊名字，不是成員就不能當付款人（與 quickAdd 一致）
+      const activePayers = defaultPayers.length > 0
+        ? new Set(defaultPayers)
+        : new Set([currentUser && trip.members.includes(currentUser) ? currentUser : trip.members[0]]);
+      setPayerActive(activePayers);
+      setPayerLocked(new Set());
+      setPayerData({});
+      payerBaselineRef.current = null;
+
+      const defaultSplit = trip.default_split_members?.length
+        ? new Set(trip.default_split_members.filter(m => trip.members.includes(m)))
+        : new Set(trip.members);
+      setSplitActive(defaultSplit.size > 0 ? defaultSplit : new Set(trip.members));
+      setSplitLocked(new Set());
+      setSplitData({});
+      splitBaselineRef.current = null;
+
+      // adjMember: 優先 currentUser（若在預設付款人中）→ 第一個預設付款人 → 第一位成員
+      const adjMember = activePayers.has(currentUser || '')
+        ? currentUser!
+        : [...activePayers][0] ?? trip.members[0];
+      setAdjustmentMember(adjMember);
+    }
+  }, [isOpen, editData, trip, currentUser]);
 
   // 兩張成員表預設收合。以五人旅程為例，展開時光是這兩區就有 50 個控制項
   // 擋在金額欄與送出鍵之間；多數記帳其實直接套用預設值即可。
@@ -275,6 +285,30 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       setSplitLocked(prev => new Set(prev).add(member));
       if (!splitActive.has(member)) setSplitActive(prev => new Set(prev).add(member));
     }
+  };
+
+  // 百分比欄的值是從金額反算的；正在輸入的那一格改顯示使用者打的原字串，
+  // 否則打到「33.」時會被重算成「33」，小數點就打不出來
+  const [pctDraft, setPctDraft] = useState<{ key: string; value: string } | null>(null);
+
+  const pctValue = (member: string, type: 'payer' | 'split') => {
+    const key = `${type}:${member}`;
+    if (pctDraft?.key === key) return pctDraft.value;
+    const data = type === 'payer' ? payerData : splitData;
+    return numAmount > 0
+      ? new Decimal(Number(data[member]) || 0).dividedBy(numAmount).times(100).toDecimalPlaces(2).toString()
+      : '';
+  };
+
+  const handlePctChange = (member: string, pctStr: string, type: 'payer' | 'split') => {
+    setPctDraft({ key: `${type}:${member}`, value: pctStr });
+    if (pctStr === '') {
+      handleManualEdit(member, '0', type);
+      return;
+    }
+    const pct = parseFloat(pctStr);
+    if (!isFinite(pct)) return;
+    handleManualEdit(member, new Decimal(numAmount).times(pct).dividedBy(100).toString(), type);
   };
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -508,17 +542,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                         placeholder="0"
                         disabled={!payerActive.has(member)}
                         className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${payerLocked.has(member) ? 'text-emerald-600 ring-1 ring-emerald-500/30' : 'text-slate-500'}`}
-                        value={numAmount > 0 ? new Decimal(Number(payerData[member] || 0)).dividedBy(numAmount).times(100).toDecimalPlaces(2).toString() : ''}
-                        onChange={e => {
-                          const pctStr = e.target.value;
-                          if (pctStr === '') {
-                            handleManualEdit(member, '0', 'payer');
-                            return;
-                          }
-                          const pct = parseFloat(pctStr);
-                          const newAmt = new Decimal(numAmount).times(pct).dividedBy(100);
-                          handleManualEdit(member, newAmt.toString(), 'payer');
-                        }}
+                        value={pctValue(member, 'payer')}
+                        onChange={e => handlePctChange(member, e.target.value, 'payer')}
+                        onBlur={() => setPctDraft(null)}
                       />
                       <span className="text-[9px] font-black text-slate-300">%</span>
                     </div>
@@ -589,17 +615,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                         placeholder="0"
                         disabled={!splitActive.has(member)}
                         className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${splitLocked.has(member) ? 'text-blue-600 ring-1 ring-blue-500/30' : 'text-slate-500'}`}
-                        value={numAmount > 0 ? new Decimal(Number(splitData[member] || 0)).dividedBy(numAmount).times(100).toDecimalPlaces(2).toString() : ''}
-                        onChange={e => {
-                          const pctStr = e.target.value;
-                          if (pctStr === '') {
-                            handleManualEdit(member, '0', 'split');
-                            return;
-                          }
-                          const pct = parseFloat(pctStr);
-                          const newAmt = new Decimal(numAmount).times(pct).dividedBy(100);
-                          handleManualEdit(member, newAmt.toString(), 'split');
-                        }}
+                        value={pctValue(member, 'split')}
+                        onChange={e => handlePctChange(member, e.target.value, 'split')}
+                        onBlur={() => setPctDraft(null)}
                       />
                       <span className="text-[9px] font-black text-slate-300">%</span>
                     </div>
