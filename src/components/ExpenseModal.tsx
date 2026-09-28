@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   X,
-  Camera,
+  ImagePlus,
   Lock,
   Unlock,
   AlertCircle,
@@ -278,6 +278,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
+    // 清掉 input 的值：否則刪掉一張照片後再選同一張，onChange 不會觸發
+    e.target.value = '';
     if (files.length === 0) return;
     setLoading(true);
     const newEntries: PhotoEntry[] = [];
@@ -309,13 +311,14 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     // 描述留空時用分類名代入，讓「只打金額」也能成立
     const finalDescription = description.trim() || category;
 
+    const liffMeta = editData as (Expense & { nonce?: string; line_user_id?: string }) | null;
+    let nonceLocked = false;
     try {
       setLoading(true);
       setError(null);
 
       // --- LIFF 防重複：在所有操作前先佔用 nonce ---
       // 若 nonce 已被 LINE 的「確認存入」或「取消」使用，則中止，避免重複寫入
-      const liffMeta = editData as (Expense & { nonce?: string; line_user_id?: string }) | null;
       if (liffMeta?.nonce && liffMeta?.line_user_id) {
         const { error: nonceErr } = await supabase.from('line_processed_actions').insert({
           nonce: liffMeta.nonce,
@@ -327,6 +330,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           onClose();
           return;
         }
+        nonceLocked = true;
       }
 
       // 1. Upload New Photos (in photoList order), build key→serverPath map
@@ -373,6 +377,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         const { error: uErr } = await supabase.from('expenses').update(record).eq('id', editData.id);
         if (uErr) throw uErr;
         savedExpenseId = editData.id;
+        // 編輯時被移除的舊照片：資料已經更新成功，才去刪 Storage 裡的檔案
+        // （順序不能反，否則更新失敗時紀錄會指向已刪掉的照片）
+        const removedPhotos = (editData.photo_urls || []).filter(url => url && !finalPhotoUrls.includes(url));
+        if (removedPhotos.length > 0) {
+          const { error: rmErr } = await supabase.storage.from(RECEIPTS_BUCKET).remove(removedPhotos);
+          if (rmErr) console.error('[PHOTO] failed to remove replaced photos:', rmErr);
+        }
         showToast('已更新支出紀錄！');
       } else {
         // --- Insert ---
@@ -402,7 +413,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
       onSuccess();
       onClose();
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)); } finally { setLoading(false); }
+    } catch (err) {
+      // 上傳或寫入失敗時把 nonce 鎖放掉，否則那張 LINE 卡片之後再也存不進去
+      if (nonceLocked && liffMeta?.nonce) {
+        await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);
+      }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setLoading(false); }
   };
 
   const ValidationBadge = ({ isValid, current, target }: { isValid: boolean, current: number, target: number }) => (
@@ -431,7 +448,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
               <div className="flex gap-2">
                 <div className="relative w-24 shrink-0">
                   <select className="w-full pl-3 pr-8 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 border-2 border-transparent font-bold text-xs outline-none appearance-none" value={currency} onChange={e => setCurrency(e.target.value)}>
-                    {Object.keys(trip.rates).map(c => <option key={c} value={c}>{c}</option>)}
+                    {[...new Set([...Object.keys(trip.rates), currency].filter(Boolean))].map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={12} />
                 </div>
@@ -448,7 +465,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             <div className="space-y-1.5">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">分類</label>
               <select className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 font-bold text-xs outline-none" value={category} onChange={e => setCategory(e.target.value)}>
-                {trip.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                {/* 編輯「結清」或已從清單移除的分類時，原值也要顯示，否則畫面與實際存入的值不一致 */}
+                {[...new Set([...trip.categories, category].filter(Boolean))].map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
             </div>
           </div>
@@ -665,7 +683,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                 );
               })}
               <label className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-slate-400 hover:border-blue-400 cursor-pointer">
-                <Camera size={20} /><span className="text-[8px] font-bold mt-1">添加</span><input type="file" multiple accept="image/*" capture="environment" className="hidden" onChange={handlePhotoChange} />
+                <ImagePlus size={20} /><span className="text-[8px] font-bold mt-1">添加</span><input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoChange} />
               </label>
             </div>
           </div>
