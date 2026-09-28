@@ -53,8 +53,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 ## 核心開發規則
 
 - **禁用原生 `alert()` / `confirm()`。** 一律使用專案封裝的 `Modal` 元件（確認動作）
-  或 `showToast`（通知訊息），以維持一致的視覺風格。
-  （註：`Home.tsx` 的建立旅程錯誤處理目前仍在用 `alert`，是待修正的例外。）
+  或 `showToast`（通知訊息），以維持一致的視覺風格。表單內的錯誤直接顯示在表單裡。
 - **金額運算一律走 `decimal.js`**，絕不使用原生浮點數。詳見下方「財務計算引擎」。
 - **改資料庫結構要動兩個地方**：`supabase/schema/NN_*.sql`（跑 `npm run db:build` 重新產生 bootstrap）
   以及一支新的 `supabase/migrations/`。詳見 [`docs/SETUP.md`](docs/SETUP.md)。

@@ -229,6 +229,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     const finalPrecision: Record<string, number> = {};
 
     try {
+      const finalName = name.trim();
+      if (!finalName) throw new Error('旅程名稱不能是空白');
+
       Object.keys(ratesStr).forEach(k => {
         const val = parseFloat(ratesStr[k]);
         if (isNaN(val) || val <= 0) throw new Error(`${k} 的匯率必須為大於 0 的數字`);
@@ -281,7 +284,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       const { error: updateError } = await supabase
         .from('trips')
         .update({
-          name,
+          name: finalName,
           // 留空即代表移除密碼；統一存成 NULL，避免出現兩種「無密碼」表示法
           access_code: accessCode.trim() || null,
           is_archived: isArchived,
@@ -389,8 +392,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   };
 
   const addCurrency = () => {
+    setError(null);
     const code = newCurrency.toUpperCase().trim();
-    if (code && !ratesStr[code]) {
+    if (!code) return;
+    // LINE Bot 的 AI 與收據辨識輸出的都是 ISO 4217 代碼（JPY），
+    // 設成「日幣」「JP Y」的幣別幾乎對不上，記帳時會被退回預設幣別
+    if (!/^[A-Z]{3}$/.test(code)) {
+      setError('幣別請輸入 3 碼英文代碼，例如 JPY、USD、KRW');
+      return;
+    }
+    if (!ratesStr[code]) {
       setRatesStr({ ...ratesStr, [code]: '1' });
       setPrecisionStr({ ...precisionStr, [code]: code === 'TWD' ? '0' : '2' });
       setNewCurrency('');
@@ -610,7 +621,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-black text-xs sm:text-sm shrink-0">{m.charAt(0)}</div>
                       <input type="text" className="flex-1 bg-transparent font-black text-sm sm:text-base outline-none focus:text-blue-600" value={m} onChange={e => handleMemberRename(idx, e.target.value)} placeholder="成員姓名" />
                     </div>
-                    <button onClick={() => removeMember(idx)}className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={16} /></button>
+                    {/* 觸控裝置沒有 hover：只有滑鼠操作時才「滑過才顯示」，否則手機、平板上按鈕永遠是透明的 */}
+                    <button onClick={() => removeMember(idx)} aria-label={`移除 ${m}`} className="p-2 text-slate-300 hover:text-rose-500 transition-colors pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus:opacity-100"><Trash2 size={16} /></button>
                   </div>
                 ))}
               </div>

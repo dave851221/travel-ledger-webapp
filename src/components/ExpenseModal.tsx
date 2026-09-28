@@ -93,14 +93,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const payerBaselineRef = useRef<string | null>(null);
   const splitBaselineRef = useRef<string | null>(null);
 
-  // 開啟 modal 時，複雜的分帳直接攤開，單純的就維持收合
-  useEffect(() => {
-    if (!isOpen) return;
-    setShowPayerDetail(payerActive.size > 1);
-    setShowSplitDetail(splitActive.size > 0 && splitActive.size !== trip.members.length);
-    // 只在開啟的當下判斷一次，之後由使用者自己控制
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  // 兩張成員表預設收合。以五人旅程為例，展開時光是這兩區就有 50 個控制項
+  // 擋在金額欄與送出鍵之間；多數記帳其實直接套用預設值即可。
+  // 只要偵測到不是「單一付款人 + 全員均分」的單純情況，就自動展開。
+  // 判斷寫在下面的初始化 effect 裡：這裡若另開一個 effect 讀 payerActive／splitActive，
+  // 讀到的會是「上一次開啟」留下的舊值（初始化的 setState 還沒生效）。
+  const [showPayerDetail, setShowPayerDetail] = useState(false);
+  const [showSplitDetail, setShowSplitDetail] = useState(false);
 
   const payerSignature = `${numAmount}|${[...payerActive].sort().join(',')}`;
   const splitSignature = `${numAmount}|${[...splitActive].sort().join(',')}|${adjustmentMember ?? ''}`;
@@ -184,6 +183,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       setSplitLocked(new Set());
       splitBaselineRef.current =
         `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
+
+      setShowPayerDetail(pActive.size > 1);
+      setShowSplitDetail(sActive.size > 0 && sActive.size !== trip.members.length);
     } else {
       // --- New Mode ---
       setDescription('');
@@ -208,10 +210,14 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       const defaultSplit = trip.default_split_members?.length
         ? new Set(trip.default_split_members.filter(m => trip.members.includes(m)))
         : new Set(trip.members);
-      setSplitActive(defaultSplit.size > 0 ? defaultSplit : new Set(trip.members));
+      const activeSplit = defaultSplit.size > 0 ? defaultSplit : new Set(trip.members);
+      setSplitActive(activeSplit);
       setSplitLocked(new Set());
       setSplitData({});
       splitBaselineRef.current = null;
+
+      setShowPayerDetail(activePayers.size > 1);
+      setShowSplitDetail(activeSplit.size !== trip.members.length);
 
       // adjMember: 優先 currentUser（若在預設付款人中）→ 第一個預設付款人 → 第一位成員
       const adjMember = activePayers.has(currentUser || '')
@@ -220,12 +226,6 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       setAdjustmentMember(adjMember);
     }
   }, [isOpen, editData, trip, currentUser]);
-
-  // 兩張成員表預設收合。以五人旅程為例，展開時光是這兩區就有 50 個控制項
-  // 擋在金額欄與送出鍵之間；多數記帳其實直接套用預設值即可。
-  // 只要偵測到不是「單一付款人 + 全員均分」的單純情況，就自動展開。
-  const [showPayerDetail, setShowPayerDetail] = useState(false);
-  const [showSplitDetail, setShowSplitDetail] = useState(false);
 
   const payerSummary = useMemo(() => {
     const names = [...payerActive];

@@ -70,6 +70,8 @@ const Home: React.FC = () => {
     category: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  // 建立旅程的錯誤顯示在表單裡；專案禁用原生 alert()
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTrips();
@@ -146,20 +148,25 @@ const Home: React.FC = () => {
   const handleCreateTrip = async (e: React.FormEvent) => {
     e.preventDefault();
     // access_code 為選填：留空代表此旅程不需要密碼
-    if (!newTrip.name || !newTrip.members || !supabase) return;
+    if (!supabase) return;
+    setCreateError(null);
+
+    // 全形逗號與頓號也要認：中文輸入法打出來的多半是「，」「、」，
+    // 以前只切半形逗號，「小明，小華」會變成一位叫「小明，小華」的成員
+    const membersArray = [...new Set(
+      newTrip.members.split(/[,，、]/).map(m => m.trim()).filter(Boolean)
+    )];
+    const tripName = newTrip.name.trim();
+    // input 的 required 擋不住只打空白或逗號的情況，會建出沒有名字或沒有成員的旅程
+    if (!tripName) { setCreateError('請輸入旅程名稱'); return; }
+    if (membersArray.length === 0) { setCreateError('請至少輸入一位參與人員'); return; }
 
     try {
       setSubmitting(true);
-      // 全形逗號與頓號也要認：中文輸入法打出來的多半是「，」「、」，
-      // 以前只切半形逗號，「小明，小華」會變成一位叫「小明，小華」的成員
-      const membersArray = [...new Set(
-        newTrip.members.split(/[,，、]/).map(m => m.trim()).filter(Boolean)
-      )];
-      
       const { data, error } = await supabase
         .from('trips')
         .insert([{
-          name: newTrip.name,
+          name: tripName,
           members: membersArray,
           access_code: newTrip.access_code.trim() || null,
           base_currency: newTrip.base_currency,
@@ -176,7 +183,7 @@ const Home: React.FC = () => {
       setIsModalOpen(false);
       setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '' });
     } catch (err) {
-      alert('建立失敗: ' + (err instanceof Error ? err.message : String(err)));
+      setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSubmitting(false);
     }
@@ -330,7 +337,7 @@ const Home: React.FC = () => {
       {/* 新增旅程 Modal */}
       <Modal 
         isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
+        onClose={() => { setIsModalOpen(false); setCreateError(null); }}
         title="開啟新的冒險"
       >
         <form onSubmit={handleCreateTrip} className="space-y-6 py-2 px-1">
@@ -416,6 +423,11 @@ const Home: React.FC = () => {
               ? '進入此旅程時需要輸入密碼。'
               : '未設定密碼：任何拿到連結的人都可以直接進入此旅程，LINE Bot 綁定時也免驗證。'}
           </p>
+          {createError && (
+            <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-xl flex items-center gap-2 text-red-600 dark:text-red-400 text-xs font-bold">
+              <AlertCircle size={16} className="shrink-0" />{createError}
+            </div>
+          )}
           <button
             disabled={submitting}
             type="submit"
