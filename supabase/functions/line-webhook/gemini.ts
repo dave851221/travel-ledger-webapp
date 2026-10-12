@@ -157,27 +157,38 @@ export const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」
    使用者說「剛剛」「最新」又沒指名店名時，選清單裡日期最近且有 📷 的那一筆。
    問的那筆不在清單上就不要填 expense_ref，系統會自己去全庫找。`
 
-// For text tasks: start with the thinking model (better reasoning)
+// Fallback order = free-tier daily quota first, then freshness.
+// The two flash-lite models have 500 RPD; every other one only has 20 RPD,
+// so they are strictly backups for when the lite models are slow or overloaded.
+// gemini-2.0-* was removed: it no longer has any free quota (limit 0 / 0).
 export const GEMINI_FALLBACK_MODELS = [
-  'gemini-3.1-flash-lite', // 500 RPD free tier
+  'gemini-3.5-flash-lite', // 15 RPM / 500 RPD
+  'gemini-3.1-flash-lite', // 15 RPM / 500 RPD
+  'gemini-3.6-flash',      // 5 RPM / 20 RPD from here on
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
+  'gemini-3-flash-preview',
   'gemini-2.5-flash',
-  'gemini-2.0-flash',
   'gemini-2.5-flash-lite',
-  'gemini-2.0-flash-lite',
 ]
 
-// For OCR (vision + JSON mode): gemini-2.0-flash is more reliable than thinking models.
-// Thinking models (gemini-2.5-flash) tend to output minimal valid JSON ("not_receipt")
-// even for real receipts when JSON mode is enforced.
+// OCR and audio transcription (vision/audio + JSON mode) use the same order.
+// A model that answers "not_receipt" for a real receipt is a valid response and
+// does NOT trigger the fallback, so re-test with real receipts before reordering.
 export const GEMINI_OCR_MODELS = [
-  'gemini-3.1-flash-lite', // 500 RPD free tier
-  'gemini-2.0-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
   'gemini-2.5-flash',
-  'gemini-2.0-flash-lite',
 ]
 
-/** 單次 JSON mode 呼叫的逾時。OCR 與轉錄都比文字慢，但也不能無限等下去。 */
-const ASK_TIMEOUT_MS = 25_000
+/**
+ * 單次 JSON mode 呼叫的逾時。OCR 與轉錄都比文字慢，但也不能無限等下去 ——
+ * 模型過載時寧可早點換下一個（曾經設 25 秒，一慢就是整整 25 秒沒有回應）。
+ */
+const ASK_TIMEOUT_MS = 15_000
 
 export interface AskGeminiOptions {
   /** 要求回傳 JSON。搭配 schema 時模型會被結構化輸出約束住 */

@@ -168,8 +168,11 @@ export function createGeminiClient(opts: {
 // function calling 迴圈
 // ============================================================
 
-/** 單次呼叫的逾時上限。LINE 的 replyToken 只有約一分鐘，不能等太久。 */
-export const MAX_CALL_TIMEOUT_MS = 25_000
+/**
+ * 單次呼叫的逾時上限。正常的回應在 1–3 秒內，超過 10 秒多半是對面過載，
+ * 換下一個模型比繼續等快得多（曾經設 25 秒，模型一慢使用者就等滿 25 秒）。
+ */
+export const MAX_CALL_TIMEOUT_MS = 10_000
 /** 已經超過 deadline 時，最後一輪仍給這麼久 —— 遲到的回覆也好過完全不回。 */
 export const MIN_CALL_TIMEOUT_MS = 5_000
 /** 一次 functionResponse 的 JSON 上限。超過就截斷，免得整包 context 被一次查詢灌爆。 */
