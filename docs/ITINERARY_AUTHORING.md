@@ -134,3 +134,4 @@ Leaflet 是從 `index.html` 以 CDN `<script>` 載入的，**不在 `package.jso
 | `trips/Nagoya2026.tsx` | 八天，用 `TripMap` + `DaySelector` |
 | `trips/Osaka2025.tsx` | 八天，粉紅色系 |
 | `trips/Jiuzhaigou2026.tsx` | 八天，青綠色系 |
+| `trips/Osaka2026.tsx` | 九天，秋楓色系；資料驅動（每天一份 `DayPlan`），「總覽」頁籤放航班、住宿、預訂狀況與可勾選的行前清單（存 localStorage） |
