@@ -21,6 +21,8 @@ const KIND_ICON: Record<ItemKind, LucideIcon> = {
 const STATUS: Record<BookingStatus, { label: string; cls: string }> = {
   paid: { label: '已付清', cls: 'bg-pos/12 text-pos' },
   booked: { label: '已預約', cls: 'bg-info/12 text-info' },
+  walkin: { label: '現場排隊', cls: 'bg-accent/18 text-ink' },
+  todo: { label: '待預訂', cls: 'bg-warn/14 text-warn' },
   pending: { label: '未確認', cls: 'bg-sunk text-muted border border-line' },
 };
 

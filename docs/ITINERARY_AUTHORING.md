@@ -123,7 +123,7 @@ export const ITINERARIES: Record<string, ItineraryEntry> = {
 | `title` | 標題，可以內嵌連結（見下） |
 | `places` | 依序造訪的地點 `{ name, href?, query?, lat?, lng? }`。「在 Google 地圖開啟這天路線」就是把這些串起來 |
 | `notes` | 備註清單，可以巢狀、可以標語氣 |
-| `booking` | `{ label?, status, href? }`，status 是 `paid`（已付清）／`booked`（已預約）／`pending`（未確認） |
+| `booking` | `{ label?, status, href? }`，status 是 `paid`（已付清）／`booked`（已預約）／`walkin`（現場排隊）／`todo`（待預訂）／`pending`（未確認） |
 | `tag` | 標題旁的紅色小標籤，例如「爸爸想吃味藏天國」 |
 | `undecided` | 還沒決定（例如餐廳），標題旁顯示「未定」 |
 | `extra` | 客製區塊，畫在備註下面 |

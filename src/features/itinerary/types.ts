@@ -35,7 +35,8 @@ export type ItemKind =
   | 'flight' | 'train' | 'car' | 'bus' | 'walk'
   | 'sight' | 'food' | 'hotel' | 'shopping' | 'activity' | 'info';
 
-export type BookingStatus = 'paid' | 'booked' | 'pending';
+/** paid 已付清、booked 已預約、walkin 現場排隊（不收預約）、todo 待預訂（還要去訂）、pending 未確認 */
+export type BookingStatus = 'paid' | 'booked' | 'walkin' | 'todo' | 'pending';
 
 export interface ItineraryItem {
   /** "09:00" 或 "09:00–11:00"（用 en dash）；沒有確切時間就改填 slot */
