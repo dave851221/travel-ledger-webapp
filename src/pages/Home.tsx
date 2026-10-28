@@ -131,11 +131,15 @@ const Home: React.FC = () => {
       if (category === UNCATEGORIZED) uncategorized = entry;
       else named.push(entry);
     });
-    // Order named groups by newest trip in the group (desc), uncategorized always last.
+    // 分類依「還沒封存的旅程裡最新的建立時間」排序，越新越上面。
+    // 封存的旅程不算 —— 否則剛封存一趟舊旅行就會把整個分類頂到最上面。
+    // 全部都封存的分類排在後面，彼此之間再依最新的建立時間排；未分類永遠最後。
+    const newest = (list: Trip[]) => Math.max(-Infinity, ...list.map(t => new Date(t.created_at).getTime()));
     named.sort((a, b) => {
-      const aLatest = Math.max(...a.trips.map(t => new Date(t.created_at).getTime()));
-      const bLatest = Math.max(...b.trips.map(t => new Date(t.created_at).getTime()));
-      return bLatest - aLatest;
+      const aActive = newest(a.trips.filter(t => !t.is_archived));
+      const bActive = newest(b.trips.filter(t => !t.is_archived));
+      if (aActive !== bActive) return bActive - aActive;
+      return newest(b.trips) - newest(a.trips);
     });
     return uncategorized ? [...named, uncategorized] : named;
   }, [trips]);
