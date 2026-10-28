@@ -46,6 +46,18 @@ const useStylesheet = (href?: string) => {
 
 const titleStyle: React.CSSProperties = { fontFamily: 'var(--t-title-font)' };
 
+/** 地圖是第三方程式庫，出錯時只讓地圖這一塊顯示失敗，不能讓整個行程頁變白 */
+class MapBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err: unknown) { console.error('[RouteMap]', err); }
+  render() {
+    return this.state.failed
+      ? <p className="rounded-xl bg-sunk border border-line px-3.5 py-6 text-center text-sm text-muted">地圖暫時無法顯示</p>
+      : this.props.children;
+  }
+}
+
 // ---------- cover ----------
 
 const Cover: React.FC<{ plan: ItineraryPlan; compact?: boolean }> = ({ plan, compact }) => {
@@ -476,7 +488,7 @@ const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
         <b className="text-ink">每日路線地圖</b>
         <ChevronDown size={16} className={`ml-auto text-muted transition-transform ${mapOpen ? 'rotate-180' : ''}`} />
       </button>
-      {mapOpen && <div className="mt-2"><RouteMap days={mapDays} initialIndex={today >= 0 ? today : active} color={accentHex} /></div>}
+      {mapOpen && <div className="mt-2"><MapBoundary><RouteMap days={mapDays} initialIndex={today >= 0 ? today : active} color={accentHex} /></MapBoundary></div>}
     </section>
   );
 

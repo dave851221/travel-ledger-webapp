@@ -36,6 +36,8 @@ const RouteMap: React.FC<Props> = ({ days, initialIndex = 0, color }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const layerRef = useRef<LeafletLayerGroup | null>(null);
+  // Leaflet 的 flyTo 要「從目前位置」飛過去；地圖剛建好還沒有位置，第一次一定要直接定位
+  const placedRef = useRef(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const withRoute = days.map((d, i) => ({ ...d, index: i })).filter(d => d.route.length > 0);
   const [pos, setPos] = useState(() => Math.max(0, withRoute.findIndex(d => d.index === initialIndex)));
@@ -61,6 +63,7 @@ const RouteMap: React.FC<Props> = ({ days, initialIndex = 0, color }) => {
       mapRef.current?.remove();
       mapRef.current = null;
       layerRef.current = null;
+      placedRef.current = false;
     };
   }, []);
 
@@ -108,11 +111,18 @@ const RouteMap: React.FC<Props> = ({ days, initialIndex = 0, color }) => {
       });
     };
 
-    map.once('moveend', draw);
-    // 視野沒變時不一定會有 moveend，保底在飛行時間之後畫
-    const fallback = window.setTimeout(draw, reduceMotion ? 50 : 900);
-    if (reduceMotion) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
-    else map.flyToBounds(bounds, { padding: [28, 28], maxZoom: 13, duration: 0.7 });
+    // 出錯時由 ItineraryView 的 MapBoundary 接住，只有地圖這一塊顯示失敗
+    let fallback = 0;
+    if (placedRef.current && !reduceMotion) {
+      map.once('moveend', draw);
+      // 視野沒變時不一定會有 moveend，保底在飛行時間之後畫
+      fallback = window.setTimeout(draw, 900);
+      map.flyToBounds(bounds, { padding: [28, 28], maxZoom: 13, duration: 0.7 });
+    } else {
+      map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
+      placedRef.current = true;
+      draw();
+    }
 
     return () => {
       window.clearTimeout(fallback);
