@@ -379,6 +379,12 @@ LINE Bot 的對話歷史曾因此永遠停在最早的六筆，AI 完全看不�
 
 `npm` / `npx` 容易遇到權限錯誤，必要時改用 `.cmd` 後綴。
 
+**vitest 遇到磁碟代號小寫會整批失敗**：從 `c:\SourceCode\…`（小寫 c）啟動時，
+每個測試檔都在第一行丟 `TypeError: Cannot read properties of undefined (reading 'config')`、
+結果顯示「0 test」—— 同一個模組被當成兩個路徑載入了兩次。程式本身沒問題，
+`cd "C:/SourceCode/AI/travel-ledger-webapp"`（大寫 C）再跑即可；CI 在 Linux 上不受影響。
+看到 `npm test` 印出 `Tests  no tests` 時先檢查 `RUN` 那一行的路徑大小寫。
+
 ### 密鑰與版控
 
 `.env` 與 `supabase/.temp/` 曾被 commit 進 git（前者含 anon key，後者含 Postgres 連線字串）。

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Archive, Plane } from 'lucide-react';
+import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Plane } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -74,7 +74,6 @@ const Home: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [showArchived, setShowArchived] = useState(false);
   const groupRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const [newTrip, setNewTrip] = useState({
@@ -112,16 +111,15 @@ const Home: React.FC = () => {
     }
   };
 
-  // 已封存的旅程收進頁面底部的摺疊區塊，不參與分類分組，
-  // 避免首頁隨著旅程累積而越來越長。
-  const activeTrips = useMemo(() => trips.filter(t => !t.is_archived), [trips]);
-  const archivedTrips = useMemo(() => trips.filter(t => t.is_archived), [trips]);
-  // trips 已依建立時間新到舊排序，第一筆就是最近的旅程
-  const featuredTrip = activeTrips[0] ?? null;
+  // trips 已依建立時間新到舊排序，第一筆沒封存的就是最近的旅程
+  const featuredTrip = useMemo(() => trips.find(t => !t.is_archived) ?? null, [trips]);
 
+  // 已封存的旅程和其他旅程一樣放在自己的分類裡（列上會標「已封存」）。
+  // 同一組裡進行中的排前面，收合時先看到的是還在用的旅程。
   const groupedTrips = useMemo(() => {
     const buckets = new Map<string, Trip[]>();
-    activeTrips.forEach(t => {
+    const ordered = [...trips.filter(t => !t.is_archived), ...trips.filter(t => t.is_archived)];
+    ordered.forEach(t => {
       const key = (t.category && t.category.trim()) || UNCATEGORIZED;
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key)!.push(t);
@@ -140,7 +138,7 @@ const Home: React.FC = () => {
       return bLatest - aLatest;
     });
     return uncategorized ? [...named, uncategorized] : named;
-  }, [activeTrips]);
+  }, [trips]);
 
   const knownCategories = useMemo(() => {
     const set = new Set<string>();
@@ -288,27 +286,6 @@ const Home: React.FC = () => {
               })}
             </div>
 
-            {archivedTrips.length > 0 && (
-              <section id="archived" className="scroll-mt-6">
-                <button
-                  onClick={() => setShowArchived(v => !v)}
-                  aria-expanded={showArchived}
-                  className="w-full flex items-center gap-2 px-1 py-1 text-sm font-bold text-ink-2 hover:text-ink transition-colors"
-                >
-                  <Archive size={15} />
-                  已封存
-                  <span className="text-xs font-normal text-muted num">{archivedTrips.length} 趟</span>
-                  <ChevronDown size={16} className={`ml-auto transition-transform ${showArchived ? 'rotate-180' : ''}`} />
-                </button>
-                {showArchived && (
-                  <div className={`${ui.card} overflow-hidden divide-y divide-line mt-2.5 anim-fade md:max-w-[calc(50%-12px)]`}>
-                    {archivedTrips.map(trip => (
-                      <TripRow key={trip.id} trip={trip} onClick={() => openTrip(trip)} />
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
           </div>
         )}
 
