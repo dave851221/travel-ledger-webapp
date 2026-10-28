@@ -17,13 +17,14 @@ interface Props {
 const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
 
 const DetailLines: React.FC<{ rows: { id: string; date: string; description: string; amount: number; currency: string }[]; trip: Trip }> = ({ rows, trip }) => (
-  <ul className="ml-7 mb-2 mt-0.5 space-y-0.5">
+  <ul className="ml-7 mb-2 mt-0.5 space-y-0.5 min-w-0">
     {rows.length === 0 ? (
       <li className="text-xs text-muted px-2 py-1">沒有資料</li>
     ) : rows.map(r => (
-      <li key={r.id} className="flex items-center gap-2 text-xs py-1 px-2.5 rounded-lg bg-sunk">
+      <li key={r.id} className="flex items-center gap-2 min-w-0 text-xs py-1 px-2.5 rounded-lg bg-sunk">
         <span className="num text-muted shrink-0">{r.date.slice(5).replace('-', '/')}</span>
-        <span className="text-ink-2 truncate flex-1">{r.description}</span>
+        {/* min-w-0：flex 子項目預設不會比內容窄，少了它長品名會把整頁撐寬 */}
+        <span className="text-ink-2 truncate flex-1 min-w-0">{r.description}</span>
         <span className="num font-bold text-ink shrink-0">{formatMoney(r.amount, r.currency, trip.precision_config)}</span>
       </li>
     ))}
@@ -61,8 +62,8 @@ const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
         ))}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2 items-start">
-        <section className="bg-surface border border-line rounded-2xl p-4 sm:p-5">
+      <div className="grid gap-5 grid-cols-1 lg:grid-cols-2 items-start">
+        <section className="bg-surface border border-line rounded-2xl p-4 sm:p-5 min-w-0">
           <h3 className="text-[15px] font-bold">分類</h3>
           {stats.categoryData.length === 0 ? (
             <p className="text-sm text-muted py-10 text-center">還沒有支出資料</p>
@@ -111,7 +112,7 @@ const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
           )}
         </section>
 
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           <section className="bg-surface border border-line rounded-2xl p-4 sm:p-5">
             <h3 className="text-[15px] font-bold mb-2">成員餘額 <span className="text-xs font-normal text-muted">· 含結清紀錄</span></h3>
             <MemberBalances trip={trip} stats={stats} currentUser={currentUser} />

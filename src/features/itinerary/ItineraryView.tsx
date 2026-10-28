@@ -443,8 +443,12 @@ const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
   }, [mapOpen]);
 
   const stays = useMemo(() => new Map((plan.stays ?? []).map(s => [s.id, s])), [plan.stays]);
-  const routes = useMemo(() => plan.days.map(d => d.route ?? []), [plan.days]);
-  const hasMap = routes.some(r => r.length > 0);
+  const mapDays = useMemo(() => plan.days.map((d, i) => ({
+    label: `D${i + 1} · ${dateParts(d.date).md}`,
+    title: d.title,
+    route: d.route ?? [],
+  })), [plan.days]);
+  const hasMap = mapDays.some(d => d.route.length > 0);
   const day = plan.days[active];
   const states = active === today ? itemStates(day.items, now.minutes) : day.items.map(() => null);
   const stay = day?.stay ? stays.get(day.stay) : undefined;
@@ -469,10 +473,10 @@ const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
         className="w-full flex items-center gap-2 rounded-xl bg-surface border border-line px-3.5 py-2.5 text-[13px] text-ink-2 hover:bg-sunk transition-colors"
       >
         <MapIcon size={16} className="text-[var(--t-accent)]" />
-        <b className="text-ink">全趟路線地圖</b>
+        <b className="text-ink">每日路線地圖</b>
         <ChevronDown size={16} className={`ml-auto text-muted transition-transform ${mapOpen ? 'rotate-180' : ''}`} />
       </button>
-      {mapOpen && <div className="mt-2"><RouteMap routes={routes} activeIndex={view === 'daily' ? active : -1} color={accentHex} /></div>}
+      {mapOpen && <div className="mt-2"><RouteMap days={mapDays} initialIndex={today >= 0 ? today : active} color={accentHex} /></div>}
     </section>
   );
 

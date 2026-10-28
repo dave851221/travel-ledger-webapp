@@ -177,7 +177,7 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 「一覽／每日／行前」三個分頁依資料自動增減，每趟旅程挑一個 `theme`（顏色在 `index.css` 的 `.it-theme-*`）。
 格式裝不下的內容寫成 `blocks/` 裡的小元件塞進 `extra`；registry 也接受 `{ component }` 整頁自訂，但應該很少用。
 `plan.test.ts` 會驗證每一份註冊的行程（日期順序、時間格式、住宿參照、連結寫法）。
-**Leaflet 不再由 `index.html` 載入**：使用者展開「全趟路線地圖」時才由 `loadLeaflet.ts` 從 CDN 下載。
+**Leaflet 不再由 `index.html` 載入**：使用者展開「每日路線地圖」時才由 `loadLeaflet.ts` 從 CDN 下載。
 新增方式（也是給 AI 的規格書）見 [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md)。
 
 ### 後端（Supabase）

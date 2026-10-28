@@ -71,7 +71,7 @@ export const ITINERARIES: Record<string, ItineraryEntry> = {
 | 只有 `days`，而且少於 3 天 | 打開就是每日時間軸，沒有分頁切換 |
 | `days` 有 3 天以上 | 多一個「一覽」：每天一行，旅途中標出「今天」 |
 | 有 `flights`、`bookings`、`checklist`、`notes`，或 3 天以上且有 `stays` | 多一個「行前」 |
-| 任何一天有 `route` 座標 | 一覽頁出現一張預設收起來的「全趟路線地圖」 |
+| 任何一天有 `route` 座標 | 一覽頁出現一張預設收起來的「每日路線地圖」 |
 
 電腦版（1024px 以上）一覽固定在左邊、詳細行程在右邊，分頁只剩「行程／行前」。
 
@@ -111,7 +111,7 @@ export const ITINERARIES: Record<string, ItineraryEntry> = {
 | `stay` | | 當晚住宿，填 `stays` 裡的 `id`。最下面會出現「今晚住宿」卡片，連同那間住宿的 `notes` |
 | `tips` | | 這天最上面的提醒 |
 | `extra` | | 客製區塊，畫在提醒下面 |
-| `route` | | 全趟地圖用的大略座標 `[[lat, lng], …]` |
+| `route` | | 每日路線地圖用的大略座標 `[[lat, lng], …]` |
 
 ### ItineraryItem（時間軸上的一項）
 
@@ -220,7 +220,7 @@ CI 會跑這支測試，資料寫錯就無法合併。
 
 | 檔案 | 特色 |
 | :--- | :--- |
-| `trips/Osaka2026.ts` | 九天，最完整：航班、兩間住宿、預訂狀況、行前清單、全趟地圖 |
+| `trips/Osaka2026.ts` | 九天，最完整：航班、兩間住宿、預訂狀況、行前清單、每日路線地圖 |
 | `trips/Nagoya2026.ts` | 八天自駕，大量巢狀備註、Mapcode、紅字提醒 |
 | `trips/Osaka2025.ts` | 八天，訂單連結放在 `booking.href` 與備註裡 |
 | `trips/Jiuzhaigou2026.ts` | 旅行社團體行程，用小函式產生重複的餐食項目 |

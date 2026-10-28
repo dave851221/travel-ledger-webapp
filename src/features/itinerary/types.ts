@@ -69,7 +69,7 @@ export interface DayPlan {
   tips?: Note[];
   /** 客製區塊，畫在提醒下面、時間軸上面 */
   extra?: React.ReactNode;
-  /** 全趟地圖用的大略路線座標 [lat, lng] */
+  /** 每日路線地圖用的大略座標 [lat, lng] */
   route?: [number, number][];
 }
 

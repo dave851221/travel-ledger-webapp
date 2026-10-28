@@ -12,7 +12,21 @@ declare global {
 
   interface LeafletPolyline extends LeafletLayer {
     getBounds(): LeafletBounds;
+    /** The SVG <path>, available once the layer is on a map */
+    getElement(): Element | undefined;
     addTo(map: LeafletMap): LeafletPolyline;
+  }
+
+  type LeafletIcon = object;
+
+  interface LeafletMarker extends LeafletLayer {
+    addTo(map: LeafletMap): LeafletMarker;
+  }
+
+  interface LeafletLayerGroup extends LeafletLayer {
+    addLayer(layer: LeafletLayer): LeafletLayerGroup;
+    clearLayers(): LeafletLayerGroup;
+    addTo(map: LeafletMap): LeafletLayerGroup;
   }
 
   interface LeafletCircleMarker extends LeafletLayer {
@@ -23,14 +37,20 @@ declare global {
   interface LeafletMap {
     setView(latlng: LatLngTuple, zoom: number): LeafletMap;
     fitBounds(bounds: LeafletBounds, opts?: { padding?: [number, number]; maxZoom?: number }): LeafletMap;
+    flyToBounds(bounds: LeafletBounds, opts?: { padding?: [number, number]; maxZoom?: number; duration?: number }): LeafletMap;
     removeLayer(layer: LeafletLayer): LeafletMap;
+    once(event: 'moveend', fn: () => void): LeafletMap;
+    off(event: 'moveend', fn: () => void): LeafletMap;
     remove(): void;
   }
 
   interface LeafletAPI {
     map(el: HTMLElement, opts?: { scrollWheelZoom?: boolean }): LeafletMap;
     tileLayer(url: string, opts?: { attribution?: string }): LeafletLayer;
-    polyline(latlngs: LatLngTuple[], opts?: { color?: string; weight?: number; opacity?: number; dashArray?: string }): LeafletPolyline;
+    polyline(latlngs: LatLngTuple[], opts?: { color?: string; weight?: number; opacity?: number; dashArray?: string; lineCap?: string; lineJoin?: string }): LeafletPolyline;
+    marker(latlng: LatLngTuple, opts?: { icon?: LeafletIcon; keyboard?: boolean }): LeafletMarker;
+    divIcon(opts: { className?: string; html?: string; iconSize?: [number, number]; iconAnchor?: [number, number] }): LeafletIcon;
+    layerGroup(): LeafletLayerGroup;
     circleMarker(latlng: LatLngTuple, opts?: { radius?: number; color?: string; weight?: number; fillColor?: string; fillOpacity?: number }): LeafletCircleMarker;
     latLngBounds(latlngs: LatLngTuple[]): LeafletBounds;
   }
