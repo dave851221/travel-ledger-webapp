@@ -47,14 +47,37 @@
 
 Supabase Dashboard → Database → Backups 建立一次備份。刪除後就只能靠備份救回來了。
 
-### 步驟 4：執行刪除
+### 步驟 4：先刪收據照片
+
+⚠️ **SQL 刪不了照片**：Supabase 的 `storage.protect_delete()` 會擋下對 `storage.objects` 的 `DELETE`
+（錯誤訊息是 `Direct deletion from storage tables is not allowed. Use the Storage API instead.`），
+所以照片要先用 Storage API 刪掉。步驟 2 的 `storage_photos` 是 0 就跳過這一步。
+
+- **Dashboard**：Storage → `travel-images` → `expenses` → 進到以旅程 UUID 命名的資料夾，全選後刪除。
+- **API**（照片很多時）：先查出路徑，
+
+  ```sql
+  SELECT name FROM storage.objects
+  WHERE bucket_id = 'travel-images' AND name LIKE 'expenses/<UUID>/%';
+  ```
+
+  再一次刪掉（`prefixes` 放完整路徑，可以一次放很多個）：
+
+  ```bash
+  curl -X DELETE "$VITE_SUPABASE_URL/storage/v1/object/travel-images" \
+    -H "apikey: $VITE_SUPABASE_ANON_KEY" -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"prefixes":["expenses/<UUID>/xxx.jpg"]}'
+  ```
+
+### 步驟 5：執行刪除
 
 打開 [`supabase/scripts/delete_trip.sql`](../supabase/scripts/delete_trip.sql)，
 同樣把「← 改這裡」那行的 UUID 換掉，整份貼上執行。
 
 腳本包在單一交易裡，依序做四件事：
 
-1. **先刪 Storage 的收據照片**
+1. **確認收據照片已經刪光**，還有照片就中止，什麼都不刪
 2. 解除所有 LINE 聊天的綁定狀態
 3. 刪除旅程本身（cascade 會一併帶走 `expenses` 與 `line_trip_id_mapping`）
 4. 回報驗證結果
@@ -74,8 +97,8 @@ Supabase Dashboard → Database → Backups 建立一次備份。刪除後就只
 該清掉 bucket 裡的哪些檔案。那些照片會變成無人知曉、也無法追蹤的孤兒，
 永遠佔用儲存空間（Storage 不受資料庫外鍵約束，不會自動清理）。
 
-腳本改以路徑前綴 `expenses/{tripId}/` 比對，所以就算真的搞錯順序，
-只要還記得 UUID 就能事後補救 —— 但正常流程仍請照順序走。
+照片是以路徑前綴 `expenses/{tripId}/` 比對，所以就算真的搞錯順序，
+只要還記得 UUID 就能事後補救 —— 但正常流程仍請照順序走，腳本也會在照片還沒刪光時拒絕執行。
 
 ---
 

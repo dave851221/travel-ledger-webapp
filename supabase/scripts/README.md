@@ -7,7 +7,7 @@
 | :--- | :--- |
 | `list_trips.sql`   | 列出所有旅程與其支出/照片數量，用來查 UUID。直接執行，不需修改 |
 | `preview_trip.sql` | 唯讀預覽「刪除某旅程會刪掉什麼」。需填入 UUID |
-| `delete_trip.sql`  | 永久刪除一個旅程。需填入 UUID。**不可逆** |
+| `delete_trip.sql`  | 永久刪除一個旅程。需填入 UUID，**收據照片要先用 Storage API 刪掉**（SQL 刪不了，見 DB_MAINTENANCE.md）。**不可逆** |
 
 **完整操作步驟、注意事項與疑難排解，請看 [`docs/DB_MAINTENANCE.md`](../../docs/DB_MAINTENANCE.md)。**
 這裡只放檔案清單，避免同一份說明散在兩處各自漂移。

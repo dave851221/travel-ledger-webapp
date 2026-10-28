@@ -5,7 +5,8 @@
 --    1. 先跑 preview_trip.sql 確認刪的是正確的旅程
 --    2. 考慮先在 Supabase Dashboard → Database → Backups 建一次備份
 --
--- 用法：把下面「改這裡」那一行的 UUID 換成目標旅程 id，整份貼進 SQL Editor 執行。
+-- 用法：先刪掉這個旅程的收據照片（SQL 刪不了，見 docs/DB_MAINTENANCE.md 步驟 4），
+--       再把下面「改這裡」那一行的 UUID 換成目標旅程 id，整份貼進 SQL Editor 執行。
 --       整份包在一個交易裡，任何一步失敗都會全部回滾。
 --
 -- 操作說明見 docs/DB_MAINTENANCE.md
@@ -41,13 +42,24 @@ END
 $$;
 
 
--- ── 步驟 3：先刪 Storage 的收據照片 ───────────────────────────
+-- ── 步驟 3：確認收據照片已經先刪掉 ─────────────────────────────
+-- Supabase 不允許用 SQL 直接刪 storage.objects（storage.protect_delete 會擋下來），
+-- 照片必須先用 Storage API 或 Dashboard 刪除，做法見 docs/DB_MAINTENANCE.md。
 -- 順序很重要：expenses.trip_id 是 ON DELETE CASCADE，一旦先刪掉 trip，
--- expenses.photo_urls 也跟著消失，就再也查不出該清哪些檔案，
--- 照片會變成 bucket 裡無法追蹤的孤兒（Storage 不受 FK 約束）。
-DELETE FROM storage.objects
-WHERE bucket_id = 'travel-images'
-  AND name LIKE 'expenses/' || (SELECT id::text FROM _target) || '/%';
+-- 就再也查不出該清哪些檔案，照片會變成 bucket 裡無法追蹤的孤兒。
+-- 所以照片還在的話，這裡直接中止整個交易。
+DO $$
+DECLARE
+    v_left int;
+BEGIN
+    SELECT count(*) INTO v_left FROM storage.objects
+    WHERE bucket_id = 'travel-images'
+      AND name LIKE 'expenses/' || (SELECT id::text FROM _target) || '/%';
+    IF v_left > 0 THEN
+        RAISE EXCEPTION '這個旅程還有 % 張收據照片，請先依 docs/DB_MAINTENANCE.md 刪掉照片再執行', v_left;
+    END IF;
+END
+$$;
 
 
 -- ── 步驟 4：解除 LINE 綁定狀態 ────────────────────────────────
