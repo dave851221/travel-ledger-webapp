@@ -92,17 +92,24 @@ const routeStop = (place: Place): string =>
 const MAX_WAYPOINTS = 9;
 
 /**
- * 把當天所有地點依序帶進 Google 地圖的路線規劃（起點是使用者目前位置）。
- * 只有一個地點時改成搜尋那個地點；沒有地點就回傳 null。
+ * 把當天所有地點依序帶進 Google 地圖的路線規劃：第一個地點是起點、最後一個是終點，中間依序經過。
+ * ⚠️ 一定要給 origin —— 省略的話 Google 會從使用者目前的位置出發，
+ *    人還在台灣時打開就是一條橫跨海峽、縮到看不見細節的路線。
+ * 同一個地點出現兩次只算一次（例如同一間店連玩兩場）；只剩一個地點時改成直接顯示那個地點。
  */
 export const dayRoute = (day: DayPlan): { url: string; places: Place[] } | null => {
-  const places = day.items.flatMap(it => it.places ?? []);
+  const places: Place[] = [];
+  day.items.flatMap(it => it.places ?? []).forEach(p => {
+    if (!places.some(q => q.name === p.name)) places.push(p);
+  });
   if (places.length === 0) return null;
   if (places.length === 1) return { url: placeUrl(places[0]), places };
+  const origin = routeStop(places[0]);
   const destination = routeStop(places[places.length - 1]);
-  const waypoints = places.slice(0, -1).slice(0, MAX_WAYPOINTS).map(routeStop);
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`
-    + `&waypoints=${encodeURIComponent(waypoints.join('|'))}`;
+  const waypoints = places.slice(1, -1).slice(0, MAX_WAYPOINTS).map(routeStop);
+  const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}`
+    + `&destination=${encodeURIComponent(destination)}`
+    + (waypoints.length > 0 ? `&waypoints=${encodeURIComponent(waypoints.join('|'))}` : '');
   return { url, places };
 };
 

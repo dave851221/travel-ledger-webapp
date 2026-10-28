@@ -109,8 +109,27 @@ describe('dayRoute', () => {
       items: [{ kind: 'sight', title: '', places: [{ name: 'A', query: 'a q' }, { name: 'B', lat: 1, lng: 2 }, { name: 'C' }] }],
     });
     expect(many?.url).toContain('/maps/dir/');
-    expect(many?.url).toContain(`destination=C`);
-    expect(decodeURIComponent(many!.url)).toContain('waypoints=a q|1,2');
+    expect(decodeURIComponent(many!.url)).toContain('origin=a q');
+    expect(many?.url).toContain('destination=C');
+    expect(decodeURIComponent(many!.url)).toContain('waypoints=1,2');
+  });
+
+  // 沒有 origin 時 Google 從使用者目前位置出發，人在台灣時路線會拉到看不見
+  it('always starts the route at the first stop, never at the user', () => {
+    const two = dayRoute({
+      date: '2026-01-01', title: '',
+      items: [{ kind: 'sight', title: '', places: [{ name: '清水寺' }] }, { kind: 'sight', title: '', places: [{ name: '嵐山' }] }],
+    });
+    expect(decodeURIComponent(two!.url)).toContain('origin=清水寺');
+    expect(decodeURIComponent(two!.url)).toContain('destination=嵐山');
+    expect(two!.url).not.toContain('waypoints');
+  });
+
+  it('counts a repeated place once, falling back to a single-place link', () => {
+    const shop = { name: '哇沙謎江戶時代館', href: 'https://maps.app.goo.gl/x' };
+    const r = dayRoute({ date: '2026-01-01', title: '', items: [{ kind: 'activity', title: '', places: [shop] }, { kind: 'activity', title: '', places: [shop] }] });
+    expect(r?.places).toHaveLength(1);
+    expect(r?.url).toBe('https://maps.app.goo.gl/x');
   });
   it('returns null without places', () => {
     expect(dayRoute({ date: '2026-01-01', title: '', items: [{ kind: 'info', title: '' }] })).toBeNull();
