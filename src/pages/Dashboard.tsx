@@ -30,6 +30,7 @@ import StatsTab from '../features/dashboard/StatsTab';
 import SettlementTab, { type SettleRequest } from '../features/dashboard/SettlementTab';
 import TrashTab from '../features/dashboard/TrashTab';
 import SiblingsTab from '../features/dashboard/SiblingsTab';
+import AlbumTab from '../features/dashboard/AlbumTab';
 import MemberAvatar from '../features/dashboard/MemberAvatar';
 
 const APP_NAME = '旅遊小本本';
@@ -360,6 +361,8 @@ const Dashboard: React.FC = () => {
           )}
 
           {activeTab === 'itinerary' && id && <TripItinerary tripId={id} />}
+
+          {activeTab === 'album' && <AlbumTab trip={trip} expenses={expenses} onOpenExpense={setDetailExpense} />}
 
           {activeTab === 'siblings' && (
             <SiblingsTab

@@ -196,8 +196,14 @@ export function buildExpenseCard(opts: {
    * （postback 的 commitExpense 另外會擋 invalid_amount）。
    */
   needsAmount?: boolean
+  /**
+   * AI 認不出這張照片是什麼（或整個 AI 忙到沒回）：描述也留空，整張讓使用者自己填。
+   * 隱含 needsAmount。照片照樣留著，不會因為辨識不出來就被丟掉。
+   */
+  unidentified?: boolean
 }): OutgoingMessage {
-  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, needsAmount = false } = opts
+  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, unidentified = false } = opts
+  const needsAmount = opts.needsAmount || unidentified
   // 還沒有金額時只列名字，不印一排 0
   const amountRows = (data: Record<string, unknown> | undefined) =>
     Object.entries(data ?? {}).map(([name, amt]) => ({
@@ -212,7 +218,7 @@ export function buildExpenseCard(opts: {
   const cancelButton = { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
   const footerButtons = needsAmount
     ? [
-        { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: "✏️ 填金額", uri: liffUrl } },
+        { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: unidentified ? "✏️ 填寫內容" : "✏️ 填金額", uri: liffUrl } },
         cancelButton,
       ]
     : [
@@ -232,7 +238,10 @@ export function buildExpenseCard(opts: {
         type: "box", layout: "vertical",
         contents: [
           { type: "text", text: title, weight: "bold", color: "#1DB446", size: "sm" },
-          { type: "text", text: String(expense.description), weight: "bold", size: "xl", margin: "md", wrap: true },
+          // Flex 的 text 不能是空字串，認不出來的照片描述是空的
+          unidentified || !String(expense.description ?? '').trim()
+            ? { type: "text", text: "（還沒填內容）", weight: "bold", size: "xl", margin: "md", wrap: true, color: "#AAAAAA" }
+            : { type: "text", text: String(expense.description), weight: "bold", size: "xl", margin: "md", wrap: true },
           { type: "text", text: `📅 ${expense.date} · 🏷️ ${expense.category}`, size: "xs", color: "#aaaaaa", margin: "xs" },
           { type: "separator", margin: "md" },
           { type: "box", layout: "vertical", margin: "md", spacing: "sm", contents: [
@@ -252,7 +261,12 @@ export function buildExpenseCard(opts: {
             ]},
           ]},
           ...(needsAmount
-            ? [{ type: "text", text: "這張照片不是收據，按「✏️ 填金額」補上金額後就會存入。", size: "xs", color: "#888888", wrap: true, margin: "md" }]
+            ? [{
+                type: "text", size: "xs", color: "#888888", wrap: true, margin: "md",
+                text: unidentified
+                  ? "我認不出這張照片是什麼，照片先幫你留著。按「✏️ 填寫內容」補上項目與金額就會存入。"
+                  : "這張照片不是收據，按「✏️ 填金額」補上金額後就會存入。",
+              }]
             : []),
         ],
       },

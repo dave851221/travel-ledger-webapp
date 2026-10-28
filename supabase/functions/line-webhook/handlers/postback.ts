@@ -166,7 +166,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         dt: curExpense.date, cat: curExpense.category,
         p: curExpense.payer_data, s: curExpense.split_details,
       },
-      p: photoIds, tid: tripIdForCur,
+      p: photoIds, rc: pending.rc, tid: tripIdForCur,
     })
     await replyMessage(replyToken, [buildExpenseCard({
       expense: curExpense,
@@ -344,12 +344,15 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     let expenseRaw: DraftExpense | undefined = exp_new || exp_old || postbackData.expense
     let photo_ids = p_new || p_old || postbackData.photo_urls || []
     let trip_id = postbackData.trip_id || userState?.current_trip_id
+    // 舊格式的卡片（內容整包放在 postback 裡）只會來自收據辨識
+    let receipt = !!(postbackData.expense || exp_new || exp_old)
 
     if (!expenseRaw && nonce) {
       const pending = await getPendingExpense(sourceId, nonce)
       if (pending) {
         expenseRaw = pending.exp
         photo_ids = pending.p || []
+        receipt = pending.rc === true
         trip_id = pending.tid || trip_id
       }
     }
@@ -408,7 +411,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       adjustment_member: null,
     }, {
       db: supabase, trip, today: tripToday(trip), actorName: ctx.memberName,
-    }, { photoUrls: photo_urls })
+    }, { photoUrls: photo_urls, receiptPhotoUrls: receipt ? photo_urls : [] })
 
     if (!saveResult.ok) {
       // 存不進去的三種情況都要把 nonce 放掉，卡片上的按鈕才還能用

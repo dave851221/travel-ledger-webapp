@@ -65,6 +65,7 @@ CREATE INDEX IF NOT EXISTS trips_category_idx ON public.trips (category);
 --   payer_data / split_data：{ 成員名稱: 金額 }，key 是純字串顯示名稱而非 ID
 --   adjustment_member      ：分帳除不盡時，餘數指派給誰
 --   photo_urls             ：Storage 的「路徑」而非完整 URL，格式 expenses/{tripId}/{檔名}
+--   receipt_photo_urls     ：photo_urls 中屬於收據的那幾張（相簿分「商品／收據」兩區），其餘是商品照片
 --   deleted_at             ：軟刪除（垃圾桶保留 24 小時）
 --   is_settlement          ：結清紀錄，統計時需特別處理
 CREATE TABLE IF NOT EXISTS public.expenses (
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS public.expenses (
     split_data        JSONB       NOT NULL DEFAULT '{}'::jsonb,
     adjustment_member TEXT,
     photo_urls        TEXT[]      DEFAULT '{}',
+    receipt_photo_urls TEXT[]     DEFAULT '{}',
     is_settlement     BOOLEAN     DEFAULT FALSE,
     deleted_at        TIMESTAMPTZ,
     created_at        TIMESTAMPTZ DEFAULT NOW()
@@ -91,6 +93,7 @@ CREATE INDEX IF NOT EXISTS expenses_deleted_at_idx ON public.expenses (deleted_a
 -- 全新建立時以下皆為 no-op；若把 bootstrap 跑在舊資料庫上則會補正
 ALTER TABLE public.trips ALTER COLUMN access_code DROP NOT NULL;
 ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS ai_preference TEXT;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS receipt_photo_urls TEXT[] DEFAULT '{}';
 
 -- 空白密碼一律正規化為 NULL，避免出現兩種「無密碼」表示法
 UPDATE public.trips SET access_code = NULL WHERE btrim(access_code) = '';

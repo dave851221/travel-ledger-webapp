@@ -185,6 +185,12 @@ export function prepareExpense(
 export interface CommitOptions {
   /** Storage 的完整路徑（例如 `expenses/{tripId}/{id}.jpg`）。id → 路徑的轉換留在呼叫端。 */
   photoUrls?: string[]
+  /**
+   * `photoUrls` 裡哪些是收據（相簿分「商品照片／收據照片」兩區）。
+   * 機器人從照片辨識出金額的才算收據；使用者自己填金額的（📷 照片記帳）是商品照片。
+   * 不在 `photoUrls` 裡的路徑會被丟掉。
+   */
+  receiptPhotoUrls?: string[]
 }
 
 /**
@@ -257,6 +263,7 @@ export async function commitExpense(
     date: prepared.date,
     category: prepared.category,
     photo_urls: opts.photoUrls ?? [],
+    receipt_photo_urls: (opts.receiptPhotoUrls ?? []).filter((u) => (opts.photoUrls ?? []).includes(u)),
     adjustment_member: adjustMember,
   }).select('id').single()
 

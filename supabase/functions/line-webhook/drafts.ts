@@ -17,6 +17,8 @@ export interface OutstandingDraft {
   nonce: string
   exp: DraftExpense
   photoIds: string[]
+  /** 照片是收據（見 PendingDraft.rc） */
+  receipt: boolean
   tripId: string
 }
 
@@ -53,7 +55,7 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
       const photoIds = Array.isArray(parsed.p) ? parsed.p : []
       const kind = parsed.kind ?? 'expense'
       if (parsed.n && kind === 'expense') {
-        candidates.push({ nonce: parsed.n, exp: parsed.exp, photoIds, tripId: parsed.tid })
+        candidates.push({ nonce: parsed.n, exp: parsed.exp, photoIds, receipt: parsed.rc === true, tripId: parsed.tid })
       }
     } catch { /* skip malformed */ }
   }

@@ -7,12 +7,12 @@
 //   expense     收據、付款畫面 → 照常辨識金額
 //   item_photo  不是收據但拍的是可以記帳的東西（食物、商品、門票…）→ 判斷是什麼、金額填 0，
 //               卡片只有「✏️ 填金額」沒有「✅ 確認存入」，使用者到編輯頁補上金額才存得進去
-//   not_receipt 與消費無關（風景、人像、聊天截圖）→ 照片刪除
+//   not_receipt 認不出是什麼 → 照片照樣留著，出一張描述與金額都空白的卡片讓使用者自己填。
+//               AI 回了壞掉的格式、或根本沒回應（額度、忙碌、逾時）時也一樣（使用者要求：上傳的照片不要丟）。
 //
-// ⚠️ 照片一旦上傳就要負責清乾淨：辨識不出來、不是收據、或整段拋例外時，
-//    都要把 filePath 從 bucket 移除，否則會留下沒有支出指向它的孤兒照片。
-//    唯一的例外是「幣別沒匯率」（M10）—— 那時刻意保留照片，
-//    讓使用者選一個幣別就能直接存入，不必重拍。
+// ⚠️ 照片一旦上傳就要負責清乾淨：處理過程拋出 AI 以外的例外時（上傳失敗、回覆失敗…），
+//    要把 filePath 從 bucket 移除，否則會留下沒有支出指向它的孤兒照片。
+//    卡片出去之後由「❌ 取消」負責刪照片。
 // ============================================================
 
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
@@ -31,7 +31,7 @@ import type { ImageMessageEvent, OcrResponse } from "../types.ts"
 
 /** 處理一張收據照片。呼叫端已經確認 ctx.isBound。 */
 export async function handleImage(ctx: EventContext, event: ImageMessageEvent): Promise<void> {
-  const { boundQR, isGroup, memberName, replyToken, sourceId, userState } = ctx
+  const { boundQR, memberName, replyToken, sourceId, userState } = ctx
 
   const messageId = event.message.id
 
@@ -141,8 +141,8 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       - 🚫 **不要猜金額**，就算照片上看得到價格也一樣 —— 金額會留空，使用者自己填實際付的錢。
         amount 與 payer_data、split_details 裡每個人的 amount 一律填 0（系統會當成「還沒填」），
         成員一樣照規則 5 決定。
-   c. **與消費無關**（人物照、風景照、風景明信片、與消費無關的截圖）→ type: "not_receipt"，
-      無需任何說明或讚美，系統會自動清除照片。拿不準是 b 還是 c 時，照片主體是可以買的東西就選 b。
+   c. **看不出是可以記帳的東西**（人物照、風景照、與消費無關的截圖）→ type: "not_receipt"，
+      無需任何說明或讚美，系統會保留照片、讓使用者自己填內容。拿不準是 b 還是 c 時，照片主體是可以買的東西就選 b。
    ⚠️ **付款成功畫面與交易通知一律視為收據**，照常回 type: "expense"：
    行動支付（LINE Pay、街口、PayPay、Suica、悠遊卡）的付款完成畫面、
    信用卡的消費通知簡訊或 App 推播、轉帳成功畫面、電子發票畫面、訂單確認頁。
@@ -150,21 +150,32 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
 8. **重要限制**：若封存狀態為「已封存」，一律回傳 type: "not_receipt"，系統會另行告知使用者旅程已封存。
 `
 
-    const aiResponse = await askGemini([
-      { role: "user", parts: [
-        { text: ocrPrompt },
-        { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-      ]}
-    ], { models: GEMINI_OCR_MODELS, responseSchema: OCR_RESPONSE_SCHEMA, temperature: 0.2 })
-
+    // 認不出來、格式壞掉、AI 沒回應都不丟照片，改出一張空白卡讓使用者自己填
+    let busyNote: string | null = null
     let res: OcrResponse
     try {
-      res = JSON.parse(extractJSON(aiResponse))
-    } catch {
-      console.error('[OCR] Non-JSON response:', aiResponse.substring(0, 200))
-      await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
-      await replyMessage(replyToken, [{ type: 'text', text: '😅 收據辨識格式異常，請重新傳送照片。' }], sourceId)
-      return
+      const aiResponse = await askGemini([
+        { role: "user", parts: [
+          { text: ocrPrompt },
+          { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+        ]}
+      ], { models: GEMINI_OCR_MODELS, responseSchema: OCR_RESPONSE_SCHEMA, temperature: 0.2 })
+      try {
+        res = JSON.parse(extractJSON(aiResponse))
+      } catch {
+        console.error('[OCR] Non-JSON response:', aiResponse.substring(0, 200))
+        res = { type: 'not_receipt' }
+      }
+    } catch (e) {
+      // 額度用完、忙碌、逾時或任何其他錯誤：告訴使用者 AI 沒回應，但照片與卡片照出
+      console.warn('[OCR] AI did not answer, keeping the photo as a blank card:', e)
+      busyNote = aiUnavailableMessage(e) ?? '😵 AI 這次沒有回應。'
+      res = { type: 'not_receipt' }
+    }
+    const unidentified = res.type !== 'expense' && res.type !== 'item_photo'
+    if (unidentified) {
+      console.log(`[PHOTO] Could not identify (${res.type}), keeping it as a blank card: ${filePath}`)
+      res = { type: 'item_photo', data: { description: '' } }
     }
     if (res.type === 'expense' || res.type === 'item_photo') {
       // 品項照片的金額留空：不管模型填了什麼都當成「還沒填」（草稿裡以 0 占位），
@@ -210,7 +221,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
             dt: expense.date, cat: expense.category,
             p: expense.payer_data, s: expense.split_details,
           },
-          p: [messageId], tid: tripId,
+          p: [messageId], rc: !needsAmount, tid: tripId,
         })
         // 幣別按鈕 + 取消。快速回覆上限 13 顆，留一顆給取消。
         const currencyItems = available.slice(0, 12).map(cur => ({
@@ -248,7 +259,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       // ⚠️ 這裡刻意不讓舊草稿失效。一次選兩張收據送出時，
       //    第二張會讓第一張作廢，使用者只記得到最後一張（H1、H7）。
       //    卡片失效只發生在 AI 明確指出「這句是在修正某張草稿」的時候。
-      await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, tid: tripId })
+      await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId })
 
       // 摘要要帶 nonce：AI 才有辦法用 corrects_draft 指名它要修正哪一張卡片
       const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids, nonce }, null, 2)}`
@@ -259,36 +270,21 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       const liffUrl = buildDraftLiffUrl(trip.id, nonce, sourceId)
 
       // 幣別或日期被修正過就一併告知，不要默默改掉使用者看不到的東西
-      const ocrWarningMsg = ocrWarnings.length > 0
-        ? [{ type: 'text' as const, text: ocrWarnings.join('\n') }]
+      // AI 全忙時多說一句為什麼卡片是空的
+      const notes = busyNote ? [`${busyNote}\n照片先幫你留著了，可以按卡片上的「✏️ 填寫內容」自己填。`, ...ocrWarnings] : ocrWarnings
+      const ocrWarningMsg = notes.length > 0
+        ? [{ type: 'text' as const, text: notes.join('\n') }]
         : []
 
       await replyMessage(replyToken, [...ocrWarningMsg, buildExpenseCard({
         expense,
         title: needsAmount ? "📷 照片記帳" : "🔍 AI 辨識結果",
-        altText: needsAmount ? `照片記帳（還沒填金額）: ${expense.description}` : `收據辨識預覽: ${expense.description}`,
+        altText: unidentified
+          ? '照片記帳（請填寫內容與金額）'
+          : needsAmount ? `照片記帳（還沒填金額）: ${expense.description}` : `收據辨識預覽: ${expense.description}`,
         heroUrl: publicUrl,
-        nonce, webUrl, liffUrl, needsAmount,
+        nonce, webUrl, liffUrl, needsAmount, unidentified,
       })], sourceId)
-    } else if (res.type === 'not_receipt') {
-      console.log(`[PHOTO] Not a receipt, deleting: ${filePath}`)
-      await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
-      // 群組維持靜默（大家常在群裡貼風景照，不該每張都被機器人回一句），
-      // 但一對一非回不可 —— 使用者傳了照片卻什麼都沒發生，
-      // 根本不知道是沒收到、當機了、還是被判定不是收據（M8）。
-      if (!isGroup) {
-        await replyMessage(replyToken, [{
-          type: 'text',
-          text: '🤔 這張看起來不是收據，所以我沒有記帳（照片也沒有留下）。\n\n'
-            + '如果要記這一筆，直接打字就可以，例如「晚餐 300」。\n'
-            + '行動支付的付款完成畫面、信用卡消費通知截圖我也讀得懂，可以再試一次。',
-          quickReply: boundQR,
-        }], sourceId)
-      }
-    } else {
-      console.log(`[PHOTO] Non-expense photo response, deleting: ${filePath}`)
-      await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
-      await replyMessage(replyToken, [{ type: 'text', text: res.content || '抱歉，這張照片我辨識不出來。' }], sourceId)
     }
   } catch (e) {
     console.error('[OCR_ERROR]', e)

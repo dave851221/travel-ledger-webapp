@@ -197,6 +197,11 @@ export interface PendingDraft {
   eid?: string
   /** 收據 photo id 或 Storage 路徑 */
   p?: string[]
+  /**
+   * `p` 的照片是收據（機器人從照片讀出金額）。📷 照片記帳（金額留空）不帶這個旗標，
+   * 存進去是商品照片。使用者在 LIFF 稍微改過再存，仍算收據。
+   */
+  rc?: boolean
   /** 這張草稿屬於哪個旅程 —— 換旅程後舊草稿必須失效，靠的就是它（M13） */
   tid?: string
 }

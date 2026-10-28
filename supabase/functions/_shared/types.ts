@@ -59,6 +59,8 @@ export interface ExpenseRow {
   adjustment_member: string | null
   /** Storage 路徑而非完整 URL（顯示時要自行加上 public bucket 前綴） */
   photo_urls: string[]
+  /** `photo_urls` 中屬於收據的那幾張；其餘是商品照片 */
+  receipt_photo_urls: string[]
   is_settlement: boolean
   /** 軟刪除。非 NULL 代表在垃圾桶裡。 */
   deleted_at: string | null

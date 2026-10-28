@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Check, ChevronDown, ChevronLeft, Compass, Ellipsis, House, Lock, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, Compass, Ellipsis, House, Images, Lock, Plus, Settings, Trash2, UserRound } from 'lucide-react';
 import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
 import { ui } from '../../components/ui';
 import Dropdown, { MenuDivider, MenuItem, MenuLabel } from './Dropdown';
 import MemberAvatar from './MemberAvatar';
 import type { TabDef, TabType } from './tabs';
-import { TAB_RECYCLE, TAB_SIBLINGS } from './tabs';
+import { TAB_ALBUM, TAB_RECYCLE, TAB_SIBLINGS } from './tabs';
 
 interface IdentityProps {
   trip: Trip;
@@ -79,6 +79,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
           anchor={<button onClick={() => setMoreOpen(v => !v)} aria-label="更多" className={ui.iconBtn}><Ellipsis size={21} /></button>}
         >
           <MenuItem icon={<Settings size={17} />} onClick={() => { setMoreOpen(false); onOpenSettings(); }}>旅程設定</MenuItem>
+          <MenuItem icon={<Images size={17} />} onClick={() => { setMoreOpen(false); onChange(TAB_ALBUM.key); }}>相簿</MenuItem>
           <MenuItem icon={<Compass size={17} />} onClick={() => { setMoreOpen(false); onChange(TAB_SIBLINGS.key); }}>其他旅程</MenuItem>
           <MenuItem
             icon={<Trash2 size={17} />}
@@ -99,7 +100,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
 export const SideNav: React.FC<ChromeProps> = ({
   trip, tabs, active, onChange, trashCount, onBack, onOpenSettings,
 }) => {
-  const items = [...tabs, TAB_SIBLINGS];
+  const items = [...tabs, TAB_ALBUM, TAB_SIBLINGS];
   const navBtn = (on: boolean) =>
     `w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors ${
       on ? 'bg-accent/15 text-accent font-bold' : 'text-[#c9d0de] hover:bg-white/5 hover:text-white'

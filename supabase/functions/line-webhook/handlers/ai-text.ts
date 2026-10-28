@@ -446,7 +446,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
         d: expense.description, a: expense.amount, c: expense.currency,
         dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details,
       },
-      p: photoIds, tid: tripId,
+      p: photoIds, rc: photoIds.length > 0 && correctedDraft?.receipt === true, tid: tripId,
     }))
     cards.push(buildExpenseCard({
       expense,

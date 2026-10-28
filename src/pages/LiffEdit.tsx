@@ -138,8 +138,8 @@ const LiffEdit: React.FC = () => {
             } catch { /* skip malformed */ }
           }
           if (!draft) throw new Error('這張卡片已過期，請重新記帳。');
-          // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, tid }
-          decoded = { ...draft.exp, pi: draft.p, n: draft.n, u: sourceId ?? undefined };
+          // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, rc: 照片是收據, tid }
+          decoded = { ...draft.exp, pi: draft.p, rc: draft.rc === true, n: draft.n, u: sourceId ?? undefined };
         } else {
           // 舊格式：Base64 -> JSON
           if (!dataStr) throw new Error('缺少必要參數');
@@ -149,6 +149,8 @@ const LiffEdit: React.FC = () => {
           const bytes = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
           decoded = JSON.parse(new TextDecoder().decode(bytes));
+          // 舊格式的卡片只有收據辨識會附照片
+          decoded.rc = true;
         }
 
         // 4. 處理照片（提取相對路徑）
@@ -175,6 +177,10 @@ const LiffEdit: React.FC = () => {
           split_data: decoded.s || decoded.split_data || decoded.split_details || {},
           adjustment_member: decoded.adjustment_member || Object.keys(decoded.s || decoded.split_details || {})[0] || tripData.members[0],
           photo_urls: photoPathIds,
+          // 既有支出照原本的標記；機器人讀出金額的草稿，照片在這裡改過也還是收據
+          receipt_photo_urls: Array.isArray(decoded.receipt_photo_urls)
+            ? decoded.receipt_photo_urls
+            : decoded.rc ? photoPathIds : [],
           is_settlement: !!(decoded.is_settlement),
           deleted_at: null,
           nonce: decoded.n || decoded.nonce,

@@ -73,11 +73,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 - **頁面流程**：`Home` → `TripPortal`（通行碼關卡）→ `Dashboard`
 - **`Dashboard.tsx`** 是主畫面（約 550 行），包含 **6 個分頁**：
   帳目（ledger）、統計（stats）、結清（settlement）、行程（itinerary）、
-  垃圾桶（recycle）、其他旅程（siblings，同 `category` 的旅程）。
+  相簿（album）、垃圾桶（recycle）、其他旅程（siblings，同 `category` 的旅程）。
   它只負責資料、處理函式與彈窗；各分頁與外框在 `src/features/dashboard/`
-  （`LedgerTab`、`StatsTab`、`SettlementTab`、`TrashTab`、`SiblingsTab`、`TripChrome`、`BottomNav`、
+  （`LedgerTab`、`StatsTab`、`SettlementTab`、`AlbumTab`、`TrashTab`、`SiblingsTab`、`TripChrome`、`BottomNav`、
   `BalanceTicket`、`SummaryPanel`）。新功能請放進對應的元件，不要再往 Dashboard 塞。
-  **版面**：手機是頂列 + 浮起的底部導覽（分頁膠囊 + 右側 ＋ 新增，`其他旅程`與`垃圾桶`在 ⋯ 選單）；
+  **版面**：手機是頂列 + 浮起的底部導覽（分頁膠囊 + 右側 ＋ 新增，`相簿`、`其他旅程`與`垃圾桶`在 ⋯ 選單）；
   `md` 以上換成左側欄；`lg` 以上帳目改成表格欄位；`xl` 以上帳目頁多一欄右側面板（淨額、成員餘額、建議結清）。
   手機上點一筆支出開 `ExpenseDetailModal`，編輯與刪除在它底部；電腦上滑鼠移過那一列才出現。
   手機的底部面板都能往下拉收起（`components/useSheetDrag.ts`）：明細從內容區捲到頂再拉也行，
@@ -328,6 +328,10 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
   後者是這趟旅程的支出分類清單。
 - **`photo_urls` 存的是 Storage 路徑而非完整 URL**，每個顯示的地方都要自行加上
   `${VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/` 前綴。
+- **相簿的收據／商品照片看 `receipt_photo_urls`**（`photo_urls` 的子集合，其餘一律是商品照片，
+  分組邏輯在 `src/utils/album.ts`）。機器人讀出金額的收據才算收據（LINE 草稿的 `rc` 旗標）；
+  網頁上傳與 📷 照片記帳預設是商品，編輯表單的照片縮圖可以逐張切換。
+  任何會改 `photo_urls` 的寫入都要一起維護它 —— 移掉的照片也要從這裡移掉。
 - **Postback 資料上限 300 bytes**：Edge Function 用單字母縮寫鍵（`d`、`a`、`c`、`p`、`s`、`n`），
   但真正的解法是 nonce 間接法 —— 完整內容存在 `line_chat_history`，postback 只帶 nonce。
 - **Tailwind CSS v4**：用 `@tailwindcss/postcss` plugin（非 v3 CLI）。

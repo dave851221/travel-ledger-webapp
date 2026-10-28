@@ -39,6 +39,8 @@ export interface Expense {
   split_data: Record<string, number>;
   adjustment_member: string | null;
   photo_urls: string[];
+  /** The subset of photo_urls that are receipts; the rest are item photos (album). */
+  receipt_photo_urls?: string[];
   is_settlement: boolean;
   deleted_at: string | null;
   created_at: string;

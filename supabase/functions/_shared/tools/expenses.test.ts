@@ -515,9 +515,10 @@ describe('commitExpense', () => {
   };
 
   /** insert().select().single() 的結果由呼叫端指定 */
-  function makeInsertDb(result: { data: unknown; error: unknown }) {
+  function makeInsertDb(result: { data: unknown; error: unknown }, inserted: Record<string, unknown>[] = []) {
     const builder: Record<string, unknown> = {};
-    for (const m of ['from', 'insert', 'select']) builder[m] = () => builder;
+    for (const m of ['from', 'select']) builder[m] = () => builder;
+    builder.insert = (row: Record<string, unknown>) => { inserted.push(row); return builder; };
     builder.single = () => Promise.resolve(result);
     return { db: builder, trip: TRIP, today: TODAY, actorName: null } as unknown as ToolContext;
   }
@@ -525,6 +526,15 @@ describe('commitExpense', () => {
   it('寫入成功回傳新 id', async () => {
     const result = await commitExpense(PREPARED, makeInsertDb({ data: { id: 'new-1' }, error: null }));
     expect(result).toMatchObject({ ok: true, id: 'new-1' });
+  });
+
+  it('收據標記只留在 photo_urls 裡的路徑；沒指定就是商品照片', async () => {
+    const rows: Record<string, unknown>[] = [];
+    await commitExpense(PREPARED, makeInsertDb({ data: { id: 'n' }, error: null }, rows), {
+      photoUrls: ['expenses/t/1.jpg'], receiptPhotoUrls: ['expenses/t/1.jpg', 'expenses/t/other.jpg'],
+    });
+    await commitExpense(PREPARED, makeInsertDb({ data: { id: 'n' }, error: null }, rows), { photoUrls: ['expenses/t/2.jpg'] });
+    expect(rows.map(r => r.receipt_photo_urls)).toEqual([['expenses/t/1.jpg'], []]);
   });
 
   it('資料庫回錯誤時不能當成存入', async () => {

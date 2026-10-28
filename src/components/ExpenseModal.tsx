@@ -12,7 +12,9 @@ import {
   ChevronDown,
   Save,
   GripVertical,
-  Star
+  Star,
+  Receipt,
+  ShoppingBag
 } from 'lucide-react';
 import Modal from './Modal';
 import { ui } from './ui';
@@ -57,10 +59,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [splitLocked, setSplitLocked] = useState<Set<string>>(new Set());
   const [adjustmentMember, setAdjustmentMember] = useState<string | null>(null);
   
-  // Photo State — unified ordered list for drag-to-reorder support
+  // Photo State — unified ordered list for drag-to-reorder support.
+  // `receipt` decides which half of the album the photo lands in (receipts vs item photos).
   type PhotoEntry =
-    | { kind: 'existing'; key: string; url: string }
-    | { kind: 'new'; key: string; file: File; preview: string };
+    | { kind: 'existing'; key: string; url: string; receipt: boolean }
+    | { kind: 'new'; key: string; file: File; preview: string; receipt: boolean };
   const [photoList, setPhotoList] = useState<PhotoEntry[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
@@ -163,7 +166,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       setDate(editData.date);
       setCategory(editData.category);
       setAdjustmentMember(editData.adjustment_member);
-      setPhotoList((editData.photo_urls || []).map(url => ({ kind: 'existing' as const, key: url, url })));
+      const receipts = new Set(editData.receipt_photo_urls ?? []);
+      setPhotoList((editData.photo_urls || []).map(url => ({ kind: 'existing' as const, key: url, url, receipt: receipts.has(url) })));
       setDragIndex(null);
       setDropTarget(null);
 
@@ -322,7 +326,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       try {
         const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true };
         const compressed = await imageCompression(file, options);
-        newEntries.push({ kind: 'new', key: `new-${crypto.randomUUID()}`, file: compressed, preview: URL.createObjectURL(compressed) });
+        // 自己上傳的照片預設是商品照片；是收據的話點縮圖下方切換
+        newEntries.push({ kind: 'new', key: `new-${crypto.randomUUID()}`, file: compressed, preview: URL.createObjectURL(compressed), receipt: false });
       } catch (err) { console.error(err); }
     }
     setPhotoList(prev => [...newEntries, ...prev]);
@@ -384,6 +389,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       const finalPhotoUrls = photoList.map(item =>
         item.kind === 'existing' ? item.url : newPhotoPathMap.get(item.key)!
       );
+      const finalReceiptUrls = finalPhotoUrls.filter((_, i) => photoList[i].receipt);
 
       // Ensure all amounts are numbers before saving and filter out zeros
       const finalPayerData: Record<string, number> = {};
@@ -403,7 +409,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         payer_data: finalPayerData, split_data: finalSplitData, adjustment_member: adjustmentMember,
         // 結清紀錄也可能被編輯（例如從 LINE 的編輯清單開進來）。
         // 硬寫 false 會把它變成一般支出，統計立刻失真。
-        photo_urls: finalPhotoUrls, is_settlement: editData?.is_settlement ?? false
+        photo_urls: finalPhotoUrls, receipt_photo_urls: finalReceiptUrls,
+        is_settlement: editData?.is_settlement ?? false
       };
 
       let savedExpenseId: string | null = null;
@@ -615,7 +622,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
         <section className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold">收據照片</span>
+            <span className="text-sm font-bold">照片</span>
+            {photoList.length > 0 && <span className="text-xs text-muted">點標籤切換收據／商品</span>}
             {photoList.length > 1 && (
               <span className="flex items-center gap-1 text-xs text-muted"><GripVertical size={12} />拖拉可調整順序</span>
             )}
@@ -653,7 +661,18 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                     ${isDropTarget ? 'ring-2 ring-accent border-accent scale-105' : 'border-line'}
                   `}
                 >
-                  <img src={src} className="w-full h-full object-cover pointer-events-none" alt={`收據 ${i + 1}`} />
+                  <img src={src} className="w-full h-full object-cover pointer-events-none" alt={`照片 ${i + 1}`} />
+                  <button
+                    type="button"
+                    aria-pressed={item.receipt}
+                    aria-label={item.receipt ? '收據照片，點一下改成商品照片' : '商品照片，點一下改成收據照片'}
+                    onClick={() => setPhotoList(prev => prev.map(p => p.key === item.key ? { ...p, receipt: !p.receipt } : p))}
+                    className={`absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-1 py-1 text-[11px] font-medium
+                      ${item.receipt ? 'bg-accent text-on-accent' : 'bg-black/60 text-white'}`}
+                  >
+                    {item.receipt ? <Receipt size={11} /> : <ShoppingBag size={11} />}
+                    {item.receipt ? '收據' : '商品'}
+                  </button>
                   <button
                     type="button"
                     aria-label="移除這張照片"
