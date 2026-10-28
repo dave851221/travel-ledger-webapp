@@ -1,4 +1,4 @@
-import type { DayPlan, ItineraryItem, ItineraryPlan, Note, Place } from './types';
+import type { ItineraryItem, ItineraryPlan, Note, Place } from './types';
 
 /** Identity helper so trip files get type checking and autocompletion. */
 export const defineItinerary = (plan: ItineraryPlan): ItineraryPlan => plan;
@@ -84,34 +84,6 @@ export const mapsSearchUrl = (query: string): string =>
 /** Where tapping a place should go: its own link, else a Google Maps search. */
 export const placeUrl = (place: Place): string =>
   place.href ?? mapsSearchUrl(place.lat !== undefined && place.lng !== undefined ? `${place.lat},${place.lng}` : place.query ?? place.name);
-
-const routeStop = (place: Place): string =>
-  place.lat !== undefined && place.lng !== undefined ? `${place.lat},${place.lng}` : place.query ?? place.name;
-
-/** Google Maps accepts up to 9 waypoints in a directions URL; extra stops are dropped from the middle. */
-const MAX_WAYPOINTS = 9;
-
-/**
- * 把當天所有地點依序帶進 Google 地圖的路線規劃：第一個地點是起點、最後一個是終點，中間依序經過。
- * ⚠️ 一定要給 origin —— 省略的話 Google 會從使用者目前的位置出發，
- *    人還在台灣時打開就是一條橫跨海峽、縮到看不見細節的路線。
- * 同一個地點出現兩次只算一次（例如同一間店連玩兩場）；只剩一個地點時改成直接顯示那個地點。
- */
-export const dayRoute = (day: DayPlan): { url: string; places: Place[] } | null => {
-  const places: Place[] = [];
-  day.items.flatMap(it => it.places ?? []).forEach(p => {
-    if (!places.some(q => q.name === p.name)) places.push(p);
-  });
-  if (places.length === 0) return null;
-  if (places.length === 1) return { url: placeUrl(places[0]), places };
-  const origin = routeStop(places[0]);
-  const destination = routeStop(places[places.length - 1]);
-  const waypoints = places.slice(1, -1).slice(0, MAX_WAYPOINTS).map(routeStop);
-  const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}`
-    + `&destination=${encodeURIComponent(destination)}`
-    + (waypoints.length > 0 ? `&waypoints=${encodeURIComponent(waypoints.join('|'))}` : '');
-  return { url, places };
-};
 
 export type RichSegment =
   | { type: 'text'; text: string }

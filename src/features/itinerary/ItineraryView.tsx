@@ -2,11 +2,11 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { LucideIcon } from 'lucide-react';
 import {
   BedDouble, Bus, Camera, Car, Check, ChevronDown, ChevronRight, Footprints, Info, Map as MapIcon,
-  MapPin, Navigation, Plane, ShoppingBag, Sparkles, Ticket, TrainFront, Utensils,
+  MapPin, Plane, ShoppingBag, Sparkles, Ticket, TrainFront, Utensils,
 } from 'lucide-react';
 import type { BookingStatus, DayPlan, ItemKind, ItineraryPlan, Stay } from './types';
 import {
-  availableViews, dateParts, dayRoute, itemStates, nightsBetween, nowIn, placeUrl, todayIndex, unlinkedPlaces,
+  availableViews, dateParts, itemStates, nightsBetween, nowIn, placeUrl, todayIndex, unlinkedPlaces,
   type ItemState, type ItineraryView as View,
 } from './plan';
 import { THEMES, TITLE_FONT_FAMILY, TITLE_FONT_HREF } from './themes';
@@ -166,7 +166,6 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
   day, index, isToday, states, stay, nightNo,
 }) => {
   const { md, weekday } = dateParts(day.date);
-  const route = dayRoute(day);
   return (
     <article className="space-y-3" aria-label={`第 ${index + 1} 天：${day.title}`}>
       <header>
@@ -180,21 +179,6 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
         <div className="rounded-xl bg-[var(--t-soft)] px-3.5 py-2.5">
           <NoteList notes={day.tips} />
         </div>
-      )}
-
-      {route && (
-        <a
-          href={route.url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-2.5 rounded-xl bg-surface border border-line px-3.5 py-2.5 text-[13px] text-ink-2 hover:bg-sunk transition-colors"
-        >
-          <Navigation size={16} className="text-[var(--t-accent)] shrink-0" />
-          <span className="min-w-0 flex-1 truncate">
-            {route.places.length > 1 ? <>{isToday ? '今天' : '這天'} <b className="text-ink">{route.places.length} 個地點</b>：{route.places.map(p => p.name).join('、')}</> : <>在地圖上查看 <b className="text-ink">{route.places[0].name}</b></>}
-          </span>
-          <span className="shrink-0 text-[var(--t-accent)] font-bold inline-flex items-center">Google 地圖<ChevronRight size={14} /></span>
-        </a>
       )}
 
       {day.extra}

@@ -121,7 +121,7 @@ export const ITINERARIES: Record<string, ItineraryEntry> = {
 | `slot` | 沒有確切時間時填，例如「早上」「午餐」「全天」。`time` 和 `slot` 至少要有一個 |
 | `kind` | 決定圖示：`flight` `train` `car` `bus` `walk` `sight` `food` `hotel` `shopping` `activity` `info` |
 | `title` | 標題，可以內嵌連結（見下） |
-| `places` | 依序造訪的地點 `{ name, href?, query?, lat?, lng? }`。「在 Google 地圖開啟這天路線」就是把這些串起來 |
+| `places` | 這一項的地點 `{ name, href?, query?, lat?, lng? }`，每個地點都會變成一個地圖連結 |
 | `notes` | 備註清單，可以巢狀、可以標語氣 |
 | `booking` | `{ label?, status, href? }`，status 是 `paid`（已付清）／`booked`（已預約）／`walkin`（現場排隊）／`todo`（待預訂）／`pending`（未確認） |
 | `tag` | 標題旁的紅色小標籤，例如「爸爸想吃味藏天國」 |

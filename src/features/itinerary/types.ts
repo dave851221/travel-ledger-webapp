@@ -45,7 +45,7 @@ export interface ItineraryItem {
   slot?: string;
   kind: ItemKind;
   title: RichText;
-  /** 依序造訪的地點，「在 Google 地圖開啟今天路線」會用到 */
+  /** 這一項的地點。名稱出現在 title 裡就直接變成地圖連結，否則列在標題下方 */
   places?: Place[];
   notes?: Note[];
   booking?: { label?: string; status: BookingStatus; href?: string };
