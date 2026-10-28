@@ -190,16 +190,38 @@ export function buildExpenseCard(opts: {
   nonce: string
   webUrl: string
   liffUrl: string
+  /**
+   * 照片記帳（不是收據的品項照片）：金額留空，卡片上**不給「確認存入」**，
+   * 只能按「✏️ 填金額」到編輯頁補上金額再存。按鈕拿掉之後舊卡片也不會誤存 0 元
+   * （postback 的 commitExpense 另外會擋 invalid_amount）。
+   */
+  needsAmount?: boolean
 }): OutgoingMessage {
-  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl } = opts
+  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, needsAmount = false } = opts
+  // 還沒有金額時只列名字，不印一排 0
   const amountRows = (data: Record<string, unknown> | undefined) =>
     Object.entries(data ?? {}).map(([name, amt]) => ({
       type: "box", layout: "horizontal",
-      contents: [
-        { type: "text", text: `• ${name}`, size: "xs", color: "#666666" },
-        { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" },
-      ],
+      contents: needsAmount
+        ? [{ type: "text", text: `• ${name}`, size: "xs", color: "#666666" }]
+        : [
+            { type: "text", text: `• ${name}`, size: "xs", color: "#666666" },
+            { type: "text", text: `${amt}`, size: "xs", color: "#666666", align: "end" },
+          ],
     }))
+  const cancelButton = { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
+  const footerButtons = needsAmount
+    ? [
+        { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: "✏️ 填金額", uri: liffUrl } },
+        cancelButton,
+      ]
+    : [
+        { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
+        { type: "box", layout: "horizontal", spacing: "sm", contents: [
+          { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
+          cancelButton,
+        ]},
+      ]
 
   return {
     type: "flex", altText,
@@ -216,7 +238,9 @@ export function buildExpenseCard(opts: {
           { type: "box", layout: "vertical", margin: "md", spacing: "sm", contents: [
             { type: "box", layout: "horizontal", contents: [
               { type: "text", text: "總金額", color: "#aaaaaa", size: "sm" },
-              { type: "text", text: `${expense.amount} ${expense.currency}`, align: "end", size: "sm", weight: "bold" },
+              needsAmount
+                ? { type: "text", text: "尚未填寫", align: "end", size: "sm", weight: "bold", color: "#E8590C" }
+                : { type: "text", text: `${expense.amount} ${expense.currency}`, align: "end", size: "sm", weight: "bold" },
             ]},
             { type: "box", layout: "vertical", margin: "sm", contents: [
               { type: "text", text: "付款人", color: "#aaaaaa", size: "xs" },
@@ -227,16 +251,15 @@ export function buildExpenseCard(opts: {
               ...amountRows(expense.split_details),
             ]},
           ]},
+          ...(needsAmount
+            ? [{ type: "text", text: "這張照片不是收據，按「✏️ 填金額」補上金額後就會存入。", size: "xs", color: "#888888", wrap: true, margin: "md" }]
+            : []),
         ],
       },
       footer: {
         type: "box", layout: "vertical", spacing: "sm",
         contents: [
-          { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-          { type: "box", layout: "horizontal", spacing: "sm", contents: [
-            { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
-            { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } },
-          ]},
+          ...footerButtons,
           { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } },
         ],
       },

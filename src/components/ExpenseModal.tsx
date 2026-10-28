@@ -151,8 +151,14 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     setLoading(false);
     if (editData) {
       // --- Edit Mode ---
+      // LINE 的照片記帳草稿還沒有金額（以 0 占位）：金額欄留空讓人直接輸入，
+      // 參與者改看「有沒有列在名單上」—— 每個人都是 0，照「金額不是 0」判斷會一個都勾不到
+      const noAmountYet = !(Number(editData.amount) > 0);
+      const participants = (data: Record<string, number>) => Object.entries(data)
+        .filter(([, v]) => noAmountYet || (Number(v) || 0) !== 0)
+        .map(([m]) => m);
       setDescription(editData.description);
-      setAmount(editData.amount.toString());
+      setAmount(noAmountYet ? '' : editData.amount.toString());
       setCurrency(editData.currency);
       setDate(editData.date);
       setCategory(editData.category);
@@ -161,27 +167,22 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       setDragIndex(null);
       setDropTarget(null);
 
-      // Set Payers (only check if amount > 0)
-      const activePayers = Object.entries(editData.payer_data)
-        .filter(([, v]) => (Number(v) || 0) !== 0)
-        .map(([m]) => m);
-      const pActive = new Set(activePayers);
+      // Set Payers (who is listed — see noAmountYet above)
+      const pActive = new Set(participants(editData.payer_data));
       setPayerActive(pActive);
       setPayerData(editData.payer_data);
       setPayerLocked(new Set());
-      payerBaselineRef.current =
-        `${editData.amount}|${[...pActive].sort().join(',')}`;
+      // 還沒有金額時沒有「原本的分帳」要保留，一輸入金額就照名單重新分配
+      payerBaselineRef.current = noAmountYet ? null
+        : `${editData.amount}|${[...pActive].sort().join(',')}`;
 
-      // Set Splitters (only check if amount > 0)
-      const activeSplitters = Object.entries(editData.split_data)
-        .filter(([, v]) => (Number(v) || 0) !== 0)
-        .map(([m]) => m);
-      const sActive = new Set(activeSplitters);
+      // Set Splitters (who is listed — see noAmountYet above)
+      const sActive = new Set(participants(editData.split_data));
       setSplitActive(sActive);
       setSplitData(editData.split_data);
       setSplitLocked(new Set());
-      splitBaselineRef.current =
-        `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
+      splitBaselineRef.current = noAmountYet ? null
+        : `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
 
       setShowPayerDetail(pActive.size > 1);
       setShowSplitDetail(sActive.size > 0 && sActive.size !== trip.members.length);

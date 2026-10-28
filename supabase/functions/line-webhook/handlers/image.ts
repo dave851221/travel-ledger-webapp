@@ -3,6 +3,12 @@
 //
 // 下載 → 上傳 Storage → Gemini OCR → 驗證（成員／幣別／分類／日期）→ 出卡片。
 //
+// 照片分三種（OCR_RESPONSE_SCHEMA 的 type）：
+//   expense     收據、付款畫面 → 照常辨識金額
+//   item_photo  不是收據但拍的是可以記帳的東西（食物、商品、門票…）→ 判斷是什麼、金額填 0，
+//               卡片只有「✏️ 填金額」沒有「✅ 確認存入」，使用者到編輯頁補上金額才存得進去
+//   not_receipt 與消費無關（風景、人像、聊天截圖）→ 照片刪除
+//
 // ⚠️ 照片一旦上傳就要負責清乾淨：辨識不出來、不是收據、或整段拋例外時，
 //    都要把 filePath 從 bucket 移除，否則會留下沒有支出指向它的孤兒照片。
 //    唯一的例外是「幣別沒匯率」（M10）—— 那時刻意保留照片，
@@ -125,9 +131,19 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
      3. 全員均分
 6. 回傳格式由系統的 response schema 約束，type 請填 "expense"。
    payer_data 與 split_details 都是陣列，每個元素是 { "member": "成員名稱", "amount": 金額 }。
-7. 如果這看起來**與消費無關**（例如：人物照、風景照、風景明信片、與消費無關的截圖），
-   請回傳 type: "not_receipt"，無需任何說明或讚美，系統會自動清除照片。
-   ⚠️ 但**付款成功畫面與交易通知一律視為收據**，照常回 type: "expense"：
+7. 照片分三種，type 請照實回報：
+   a. **收據或付款證明** → type: "expense"，照上面的規則辨識金額。
+   b. **不是收據，但拍的是可以記帳的東西**：食物、飲料、甜點、商品、紀念品、門票、
+      餐廳或店家的門面、菜單、價目表 → type: "item_photo"。
+      - description 寫出「這是什麼」：菜名、商品名或店名，看得出外文就照規則 3 保留原文加中文說明，
+        例如「一蘭ラーメン (拉麵)」、「抹茶霜淇淋」、「東京鐵塔紀念磁鐵」。看不出具體名稱就寫類別，例如「拉麵」。
+      - category 依照片內容挑最接近的分類；date 填今日。
+      - 🚫 **不要猜金額**，就算照片上看得到價格也一樣 —— 金額會留空，使用者自己填實際付的錢。
+        amount 與 payer_data、split_details 裡每個人的 amount 一律填 0（系統會當成「還沒填」），
+        成員一樣照規則 5 決定。
+   c. **與消費無關**（人物照、風景照、風景明信片、與消費無關的截圖）→ type: "not_receipt"，
+      無需任何說明或讚美，系統會自動清除照片。拿不準是 b 還是 c 時，照片主體是可以買的東西就選 b。
+   ⚠️ **付款成功畫面與交易通知一律視為收據**，照常回 type: "expense"：
    行動支付（LINE Pay、街口、PayPay、Suica、悠遊卡）的付款完成畫面、
    信用卡的消費通知簡訊或 App 推播、轉帳成功畫面、電子發票畫面、訂單確認頁。
    這些沒有紙本收據的品項描述，就用商店名稱或服務名稱當描述。
@@ -150,7 +166,14 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       await replyMessage(replyToken, [{ type: 'text', text: '😅 收據辨識格式異常，請重新傳送照片。' }], sourceId)
       return
     }
-    if (res.type === 'expense') {
+    if (res.type === 'expense' || res.type === 'item_photo') {
+      // 品項照片的金額留空：不管模型填了什麼都當成「還沒填」（草稿裡以 0 占位），
+      // 卡片上不給「確認存入」，使用者一定要到編輯頁補上金額（commitExpense 也會擋 0 元，雙重保險）
+      const needsAmount = res.type === 'item_photo'
+      if (needsAmount) {
+        res.data = { ...(res.data ?? {}), amount: 0 } as typeof res.data
+        console.log(`[PHOTO] Item photo (no amount yet): ${String(res.data?.description ?? '')}`)
+      }
       // 驗證與分帳整段走共用工具層（_shared/tools/expenses.ts），與文字路徑、
       // 「確認存入」用的是同一份實作 —— 以前這段在三個地方各寫一次。
       // OCR 沒有使用者文字可以驗證 stated，sourceText 傳 null 代表直接採信（T3）。
@@ -242,10 +265,10 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
 
       await replyMessage(replyToken, [...ocrWarningMsg, buildExpenseCard({
         expense,
-        title: "🔍 AI 辨識結果",
-        altText: `收據辨識預覽: ${expense.description}`,
+        title: needsAmount ? "📷 照片記帳" : "🔍 AI 辨識結果",
+        altText: needsAmount ? `照片記帳（還沒填金額）: ${expense.description}` : `收據辨識預覽: ${expense.description}`,
         heroUrl: publicUrl,
-        nonce, webUrl, liffUrl,
+        nonce, webUrl, liffUrl, needsAmount,
       })], sourceId)
     } else if (res.type === 'not_receipt') {
       console.log(`[PHOTO] Not a receipt, deleting: ${filePath}`)

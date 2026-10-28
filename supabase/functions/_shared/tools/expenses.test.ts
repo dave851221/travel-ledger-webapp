@@ -104,6 +104,20 @@ describe('prepareExpense', () => {
     expect(Object.keys(expense.split_details).sort()).toEqual(['Amy', '小明']);
   });
 
+  // 照片記帳：不是收據的照片（食物、商品）先存成金額 0 的草稿，使用者之後再到編輯頁填金額。
+  // 付款人與分攤名單一定要保留下來（各自是 0），編輯頁才知道誰有參與。
+  it('金額 0 的照片草稿保留付款人與分攤名單，也不會被拒', () => {
+    const prepared = prepareExpense(
+      { description: '一蘭ラーメン (拉麵)', amount: 0, currency_source: 'none' },
+      TRIP, { today: TODAY, actorName: '小明', sourceText: null },
+    );
+    expect(prepared.reject).toBeFalsy();
+    expect(prepared.expense.amount).toBe(0);
+    expect(Object.keys(prepared.expense.payer_data).length).toBeGreaterThan(0);
+    expect(Object.keys(prepared.expense.split_details).length).toBe(TRIP.members.length);
+    expect(sum(prepared.expense.split_details)).toBe(0);
+  });
+
   it('對不上的名字會被挑出來，而不是自己造一個成員', () => {
     const { unresolvedMembers, expense } = prepareExpense({
       description: '晚餐',

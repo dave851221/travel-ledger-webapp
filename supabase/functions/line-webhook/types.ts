@@ -288,7 +288,8 @@ export type ExpenseDraft = {
 
 /** 收據 OCR 的回應 */
 export interface OcrResponse {
-  type: 'expense' | 'not_receipt'
+  /** expense＝收據；item_photo＝可記帳的品項照片（金額先填 0）；not_receipt＝與消費無關 */
+  type: 'expense' | 'item_photo' | 'not_receipt'
   data?: AiExpenseData
   /** 兩種 type 都不是時的後備說明 */
   content?: string

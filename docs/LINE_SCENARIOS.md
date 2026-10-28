@@ -202,6 +202,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | G17 | 幣別或日期被修正 | AI 幣別看錯 | 卡片前多一則「已改用 XXX」提醒 | ✅ | `ocrWarnings` |
 | G18 | 取消卡片 | 按「❌ 取消」 | 刪除 Storage 照片 | ✅ | P1 cancel |
 | G19 | 確認存入 | 按「✅ 確認存入」 | `photo_urls` 存路徑 `expenses/{tripId}/{messageId}.jpg` | ✅ | P1 save |
+| G20 | 照片記帳（不是收據的品項） | 拍拉麵、伴手禮、門票 | 判斷是什麼當描述、金額留空，卡片只有「✏️ 填金額」與「❌ 取消」；編輯頁補上金額才存得進去 | ✅ 2026-10-29 | `item_photo`、`buildExpenseCard({ needsAmount })`、`ExpenseModal` 的 `noAmountYet` |
 | G20 | 照片下載失敗 | LINE CDN 錯誤 | 回「處理圖片時發生錯誤」 | ✅ | P2 catch |
 | G21 | 同一張照片重傳 | 轉傳同一則圖片 | 新 messageId，視為新照片 | ✅ | — |
 | G22 | OCR 太慢超過 reply token 時效 | 大圖 + 模型慢 | 改用 push 補送 | ✅ 與 N5 同一個修正：reply 失敗改 push 原本那組 messages | `replyMessage` fallback |

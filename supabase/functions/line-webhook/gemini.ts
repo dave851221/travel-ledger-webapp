@@ -111,7 +111,8 @@ export const EXPENSE_DATA_SCHEMA = {
 export const OCR_RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    type: { type: 'STRING', enum: ['expense', 'not_receipt'] },
+    // item_photo：不是收據、但拍的是可以記帳的東西（食物、商品、門票…），先記成金額 0 的草稿
+    type: { type: 'STRING', enum: ['expense', 'item_photo', 'not_receipt'] },
     data: EXPENSE_DATA_SCHEMA,
   },
   required: ['type'],
