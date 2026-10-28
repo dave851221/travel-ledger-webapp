@@ -12,7 +12,7 @@
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { extractJSON } from "../guards.ts"
 import { prepareExpense } from "../../_shared/tools/expenses.ts"
-import { isRateLimit, RATE_LIMIT_MSG, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
+import { aiUnavailableMessage, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { storePendingExpense } from "../drafts.ts"
@@ -270,7 +270,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
   } catch (e) {
     console.error('[OCR_ERROR]', e)
     await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
-    const msg = isRateLimit(e) ? RATE_LIMIT_MSG : '😵 處理圖片時發生錯誤，請稍後再試。'
+    const msg = aiUnavailableMessage(e) ?? '😵 處理圖片時發生錯誤，請稍後再試。'
     await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
   }
 }

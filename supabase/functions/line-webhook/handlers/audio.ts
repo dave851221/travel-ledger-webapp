@@ -9,7 +9,7 @@
 //    要嘛就是現在這樣跳過。想在群組用語音請切「模式:全回應模式」。
 // ============================================================
 
-import { isRateLimit, RATE_LIMIT_MSG } from "../config.ts"
+import { aiUnavailableMessage } from "../config.ts"
 import type { EventContext } from "../context.ts"
 import { transcribeAudio } from "../gemini.ts"
 import { replyMessage } from "../line-api.ts"
@@ -34,11 +34,10 @@ export async function handleAudio(ctx: EventContext, event: AudioMessageEvent): 
     transcript = await transcribeAudio(event.message.id)
   } catch (err) {
     console.error('[AUDIO_ERROR]', err)
-    const msg = isRateLimit(err)
-      ? RATE_LIMIT_MSG
-      : String((err as Error)?.message) === 'AUDIO_TOO_LARGE'
+    const msg = aiUnavailableMessage(err)
+      ?? (String((err as Error)?.message) === 'AUDIO_TOO_LARGE'
         ? '😅 這段語音太長了，請講短一點（或直接打字）。'
-        : '😵 語音處理時發生錯誤，請稍後再試，或直接打字。'
+        : '😵 語音處理時發生錯誤，請稍後再試，或直接打字。')
     await replyMessage(replyToken, [{ type: 'text', text: msg, quickReply: boundQR }], sourceId)
     return null
   }

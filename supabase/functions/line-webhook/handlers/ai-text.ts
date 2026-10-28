@@ -38,7 +38,7 @@ import {
   summarizeHistoryEntry,
   summarizeTripExpenses,
 } from "../guards.ts"
-import { CHAT_HISTORY_TURNS, isRateLimit, RATE_LIMIT_MSG, WEBAPP_URL } from "../config.ts"
+import { aiUnavailableMessage, CHAT_HISTORY_TURNS, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { type OutstandingDraft, photoPublicUrl, storePendingExpense, supersedeDraft } from "../drafts.ts"
@@ -330,7 +330,7 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
     }
   } catch (e) {
     console.error('[AI_ERROR]', e)
-    const msg = isRateLimit(e) ? RATE_LIMIT_MSG : '😵 AI 處理時發生錯誤，請稍後再試。'
+    const msg = aiUnavailableMessage(e) ?? '😵 AI 處理時發生錯誤，請稍後再試。'
     await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
   }
 }

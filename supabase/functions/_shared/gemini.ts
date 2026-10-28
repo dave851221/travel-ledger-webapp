@@ -69,6 +69,21 @@ export class RetryableError extends Error {
   }
 }
 
+/**
+ * 所有模型都失敗時要丟的錯誤。
+ *
+ * 只有**每個**模型都回 429（免費額度用完）才是 `RATE_LIMIT:`，那種情況要隔天才會恢復。
+ * 逾時、503 過載、空回應一律是 `AI_BUSY:` —— Google 那邊暫時忙不過來，過幾分鐘再試就好。
+ * 以前不分青紅皂白都丟 RATE_LIMIT，伺服器過載時使用者會被叫去「隔天再試」。
+ */
+export const allModelsFailedError = (failures: string[]): Error => {
+  const last = failures[failures.length - 1] ?? 'no model was tried'
+  const quota = failures.length > 0 && failures.every((f) => f === 'HTTP 429')
+  return quota
+    ? new Error(`RATE_LIMIT: Every Gemini model is out of free quota. Last error: ${last}`)
+    : new Error(`AI_BUSY: All Gemini models failed or timed out. Last error: ${last}`)
+}
+
 /** 換模型也沒用的錯誤（schema 寫錯、金鑰不對）。直接往外丟，不要吞。 */
 export class FatalError extends Error {
   constructor(message: string) {
@@ -254,7 +269,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
   } = params
 
   const tools: GeminiTool[] = [{ functionDeclarations: declarations }]
-  let lastError: string | null = null
+  const failures: string[] = []
 
   for (const model of models) {
     // 每個模型都從原始 contents 開始。淺拷貝就夠 —— 迴圈只會往後 push。
@@ -328,12 +343,13 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       throw new RetryableError(`no terminal call within ${maxRounds} rounds`)
     } catch (err) {
       if (err instanceof FatalError) throw err
-      lastError = err instanceof Error ? err.message : String(err)
-      console.warn(`[AI] ${model} failed (${lastError}), trying next model...`)
+      const reason = err instanceof Error ? err.message : String(err)
+      failures.push(reason)
+      console.warn(`[AI] ${model} failed (${reason}), trying next model...`)
       continue
     }
   }
 
-  // 與 askGemini 用同一個前綴，呼叫端的 isRateLimit() 才認得出來
-  throw new Error(`RATE_LIMIT: All Gemini models are currently rate limited or unavailable. Last error: ${lastError}`)
+  // 與 askGemini 共用同一個判斷，呼叫端才能分辨「額度用完」與「暫時忙碌」
+  throw allModelsFailedError(failures)
 }

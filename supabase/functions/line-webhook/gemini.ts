@@ -15,7 +15,7 @@
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { GEMINI_API_KEY } from "./config.ts"
 import { downloadLineContent } from "./line-api.ts"
-import { createGeminiClient, FatalError, RetryableError } from "../_shared/gemini.ts"
+import { allModelsFailedError, createGeminiClient, FatalError, RetryableError } from "../_shared/gemini.ts"
 import { toGeminiFunctionDeclarations } from "../_shared/tools/registry.ts"
 import {
   ANALYZE_RECEIPT_SCHEMA,
@@ -165,7 +165,6 @@ export const GEMINI_FALLBACK_MODELS = [
   'gemini-3.5-flash-lite', // 15 RPM / 500 RPD
   'gemini-3.1-flash-lite', // 15 RPM / 500 RPD
   'gemini-3.6-flash',      // 5 RPM / 20 RPD from here on
-  'gemini-3.7-flash',
   'gemini-3.8-flash',
   'gemini-3-flash-preview',
   'gemini-2.5-flash',
@@ -179,7 +178,6 @@ export const GEMINI_OCR_MODELS = [
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
   'gemini-3.6-flash',
-  'gemini-3.7-flash',
   'gemini-3.8-flash',
   'gemini-2.5-flash',
 ]
@@ -218,7 +216,7 @@ export async function askGemini(contents: GeminiContent[], options: AskGeminiOpt
   if (useJsonMode && responseSchema) generationConfig.responseSchema = responseSchema
   if (temperature !== undefined) generationConfig.temperature = temperature
 
-  let lastError: string | null = null
+  const failures: string[] = []
 
   for (const model of models) {
     console.log(`[AI] Calling Gemini model: ${model}`)
@@ -230,7 +228,7 @@ export async function askGemini(contents: GeminiContent[], options: AskGeminiOpt
       const text = content.parts.map((part) => String(part.text ?? '')).filter(Boolean).join('')
       if (!text) {
         // 有 parts 卻沒有文字（例如只回了 thought）。換模型比直接失敗好。
-        lastError = 'empty text'
+        failures.push('empty text')
         console.warn(`[AI] ${model} returned no text, trying next model...`)
         continue
       }
@@ -238,12 +236,13 @@ export async function askGemini(contents: GeminiContent[], options: AskGeminiOpt
     } catch (err) {
       // schema 寫錯之類的問題換模型也沒用，直接往外丟
       if (err instanceof FatalError) throw err
-      lastError = err instanceof RetryableError ? err.message : String(err)
-      console.warn(`[AI] ${model} failed (${lastError}), trying next model...`)
+      const reason = err instanceof RetryableError ? err.message : String(err)
+      failures.push(reason)
+      console.warn(`[AI] ${model} failed (${reason}), trying next model...`)
     }
   }
 
-  throw new Error(`RATE_LIMIT: All Gemini models are currently rate limited or unavailable. Last error: ${lastError}`)
+  throw allModelsFailedError(failures)
 }
 
 // ============================================================

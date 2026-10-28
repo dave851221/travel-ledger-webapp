@@ -22,7 +22,18 @@ export const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.gith
 export const RECEIPTS_BUCKET = 'travel-images'
 
 export const RATE_LIMIT_MSG = '⚠️ AI 服務暫時達到免費使用量上限，請隔天再試。'
-export const isRateLimit = (e: unknown) => String((e as { message?: unknown } | null)?.message).startsWith('RATE_LIMIT:')
+export const AI_BUSY_MSG = '⏳ AI 服務目前忙碌中，請過幾分鐘再試一次。'
+
+/**
+ * 所有 Gemini 模型都失敗時（見 `_shared/gemini.ts` 的 allModelsFailedError）要回給使用者的話；
+ * 其他錯誤回傳 null，由呼叫端用自己的訊息。
+ */
+export const aiUnavailableMessage = (e: unknown): string | null => {
+  const message = String((e as { message?: unknown } | null)?.message)
+  if (message.startsWith('RATE_LIMIT:')) return RATE_LIMIT_MSG
+  if (message.startsWith('AI_BUSY:')) return AI_BUSY_MSG
+  return null
+}
 
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
 export const CHAT_HISTORY_TURNS = 8

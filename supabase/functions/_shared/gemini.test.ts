@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  allModelsFailedError,
   FatalError,
   RetryableError,
   runToolLoop,
@@ -192,12 +193,20 @@ describe('runToolLoop', () => {
     expect(client.calls).toHaveLength(1);
   });
 
-  it('所有模型都失敗時丟出 RATE_LIMIT 前綴的錯誤', async () => {
+  it('每個模型都回 429 時丟出 RATE_LIMIT 前綴的錯誤', async () => {
     const client = scriptedClient([
       new RetryableError('HTTP 429'),
       new RetryableError('HTTP 429'),
     ]);
     await expect(runToolLoop(base(client))).rejects.toThrow(/^RATE_LIMIT:/);
+  });
+
+  it('有任何一個是逾時或 503 時丟出 AI_BUSY，而不是叫人隔天再試', async () => {
+    const client = scriptedClient([
+      new RetryableError('fetch failed: Signal timed out.'),
+      new RetryableError('HTTP 503'),
+    ]);
+    await expect(runToolLoop(base(client))).rejects.toThrow(/^AI_BUSY:/);
   });
 
   it('工具丟例外時把錯誤回給模型，不中斷迴圈', async () => {
@@ -211,6 +220,25 @@ describe('runToolLoop', () => {
     });
 
     expect(client.calls[1].contents[2].parts[0].functionResponse?.response).toEqual({ error: 'db down' });
+  });
+});
+
+// 2026-10-29 收據辨識時三個模型逾時、三個回 503，使用者卻被告知「達到免費使用量上限，請隔天再試」
+describe('allModelsFailedError', () => {
+  it('只有全部都是 429 才算額度用完', () => {
+    expect(allModelsFailedError(['HTTP 429', 'HTTP 429', 'HTTP 429']).message).toMatch(/^RATE_LIMIT:/);
+  });
+
+  it('逾時、503、空回應混在一起時是忙碌', () => {
+    const err = allModelsFailedError([
+      'fetch failed: Signal timed out.', 'HTTP 503', 'HTTP 429', 'empty text',
+    ]);
+    expect(err.message).toMatch(/^AI_BUSY:/);
+    expect(err.message).toContain('empty text');
+  });
+
+  it('一個模型都沒試到時不會誤報成額度用完', () => {
+    expect(allModelsFailedError([]).message).toMatch(/^AI_BUSY:/);
   });
 });
 
