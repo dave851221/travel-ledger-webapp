@@ -11,7 +11,7 @@
 | [`docs/DB_MAINTENANCE.md`](docs/DB_MAINTENANCE.md) | 後台維運（**刪除旅程**、清理孤兒照片、重設 LINE 綁定） | 需要手動操作資料庫時 |
 | [`docs/LINE_BOT.md`](docs/LINE_BOT.md) | LINE Bot 行為規格與自我介紹全文 | 改機器人邏輯或對話時 |
 | [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md) | LINE 記帳的完整使用情境、支援狀態、bug 清單與修正規劃 | 改 Bot 邏輯前後的回歸檢查表 |
-| [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md) | 如何新增一個旅程行程頁 | 要做新行程頁時 |
+| [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md) | 行程頁的資料格式、風格、客製區塊（給 AI 的規格書） | 要做新行程頁時 |
 | [`docs/AI_TOOLING.md`](docs/AI_TOOLING.md) | 讓 AI 直接操作 Supabase（MCP 設定與風險） | 想請 AI 跑 SQL 或部署函式時 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 待辦、已知風險、未來規劃 | 想知道什麼還沒做、哪裡有雷 |
 | [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md) | MCP server 設計構想 | 規劃 LINE 以外的記帳管道時 |
@@ -33,7 +33,7 @@ npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查
 ```
 
 提交前請跑 `npm run lint && npm test && npm run check:functions && npm run build`
-—— CI 這四關都會擋。測試涵蓋 `src/utils/` 的純函式、跨實作的契約比對、
+—— CI 這四關都會擋。測試涵蓋 `src/utils/` 的純函式、所有行程資料的格式檢查（`features/itinerary/plan.test.ts`）、跨實作的契約比對、
 LINE Bot 的 `line-webhook/guards.ts` 與它轉出的 `_shared/validate.ts`，
 以及共用工具層 `_shared/tools/`（支出的驗證與更新、查詢過濾、工具 schema）；
 沒有元件層級的測試。
@@ -71,11 +71,15 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 
 - **路由**：HashRouter，base path `/travel-ledger-webapp/`（對應 GitHub Pages）
 - **頁面流程**：`Home` → `TripPortal`（通行碼關卡）→ `Dashboard`
-- **`Dashboard.tsx`** 是主畫面，目前約 **1270 行**，包含 **6 個分頁**：
-  帳目（ledger）、統計（stats）、結算（settlement）、行程（itinerary）、
-  回收桶（recycle）、其他旅程（siblings，同 `category` 的旅程）。
-  所有 Supabase 即時訂閱、旅程狀態、六個 Modal 與 30 個 `useState` 都在這一個元件裡。
-  **這是專案最大的技術債**，新增功能時優先考慮抽成獨立元件而非繼續往裡面塞。
+- **`Dashboard.tsx`** 是主畫面（約 550 行），包含 **6 個分頁**：
+  帳目（ledger）、統計（stats）、結清（settlement）、行程（itinerary）、
+  垃圾桶（recycle）、其他旅程（siblings，同 `category` 的旅程）。
+  它只負責資料、處理函式與彈窗；各分頁與外框在 `src/features/dashboard/`
+  （`LedgerTab`、`StatsTab`、`SettlementTab`、`TrashTab`、`SiblingsTab`、`TripChrome`、`BottomNav`、
+  `BalanceTicket`、`SummaryPanel`）。新功能請放進對應的元件，不要再往 Dashboard 塞。
+  **版面**：手機是頂列 + 浮起的底部導覽（分頁膠囊 + 右側 ＋ 新增，`其他旅程`與`垃圾桶`在 ⋯ 選單）；
+  `md` 以上換成左側欄；`lg` 以上帳目改成表格欄位；`xl` 以上帳目頁多一欄右側面板（淨額、成員餘額、建議結清）。
+  手機上點一筆支出開 `ExpenseDetailModal`，編輯與刪除在它底部；電腦上滑鼠移過那一列才出現。
 - **`ExpenseModal.tsx`**：支出新增與編輯。付款人/分攤的鎖定機制、多幣別、
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
   ⚠️ 表單只在「開啟的那一刻」或 `editData` 換了才灌初始值（`initializedFor` ref）——
@@ -163,11 +167,15 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 丟 `FatalError`（schema 問題，換模型沒用），其餘可重試的丟 `RetryableError`。
 新程式碼一律 camelCase（`systemInstruction`、`toolConfig`、`functionDeclarations`）。
 
-### 行程登錄檔模式
+### 行程頁：資料檔 + 共用版面
 
-`src/features/itinerary/registry.ts` 把旅程 UUID 對應到自訂 React 元件，
-每個旅程可以有手工打造的行程頁（飯店、時程、地圖等）。
-新增方式見 [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md)。
+`src/features/itinerary/registry.ts` 把旅程 UUID 對應到一份 **行程資料**（`ItineraryPlan`，
+用 `defineItinerary` 寫在 `trips/`），版面一律由 `ItineraryView.tsx` 畫：
+「一覽／每日／行前」三個分頁依資料自動增減，每趟旅程挑一個 `theme`（顏色在 `index.css` 的 `.it-theme-*`）。
+格式裝不下的內容寫成 `blocks/` 裡的小元件塞進 `extra`；registry 也接受 `{ component }` 整頁自訂，但應該很少用。
+`plan.test.ts` 會驗證每一份註冊的行程（日期順序、時間格式、住宿參照、連結寫法）。
+**Leaflet 不再由 `index.html` 載入**：使用者展開「全趟路線地圖」時才由 `loadLeaflet.ts` 從 CDN 下載。
+新增方式（也是給 AI 的規格書）見 [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md)。
 
 ### 後端（Supabase）
 
@@ -295,7 +303,16 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 ## 重要慣例
 
 - **幣別精確度**：每個旅程存 `precision_config`，格式 `{ "TWD": 0, "JPY": 0, "USD": 2 }`。
-  一律使用 `finance.ts` 的 `formatAmount()`，不要直接呼叫 `.toFixed()`。
+  捨入一律走 `finance.ts` 的 `formatAmount()`，不要直接呼叫 `.toFixed()`。
+  **畫面上顯示金額用 `src/utils/money.ts` 的 `formatMoney()`**（加千分位與幣別符號，例如 `NT$12,670`、`¥4,560`），
+  它在 `formatAmount` 的字串上處理，不碰浮點數。
+- **視覺設計**：顏色一律用 `src/index.css` 定義的語意名稱（`bg-canvas`、`bg-surface`、`text-ink`、`text-ink-2`、
+  `text-muted`、`border-line`、`bg-navy`、`bg-accent`、`bg-primary`、`text-pos`／`text-neg`…），
+  淺色與深色模式在那裡切換一次，**元件裡不要再寫 `dark:` 或 `slate-*`、`blue-*` 這類原始色**。
+  表單與按鈕的 class 用 `src/components/ui.ts`；輸入框在手機上維持 16px，否則 iPhone 會自動放大。
+  金額與日期加 `num` class（Manrope + 等寬數字）。字重只用 400／500／700（金額 800），不要用 `font-black`
+  和全大寫英文小標。分類的顏色與圖示用 `utils/category.ts` 的 `getCategoryVisual()`。
+  品牌名稱是「旅遊小本本」，分頁標題是「<旅程名> · 旅遊小本本」；分享預覽圖在 `public/og-image.png`。
 - **旅程時區**：`trips.timezone` 存 IANA 字串（例如 `Asia/Tokyo`），網頁設定頁可選。
   LINE Bot 判斷「今天」優先讀它；NULL 才退回從幣別推測（會猜錯，見 `docs/LINE_SCENARIOS.md` 的 F4）。
 - **JSONB 欄位**：`payer_data` 與 `split_data` 是 `{ 成員名稱: 金額 }`，
@@ -310,8 +327,9 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
   `${VITE_SUPABASE_URL}/storage/v1/object/public/travel-images/` 前綴。
 - **Postback 資料上限 300 bytes**：Edge Function 用單字母縮寫鍵（`d`、`a`、`c`、`p`、`s`、`n`），
   但真正的解法是 nonce 間接法 —— 完整內容存在 `line_chat_history`，postback 只帶 nonce。
-- **Tailwind CSS v4**：用 `@tailwindcss/postcss` plugin（非 v3 CLI），
-  設定在 `tailwind.config.js` 與 `postcss.config.js`。
+- **Tailwind CSS v4**：用 `@tailwindcss/postcss` plugin（非 v3 CLI）。
+  設計變數寫在 `src/index.css` 的 `@theme`；`tailwind.config.js` 沒有被 `@config` 載入，實際上不生效。
+  深色模式跟隨系統（`prefers-color-scheme`）。
 - **ESLint 平面設定**：設定檔是 `eslint.config.js`（非 `.eslintrc`）。
 - **型別安全**：`reduce` 累加金額時要顯式轉型並給初始值：
   `reduce<number>((a, b) => a + (Number(b) || 0), 0)`。

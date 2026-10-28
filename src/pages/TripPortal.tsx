@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Lock, Loader2, ChevronLeft, AlertCircle } from 'lucide-react';
 import { supabase } from '../api/supabase';
+import { ui } from '../components/ui';
 
 const TripPortal: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -69,7 +70,7 @@ const TripPortal: React.FC = () => {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError('驗證時發生錯誤: ' + msg);
+      setError('驗證時發生錯誤：' + msg);
     } finally {
       setLoading(false);
     }
@@ -77,45 +78,51 @@ const TripPortal: React.FC = () => {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
-        <Loader2 className="animate-spin text-blue-600 mb-4" size={32} />
-        <p className="text-gray-500 dark:text-gray-400 text-sm font-bold animate-pulse">正在確認旅程權限...</p>
+      <div className="min-h-screen bg-canvas flex flex-col items-center justify-center p-6 text-ink-2">
+        <Loader2 className="animate-spin text-ink mb-3" size={28} />
+        <p className="text-sm">正在確認旅程權限…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
-      <div className="max-w-md w-full">
-        <button 
+    <div className="min-h-screen bg-canvas text-ink flex items-center justify-center px-4 py-10">
+      <div className="max-w-sm w-full">
+        <button
           onClick={() => navigate('/')}
-          className="flex items-center gap-1 text-gray-500 hover:text-blue-600 transition-colors mb-8"
+          className="flex items-center gap-1 text-sm text-ink-2 hover:text-ink transition-colors mb-5 -ml-1"
         >
-          <ChevronLeft size={20} />
-          <span>返回旅程列表</span>
+          <ChevronLeft size={18} />
+          所有旅程
         </button>
 
-        <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 text-center">
-          <div className="bg-blue-100 dark:bg-blue-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Lock className="text-blue-600" size={30} />
+        <div className="bg-surface border border-line rounded-2xl overflow-hidden">
+          <div className="bg-navy text-navy-fg px-6 pt-6 pb-5">
+            <span className="inline-flex w-10 h-10 rounded-xl bg-accent text-on-accent items-center justify-center mb-3">
+              <Lock size={18} strokeWidth={2.2} />
+            </span>
+            <p className="text-xs text-navy-sub">這趟旅程需要密碼</p>
+            <h1 className="text-xl font-bold mt-0.5 text-balance">{tripName || '旅程'}</h1>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">請輸入訪問密碼</h1>
-          <p className="text-gray-500 dark:text-gray-400 mb-8">進入 {tripName || '這趟旅程'} 前需要進行驗證</p>
 
-          <form onSubmit={handleVerify} className="space-y-4">
-            <input
-              type="password"
-              maxLength={6}
-              placeholder="請輸入密碼"
-              className="w-full text-center text-2xl tracking-[0.5em] placeholder:tracking-normal placeholder:text-sm px-4 py-4 rounded-xl border-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 outline-none transition-all"
-              value={code}
-              onChange={e => setCode(e.target.value)}
-              autoFocus
-            />
+          <form onSubmit={handleVerify} className="p-6 space-y-4">
+            <div>
+              <label htmlFor="portal-code" className={ui.label}>進入密碼</label>
+              <input
+                id="portal-code"
+                type="password"
+                maxLength={6}
+                placeholder="請輸入密碼"
+                className={`${ui.input} text-center text-xl tracking-[0.4em] placeholder:tracking-normal placeholder:text-sm py-3.5`}
+                value={code}
+                onChange={e => setCode(e.target.value)}
+                autoFocus
+              />
+            </div>
 
             {error && (
-              <div className="flex items-center justify-center gap-2 text-red-600 text-sm">
-                <AlertCircle size={16} />
+              <div className={ui.errorBox}>
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
             )}
@@ -123,9 +130,9 @@ const TripPortal: React.FC = () => {
             {/* 建立旅程與設定頁都沒有限制最短長度，這裡若要求至少 4 碼，設了短密碼的人會完全進不去 */}
             <button
               disabled={loading || !code.trim()}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center justify-center gap-2"
+              className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}
             >
-              {loading ? <Loader2 className="animate-spin" size={20} /> : '確認進入'}
+              {loading ? <Loader2 className="animate-spin" size={18} /> : '進入旅程'}
             </button>
           </form>
         </div>

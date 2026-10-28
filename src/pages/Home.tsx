@@ -1,54 +1,69 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { PlusCircle, Plane, Calendar, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Tag, FolderOpen, Archive } from 'lucide-react';
+import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Archive, Plane } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
+import BrandMark from '../components/BrandMark';
+import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const UNCATEGORIZED = '未分類';
 const TRIPS_PER_GROUP = 3;
+const APP_NAME = '旅遊小本本';
 
 const categorySlug = (name: string) => `cat-${encodeURIComponent(name)}`;
 
-const TripCard: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick }) => (
-  <div
+const currencyList = (trip: Trip) => Object.keys(trip.rates || {}).join(' · ');
+
+const formatCreated = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+};
+
+/** 最近一趟進行中的旅程，做成登機證樣式放在最上面 */
+const FeaturedTrip: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick }) => (
+  <button
     onClick={onClick}
-    className="group relative bg-white dark:bg-slate-900 p-5 rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] hover:shadow-[0_12px_24px_-8px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 cursor-pointer border border-slate-100 dark:border-slate-800 flex flex-col h-full overflow-hidden"
+    className="group w-full text-left bg-navy text-navy-fg rounded-2xl overflow-hidden transition-transform active:scale-[.99] focus-visible:outline-2 focus-visible:outline-accent"
   >
-    <div className="flex justify-between items-center mb-4">
-      <div className="text-left">
-        <span className="block text-[9px] font-bold text-slate-300 dark:text-slate-600 uppercase tracking-widest mb-0.5">Currencies</span>
-        <span className="inline-block text-[9px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded uppercase">
-          {Object.keys(trip.rates || {}).join(' / ')}
-        </span>
+    <div className="px-5 pt-5 pb-4 flex items-start gap-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-navy-sub">{trip.category?.trim() || '最近的旅程'}</p>
+        <h2 className="text-xl sm:text-2xl font-bold leading-snug mt-1 text-balance">{trip.name}</h2>
       </div>
-      {trip.is_archived && (
-        <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 bg-slate-50 dark:bg-slate-800 px-2 py-0.5 rounded">
-          <Lock size={10} /> 封存
-        </div>
-      )}
+      <span className="shrink-0 w-10 h-10 rounded-xl bg-accent text-on-accent flex items-center justify-center transition-transform group-hover:translate-x-0.5">
+        <ChevronRight size={20} strokeWidth={2.4} />
+      </span>
     </div>
-
-    <h3 className="text-lg font-bold text-slate-800 dark:text-white leading-tight group-hover:text-blue-600 transition-colors mb-6 flex-grow">
-      {trip.name}
-    </h3>
-
-    <div className="pt-4 border-t border-slate-50 dark:border-slate-800/50 flex items-center justify-between">
-      <div className="flex items-center gap-4 text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
-        <div className="flex items-center gap-1.5">
-          <Users size={14} />
-          <span>{trip.members.length} 人</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Calendar size={14} />
-          <span>{new Date(trip.created_at).toLocaleDateString()}</span>
-        </div>
-      </div>
-      <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-600 group-hover:text-white transition-all">
-        <ChevronRight size={16} />
-      </div>
+    <div className="perforation" style={{ ['--notch-bg' as string]: 'var(--app-bg)' }} />
+    <div className="grid grid-cols-3 gap-2 px-5 pt-3.5 pb-4 text-xs text-navy-sub">
+      <div>成員<b className="block num text-sm font-bold text-navy-fg mt-0.5">{trip.members.length} 人</b></div>
+      <div className="min-w-0">幣別<b className="block num text-sm font-bold text-navy-fg mt-0.5 truncate">{currencyList(trip)}</b></div>
+      <div>建立於<b className="block num text-sm font-bold text-navy-fg mt-0.5">{formatCreated(trip.created_at)}</b></div>
     </div>
-  </div>
+  </button>
+);
+
+const TripRow: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick }) => (
+  <button
+    onClick={onClick}
+    className="w-full text-left flex items-center gap-3 px-4 py-3.5 hover:bg-sunk transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+  >
+    <div className="min-w-0 flex-1">
+      <p className="text-[15px] font-medium text-ink truncate">{trip.name}</p>
+      <p className="text-xs text-muted mt-0.5 flex items-center gap-2">
+        <span className="inline-flex items-center gap-1"><Users size={12} />{trip.members.length} 人</span>
+        <span className="num">{currencyList(trip)}</span>
+      </p>
+    </div>
+    {trip.is_archived ? (
+      <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-ink-2 bg-sunk border border-line rounded-md px-2 py-0.5">
+        <Lock size={10} />已封存
+      </span>
+    ) : (
+      <ChevronRight size={18} className="shrink-0 text-muted" />
+    )}
+  </button>
 );
 
 const Home: React.FC = () => {
@@ -75,7 +90,7 @@ const Home: React.FC = () => {
 
   useEffect(() => {
     fetchTrips();
-    document.title = '代杰的旅遊小本本';
+    document.title = APP_NAME;
   }, []);
 
   const fetchTrips = async () => {
@@ -101,6 +116,8 @@ const Home: React.FC = () => {
   // 避免首頁隨著旅程累積而越來越長。
   const activeTrips = useMemo(() => trips.filter(t => !t.is_archived), [trips]);
   const archivedTrips = useMemo(() => trips.filter(t => t.is_archived), [trips]);
+  // trips 已依建立時間新到舊排序，第一筆就是最近的旅程
+  const featuredTrip = activeTrips[0] ?? null;
 
   const groupedTrips = useMemo(() => {
     const buckets = new Map<string, Trip[]>();
@@ -189,73 +206,54 @@ const Home: React.FC = () => {
     }
   };
 
+  const openTrip = (trip: Trip) => navigate(`/trip/${trip.id}`);
+
   return (
-    <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-950 transition-colors duration-500 overflow-x-hidden">
-      {/* Background Decor */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-[5%] -left-[5%] w-[45%] h-[45%] rounded-full bg-blue-100/40 dark:bg-blue-900/10 blur-[100px]" />
-        <div className="absolute top-[25%] -right-[5%] w-[35%] h-[35%] rounded-full bg-indigo-50/40 dark:bg-indigo-900/10 blur-[100px]" />
-      </div>
+    <div className="min-h-screen bg-canvas text-ink">
+      <main className="w-full max-w-5xl mx-auto px-4 sm:px-8 pt-[max(16px,env(safe-area-inset-top))] pb-10">
+        <header className="flex items-center gap-3 py-3 sm:py-6">
+          <BrandMark />
+          <span className="text-lg sm:text-xl font-bold">{APP_NAME}</span>
+          <button onClick={() => setIsModalOpen(true)} className={`${ui.btnPrimary} ml-auto`}>
+            <Plus size={16} strokeWidth={2.6} />新旅程
+          </button>
+        </header>
 
-      {/* Main Container */}
-      <main className="relative z-10 w-full px-6 sm:px-12 md:px-16 lg:px-24 py-12 md:py-16">
-        <div className="max-w-5xl mx-auto">
-          
-          {/* Header Section */}
-          <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-16 md:mb-20">
-            <div className="space-y-5">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-600 p-3 rounded-xl shadow-lg shadow-blue-500/30">
-                  <Plane className="text-white" size={20} />
-                </div>
-                <span className="text-blue-600 font-bold tracking-[0.2em] text-[10px] uppercase">代杰的旅遊紀錄</span>
-              </div>
-              
-              <div className="space-y-3">
-                <h1 className="text-3xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
-                  紀錄每一個<br className="hidden sm:block" />精彩旅遊
-                </h1>
-                <p className="text-slate-500 dark:text-slate-400 text-sm md:text-base font-medium max-w-sm leading-relaxed">
-                  輕鬆管理旅程支出，精確計算每一分花費。
-                </p>
-              </div>
-            </div>
-            
-            <button 
-              onClick={() => setIsModalOpen(true)}
-              className="group flex items-center justify-center gap-2 bg-slate-900 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white font-bold px-6 py-4 rounded-xl transition-all shadow-lg active:scale-95 self-start"
-            >
-              <PlusCircle size={18} className="group-hover:rotate-90 transition-transform duration-300" />
-              <span className="text-sm md:text-base">開啟新旅程</span>
+        {error && (
+          <div className={`${ui.errorBox} mb-6`}>
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <span>無法載入旅程：{error}</span>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="space-y-4 mt-4" aria-label="載入中">
+            <div className="h-40 rounded-2xl bg-surface border border-line animate-pulse" />
+            <div className="h-48 rounded-2xl bg-surface border border-line animate-pulse" />
+          </div>
+        ) : trips.length === 0 ? (
+          <div className={`${ui.card} mt-4 px-6 py-14 text-center`}>
+            <span className="inline-flex w-14 h-14 rounded-2xl bg-sunk text-muted items-center justify-center mb-4">
+              <Plane size={26} />
+            </span>
+            <h2 className="text-lg font-bold">還沒有任何旅程</h2>
+            <p className="text-sm text-muted mt-1.5 mb-6">建立一趟旅程，邀請旅伴一起記帳。</p>
+            <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
+              <Plus size={16} strokeWidth={2.6} />建立第一趟旅程
             </button>
-          </header>
+          </div>
+        ) : (
+          <div className="mt-2 sm:mt-0 space-y-8">
+            {featuredTrip && (
+              <section>
+                <h2 className="text-sm font-bold text-ink mb-2.5 px-1">最近的旅程</h2>
+                <div className="md:max-w-xl">
+                  <FeaturedTrip trip={featuredTrip} onClick={() => openTrip(featuredTrip)} />
+                </div>
+              </section>
+            )}
 
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 p-5 rounded-2xl flex items-center gap-4 text-red-700 dark:text-red-400 mb-10 animate-in fade-in slide-in-from-top-4">
-              <AlertCircle size={20} className="shrink-0" />
-              <div className="text-xs md:text-sm font-bold">發生錯誤：{error}</div>
-            </div>
-          )}
-
-          {/* Trips List */}
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="bg-white/50 dark:bg-slate-800/50 animate-pulse rounded-xl h-48 border border-slate-100 dark:border-slate-800" />
-              ))}
-            </div>
-          ) : trips.length === 0 ? (
-            <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm p-12 md:p-20 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-center group transition-all duration-500">
-              <div className="bg-white dark:bg-slate-800 p-8 rounded-full mb-6 shadow-sm">
-                <Plane className="text-slate-200 dark:text-slate-600" size={40} />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">準備好開始新的旅程了嗎？</h3>
-              <p className="text-slate-400 dark:text-slate-500 max-w-xs mx-auto text-sm font-medium">
-                點擊「開啟新旅程」按鈕，建立您的第一本旅遊記帳本。
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-14 md:space-y-16">
+            <div className="grid gap-x-6 gap-y-8 md:grid-cols-2 items-start">
               {groupedTrips.map(({ category, trips: groupTrips }) => {
                 const isExpanded = !!expandedGroups[category];
                 const visibleTrips = isExpanded ? groupTrips : groupTrips.slice(0, TRIPS_PER_GROUP);
@@ -265,117 +263,101 @@ const Home: React.FC = () => {
                     key={category}
                     id={categorySlug(category)}
                     ref={el => { groupRefs.current[category] = el; }}
-                    className="scroll-mt-24"
+                    className="scroll-mt-6 min-w-0"
                   >
-                    <div className="flex items-end justify-between mb-6 px-1">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${category === UNCATEGORIZED ? 'bg-slate-100 text-slate-400 dark:bg-slate-800' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20'}`}>
-                          {category === UNCATEGORIZED ? <FolderOpen size={16} /> : <Tag size={16} />}
-                        </div>
-                        <div>
-                          <h2 className="text-lg md:text-xl font-black text-slate-800 dark:text-white">{category}</h2>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{groupTrips.length} trips</span>
-                        </div>
-                      </div>
+                    <div className="flex items-baseline justify-between mb-2.5 px-1">
+                      <h2 className={`text-sm font-bold ${category === UNCATEGORIZED ? 'text-ink-2' : 'text-ink'}`}>{category}</h2>
+                      <span className="text-xs text-muted num">{groupTrips.length} 趟</span>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className={`${ui.card} overflow-hidden divide-y divide-line`}>
                       {visibleTrips.map(trip => (
-                        <TripCard key={trip.id} trip={trip} onClick={() => navigate(`/trip/${trip.id}`)} />
+                        <TripRow key={trip.id} trip={trip} onClick={() => openTrip(trip)} />
                       ))}
-                    </div>
-                    {groupTrips.length > TRIPS_PER_GROUP && (
-                      <div className="mt-5 flex justify-center">
+                      {groupTrips.length > TRIPS_PER_GROUP && (
                         <button
                           onClick={() => setExpandedGroups(prev => ({ ...prev, [category]: !isExpanded }))}
-                          className="text-xs font-black text-blue-600 hover:text-blue-700 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-300 px-5 py-2.5 rounded-full transition-all shadow-sm tracking-widest uppercase"
+                          className="w-full flex items-center justify-center gap-1 px-4 py-2.5 text-xs font-medium text-ink-2 hover:text-ink hover:bg-sunk transition-colors"
                         >
-                          {isExpanded ? '收合' : `看全部 ${hiddenCount} 個`}
+                          {isExpanded ? '收合' : `顯示其餘 ${hiddenCount} 趟`}
+                          <ChevronDown size={14} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </section>
                 );
               })}
-
-              {archivedTrips.length > 0 && (
-                <section id="archived" className="scroll-mt-24">
-                  <button
-                    onClick={() => setShowArchived(v => !v)}
-                    className="w-full flex items-center gap-3 px-1 py-2 group"
-                  >
-                    <div className="p-2 rounded-lg bg-slate-100 text-slate-400 dark:bg-slate-800">
-                      <Archive size={16} />
-                    </div>
-                    <div className="text-left">
-                      <h2 className="text-lg md:text-xl font-black text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors">
-                        已封存
-                      </h2>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        {archivedTrips.length} trips
-                      </span>
-                    </div>
-                    <ChevronDown
-                      size={20}
-                      className={`ml-auto text-slate-400 transition-transform duration-300 ${showArchived ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-
-                  {showArchived && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                      {archivedTrips.map(trip => (
-                        <TripCard key={trip.id} trip={trip} onClick={() => navigate(`/trip/${trip.id}`)} />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              )}
             </div>
-          )}
-        </div>
+
+            {archivedTrips.length > 0 && (
+              <section id="archived" className="scroll-mt-6">
+                <button
+                  onClick={() => setShowArchived(v => !v)}
+                  aria-expanded={showArchived}
+                  className="w-full flex items-center gap-2 px-1 py-1 text-sm font-bold text-ink-2 hover:text-ink transition-colors"
+                >
+                  <Archive size={15} />
+                  已封存
+                  <span className="text-xs font-normal text-muted num">{archivedTrips.length} 趟</span>
+                  <ChevronDown size={16} className={`ml-auto transition-transform ${showArchived ? 'rotate-180' : ''}`} />
+                </button>
+                {showArchived && (
+                  <div className={`${ui.card} overflow-hidden divide-y divide-line mt-2.5 anim-fade md:max-w-[calc(50%-12px)]`}>
+                    {archivedTrips.map(trip => (
+                      <TripRow key={trip.id} trip={trip} onClick={() => openTrip(trip)} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        )}
+
+        <footer className="mt-14 text-center text-xs text-muted">Made by 代杰</footer>
       </main>
 
       {/* 新增旅程 Modal */}
-      <Modal 
-        isOpen={isModalOpen} 
+      <Modal
+        isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setCreateError(null); }}
-        title="開啟新的冒險"
+        title="建立新旅程"
       >
-        <form onSubmit={handleCreateTrip} className="space-y-6 py-2 px-1">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              旅程名稱
-            </label>
+        <form onSubmit={handleCreateTrip} className="space-y-4">
+          <div>
+            <label htmlFor="trip-name" className={ui.label}>旅程名稱</label>
             <input
+              id="trip-name"
               required
               type="text"
-              placeholder="例如：2024 東京賞櫻之旅"
-              className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 dark:text-white outline-none transition-all font-bold text-sm shadow-sm"
+              placeholder="例如：2027 東京賞櫻"
+              className={ui.input}
               value={newTrip.name}
               onChange={e => setNewTrip({ ...newTrip, name: e.target.value })}
             />
           </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              參與人員 <span className="text-[9px] font-normal opacity-60 ml-2">(以逗號或頓號隔開)</span>
+          <div>
+            <label htmlFor="trip-members" className={ui.label}>
+              參與人員 <span className="text-muted font-normal">· 以逗號或頓號隔開</span>
             </label>
             <input
+              id="trip-members"
               required
               type="text"
-              placeholder="例如：小明, 小華, 大強"
-              className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 dark:text-white outline-none transition-all font-bold text-sm shadow-sm"
+              placeholder="例如：小明、小華、大強"
+              className={ui.input}
               value={newTrip.members}
               onChange={e => setNewTrip({ ...newTrip, members: e.target.value })}
             />
           </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              旅程分類 <span className="text-[9px] font-normal opacity-60 ml-2">(選填，可自由輸入)</span>
+          <div>
+            <label htmlFor="trip-category" className={ui.label}>
+              旅程分類 <span className="text-muted font-normal">· 選填，首頁會依分類分組</span>
             </label>
             <input
+              id="trip-category"
               type="text"
               list="home-trip-categories"
-              placeholder="例如：家族、朋友、情侶、出差"
-              className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 dark:text-white outline-none transition-all font-bold text-sm shadow-sm"
+              placeholder="例如：家族、朋友、出差"
+              className={ui.input}
               value={newTrip.category}
               onChange={e => setNewTrip({ ...newTrip, category: e.target.value })}
             />
@@ -383,58 +365,54 @@ const Home: React.FC = () => {
               {knownCategories.map(c => <option key={c} value={c} />)}
             </datalist>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                主幣別
-              </label>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="trip-currency" className={ui.label}>主幣別</label>
               <select
-                className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 dark:text-white outline-none transition-all font-bold text-sm appearance-none shadow-sm"
+                id="trip-currency"
+                className={ui.select}
                 value={newTrip.base_currency}
                 onChange={e => setNewTrip({ ...newTrip, base_currency: e.target.value })}
               >
-                <option value="TWD">TWD (新台幣)</option>
-                <option value="JPY">JPY (日圓)</option>
-                <option value="USD">USD (美金)</option>
-                <option value="EUR">EUR (歐元)</option>
+                <option value="TWD">TWD 新台幣</option>
+                <option value="JPY">JPY 日圓</option>
+                <option value="USD">USD 美金</option>
+                <option value="EUR">EUR 歐元</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                訪問密碼 <span className="text-[9px] font-normal opacity-60 ml-2">(選填)</span>
+            <div>
+              <label htmlFor="trip-code" className={ui.label}>
+                進入密碼 <span className="text-muted font-normal">· 選填</span>
               </label>
               <div className="relative">
                 {newTrip.access_code.trim()
-                  ? <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                  : <Unlock className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={14} />}
+                  ? <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" size={14} />
+                  : <Unlock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-pos" size={14} />}
                 <input
+                  id="trip-code"
                   type="password"
                   maxLength={6}
-                  placeholder="留空 = 免密碼"
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 dark:text-white outline-none transition-all font-bold text-sm shadow-sm"
+                  placeholder="留空即免密碼"
+                  className={`${ui.input} pl-9`}
                   value={newTrip.access_code}
                   onChange={e => setNewTrip({ ...newTrip, access_code: e.target.value })}
                 />
               </div>
             </div>
           </div>
-          <p className="text-[10px] text-slate-400 font-medium px-1 -mt-2">
+          <p className={ui.hint}>
             {newTrip.access_code.trim()
-              ? '進入此旅程時需要輸入密碼。'
-              : '未設定密碼：任何拿到連結的人都可以直接進入此旅程，LINE Bot 綁定時也免驗證。'}
+              ? '進入這趟旅程時需要輸入密碼。'
+              : '沒有設定密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}
           </p>
           {createError && (
-            <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-xl flex items-center gap-2 text-red-600 dark:text-red-400 text-xs font-bold">
-              <AlertCircle size={16} className="shrink-0" />{createError}
+            <div className={ui.errorBox}>
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />{createError}
             </div>
           )}
-          <button
-            disabled={submitting}
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 mt-4 active:scale-95"
-          >
-            {submitting ? <Loader2 className="animate-spin" size={20} /> : <PlusCircle size={20} />}
-            <span className="text-base">{submitting ? '同步中...' : '開始冒險之旅'}</span>
+          <button disabled={submitting} type="submit" className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}>
+            {submitting ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} strokeWidth={2.6} />}
+            {submitting ? '建立中…' : '建立旅程'}
           </button>
         </form>
       </Modal>

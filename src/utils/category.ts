@@ -1,26 +1,24 @@
-const KEYWORD_COLORS: Array<[RegExp, string]> = [
-  [/食|飯|餐/, 'bg-orange-500 text-white'],
-  [/住|宿|店/, 'bg-blue-500 text-white'],
-  [/行|車|交通/, 'bg-emerald-500 text-white'],
-  [/樂|玩|門票/, 'bg-purple-500 text-white'],
-  [/買|物|街/, 'bg-rose-500 text-white'],
-  [/結清/, 'bg-slate-700 text-white'],
+import type { LucideIcon } from 'lucide-react';
+import { ArrowLeftRight, BedDouble, ShoppingBag, Tag, Ticket, TramFront, Utensils } from 'lucide-react';
+
+export interface CategoryVisual {
+  /** Mid-tone hex that reads on both light and dark surfaces; tint it for backgrounds */
+  color: string;
+  icon: LucideIcon;
+}
+
+// Matched against the category name, so custom names like「午餐」「計程車」still get the right look.
+const KEYWORD_VISUALS: Array<[RegExp, CategoryVisual]> = [
+  [/結清/, { color: '#2e9e6a', icon: ArrowLeftRight }],
+  [/食|飯|餐|吃|飲/, { color: '#d9822b', icon: Utensils }],
+  [/住|宿|店/, { color: '#4a6fc0', icon: BedDouble }],
+  [/行|車|交通|機|票券/, { color: '#2e9a80', icon: TramFront }],
+  [/樂|玩|門票|景點|遊/, { color: '#8a68c4', icon: Ticket }],
+  [/買|物|街|藥妝/, { color: '#c2527a', icon: ShoppingBag }],
 ];
 
-const PALETTE = [
-  'bg-indigo-500',
-  'bg-cyan-500',
-  'bg-teal-500',
-  'bg-amber-500',
-  'bg-pink-500',
-  'bg-violet-500',
-  'bg-sky-500',
-  'bg-lime-500',
-  'bg-fuchsia-500',
-  'bg-orange-400',
-  'bg-red-500',
-  'bg-green-600',
-];
+// Fallback hues for custom categories, deliberately muted so they don't fight the amber accent.
+const PALETTE = ['#5c7fa8', '#3f9aa6', '#a3784a', '#7d72b8', '#b0636f', '#5f9a5b', '#8a8f3c', '#a86a9c'];
 
 function polyHash(str: string): number {
   let h = 0;
@@ -31,19 +29,16 @@ function polyHash(str: string): number {
 }
 
 /**
- * Returns a Tailwind bg+text color pair for a category badge.
+ * Colour and icon for a category badge or tile.
  * Pass the trip's full categories array so each custom category
- * gets a deterministically distinct color via its array index.
+ * gets a deterministically distinct colour via its array index.
  */
-export function getCategoryColor(category: string, categories?: string[]): string {
-  for (const [re, color] of KEYWORD_COLORS) {
-    if (re.test(category)) return color;
+export function getCategoryVisual(category: string, categories?: string[]): CategoryVisual {
+  for (const [re, visual] of KEYWORD_VISUALS) {
+    if (re.test(category)) return visual;
   }
 
-  if (categories) {
-    const idx = categories.indexOf(category);
-    if (idx >= 0) return `${PALETTE[idx % PALETTE.length]} text-white`;
-  }
-
-  return `${PALETTE[polyHash(category) % PALETTE.length]} text-white`;
+  const idx = categories ? categories.indexOf(category) : -1;
+  const color = idx >= 0 ? PALETTE[idx % PALETTE.length] : PALETTE[polyHash(category) % PALETTE.length];
+  return { color, icon: Tag };
 }

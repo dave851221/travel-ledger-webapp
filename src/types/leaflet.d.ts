@@ -1,5 +1,6 @@
-// Minimal Leaflet types covering only what the itinerary trip components use.
-// Leaflet is loaded via CDN <script> in index.html, so window.L is the entry point.
+// Minimal Leaflet types covering only what the itinerary route map uses.
+// Leaflet is loaded from the CDN on demand (src/features/itinerary/loadLeaflet.ts),
+// so window.L is the entry point once it has loaded.
 declare global {
   type LatLngTuple = [number, number];
 
@@ -14,26 +15,24 @@ declare global {
     addTo(map: LeafletMap): LeafletPolyline;
   }
 
-  interface LeafletMarker extends LeafletLayer {
-    setLatLng(latlng: LatLngTuple): LeafletMarker;
-    addTo(map: LeafletMap): LeafletMarker;
+  interface LeafletCircleMarker extends LeafletLayer {
+    bindTooltip(text: string): LeafletCircleMarker;
+    addTo(map: LeafletMap): LeafletCircleMarker;
   }
-
-  type LeafletIcon = object;
 
   interface LeafletMap {
     setView(latlng: LatLngTuple, zoom: number): LeafletMap;
-    flyToBounds(bounds: LeafletBounds, opts?: { padding?: [number, number]; duration?: number; maxZoom?: number }): LeafletMap;
+    fitBounds(bounds: LeafletBounds, opts?: { padding?: [number, number]; maxZoom?: number }): LeafletMap;
     removeLayer(layer: LeafletLayer): LeafletMap;
     remove(): void;
   }
 
   interface LeafletAPI {
-    map(el: HTMLElement): LeafletMap;
+    map(el: HTMLElement, opts?: { scrollWheelZoom?: boolean }): LeafletMap;
     tileLayer(url: string, opts?: { attribution?: string }): LeafletLayer;
     polyline(latlngs: LatLngTuple[], opts?: { color?: string; weight?: number; opacity?: number; dashArray?: string }): LeafletPolyline;
-    marker(latlng: LatLngTuple, opts?: { icon?: LeafletIcon }): LeafletMarker;
-    divIcon(opts: { className?: string; html?: string; iconSize?: [number, number]; iconAnchor?: [number, number] }): LeafletIcon;
+    circleMarker(latlng: LatLngTuple, opts?: { radius?: number; color?: string; weight?: number; fillColor?: string; fillOpacity?: number }): LeafletCircleMarker;
+    latLngBounds(latlngs: LatLngTuple[]): LeafletBounds;
   }
 
   interface Window {

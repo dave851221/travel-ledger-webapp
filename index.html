@@ -3,18 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>代杰的旅遊小本本</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>旅遊小本本</title>
 
-    <meta name="description" content="多人旅遊記帳，輕鬆分帳結算。" />
-    <meta name="theme-color" content="#2563eb" />
-    <meta property="og:title" content="代杰的旅遊小本本" />
-    <meta property="og:description" content="多人旅遊記帳，輕鬆分帳結算。" />
+    <meta name="description" content="多人旅遊記帳：一起記帳、多幣別換算，自動算出誰該給誰多少。" />
+    <meta name="theme-color" content="#edf0f4" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d1320" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Link previews (LINE, Messenger…). Crawlers never see the #/ route, so every shared link shows this one card. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="旅遊小本本" />
+    <meta property="og:title" content="旅遊小本本｜多人旅遊分帳" />
+    <meta property="og:description" content="一起記帳、多幣別換算，自動算出誰該給誰多少。" />
     <meta property="og:url" content="https://dave851221.github.io/travel-ledger-webapp/" />
+    <meta property="og:image" content="https://dave851221.github.io/travel-ledger-webapp/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
 
-    <!-- Leaflet.js for Itinerary Maps -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" />
   </head>
   <body>
     <div id="root"></div>

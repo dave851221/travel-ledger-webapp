@@ -9,7 +9,11 @@ interface ModalProps {
   maxWidth?: string;
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-md' }) => {
+/**
+ * 共用彈窗。手機上是從底部滑出的面板（拇指搆得到關閉與送出），
+ * sm 以上是置中的對話框。內容過長時只捲內容區，標題列固定。
+ */
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidth = 'sm:max-w-md' }) => {
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,22 +32,35 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
 
   if (!isOpen) return null;
 
+  // 舊的呼叫端傳的是 'max-w-2xl' 這種寫法；手機上一律滿版，所以補上 sm: 前綴
+  const width = maxWidth.startsWith('sm:') ? maxWidth : `sm:${maxWidth}`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div 
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-scrim anim-fade"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
         ref={modalRef}
-        className={`bg-white dark:bg-gray-800 rounded-2xl w-full ${maxWidth} shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`bg-surface text-ink w-full ${width} max-h-[92dvh] sm:max-h-[88dvh] flex flex-col rounded-t-3xl sm:rounded-2xl shadow-2xl anim-sheet`}
       >
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-          <h3 className="text-xl font-bold text-gray-800 dark:text-white">{title}</h3>
-          <button 
+        <div className="sm:hidden pt-2.5 flex justify-center shrink-0" aria-hidden>
+          <span className="w-9 h-1 rounded-full bg-line" />
+        </div>
+        <div className="flex items-center justify-between gap-3 px-5 pt-3 pb-3 sm:pt-4 border-b border-line shrink-0">
+          <h3 className="text-lg font-bold text-ink truncate">{title}</h3>
+          <button
             onClick={onClose}
-            className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            aria-label="關閉"
+            className="p-1.5 -mr-1.5 rounded-lg text-muted hover:text-ink hover:bg-sunk transition-colors"
           >
-            <X size={20} className="text-gray-500" />
+            <X size={20} />
           </button>
         </div>
-        <div className="p-6">
+        <div className="px-5 py-5 overflow-y-auto overscroll-contain pb-[max(20px,env(safe-area-inset-bottom))]">
           {children}
         </div>
       </div>

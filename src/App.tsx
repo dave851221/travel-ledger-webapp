@@ -40,29 +40,29 @@ function App() {
       <div className="relative min-h-screen">
         {/* PWA Update Notification */}
         {needRefresh && (
-          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[150] bg-blue-600 text-white py-3 px-6 rounded-2xl shadow-2xl flex items-center gap-4 animate-in fade-in zoom-in duration-300 border border-white/20">
-            <RefreshCw size={20} className="animate-spin-slow" />
-            <div className="flex flex-col">
-              <span className="text-sm font-black">發現新版本內容！</span>
-              <span className="text-[10px] opacity-80 font-bold">點擊按鈕立即切換至最新版</span>
+          <div className="fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[150] w-[calc(100vw-32px)] max-w-sm bg-navy text-navy-fg py-3 pl-4 pr-3 rounded-xl shadow-2xl flex items-center gap-3 anim-sheet">
+            <RefreshCw size={18} className="text-accent shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold">有新版本</p>
+              <p className="text-xs text-navy-sub">重新整理後就會換成最新版</p>
             </div>
-            <button onClick={() => updateServiceWorker(true)} className="bg-white text-blue-600 px-4 py-1.5 rounded-xl text-xs font-black hover:bg-blue-50 transition-colors shadow-sm">立即更新</button>
+            <button onClick={() => updateServiceWorker(true)} className="shrink-0 bg-accent text-on-accent px-3 py-1.5 rounded-lg text-xs font-bold">立即更新</button>
           </div>
         )}
 
         {/* Offline Notification Bar */}
         {isOffline && (
-          <div className="fixed top-0 left-0 right-0 z-[100] bg-slate-900 text-white py-2 px-4 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-300">
-            <WifiOff size={16} className="text-amber-400" />
-            <span className="text-xs font-black tracking-widest uppercase">您目前處於離線模式 - 僅能查看快取資料</span>
+          <div className="fixed top-0 left-0 right-0 z-[100] bg-navy text-navy-fg pt-[max(8px,env(safe-area-inset-top))] pb-2 px-4 flex items-center justify-center gap-2 text-xs">
+            <WifiOff size={14} className="text-accent" />
+            目前離線，只能查看已載入的資料
           </div>
         )}
 
         {/* Back Online Toast */}
         {showOnlineToast && (
-          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-emerald-600 text-white py-3 px-6 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in zoom-in duration-300">
-            <Wifi size={20} />
-            <span className="text-sm font-black">網路已恢復連線！</span>
+          <div className="fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[100] bg-navy text-navy-fg py-2.5 px-4 rounded-xl shadow-xl flex items-center gap-2 text-sm anim-sheet">
+            <Wifi size={16} className="text-pos" />
+            已恢復連線
           </div>
         )}
 

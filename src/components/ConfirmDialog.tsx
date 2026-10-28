@@ -4,21 +4,21 @@ import Modal from './Modal';
 type Tone = 'danger' | 'primary' | 'success';
 
 const CONFIRM_BUTTON_CLASS: Record<Tone, string> = {
-  danger: 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20',
-  primary: 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20',
-  success: 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20',
+  danger: 'bg-neg text-white hover:opacity-90',
+  primary: 'bg-primary text-on-primary hover:opacity-90',
+  success: 'bg-pos text-white hover:opacity-90',
 };
 
 const SOFT_ICON_CLASS: Record<Tone, string> = {
-  danger: 'bg-rose-50 dark:bg-rose-900/20 text-rose-600',
-  primary: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600',
-  success: 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600',
+  danger: 'bg-neg/10 text-neg',
+  primary: 'bg-accent/15 text-ink',
+  success: 'bg-pos/10 text-pos',
 };
 
 const SOLID_ICON_CLASS: Record<Tone, string> = {
-  danger: 'bg-rose-600 text-white shadow-xl shadow-rose-500/30',
-  primary: 'bg-blue-600 text-white shadow-xl shadow-blue-500/30',
-  success: 'bg-emerald-600 text-white shadow-xl shadow-emerald-500/30',
+  danger: 'bg-neg text-white',
+  primary: 'bg-primary text-on-primary',
+  success: 'bg-pos text-white',
 };
 
 export interface ConfirmDialogProps {
@@ -69,37 +69,35 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   disabled = false,
 }) => (
   <Modal isOpen={isOpen} onClose={onClose} title={title}>
-    <div className="py-6 text-center space-y-6">
+    <div className="pt-2 text-center space-y-5">
       <div
-        className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto ${
-          solidIcon ? SOLID_ICON_CLASS[tone] : `${SOFT_ICON_CLASS[tone]} shadow-inner`
+        className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto [&_svg]:w-7 [&_svg]:h-7 ${
+          solidIcon ? SOLID_ICON_CLASS[tone] : SOFT_ICON_CLASS[tone]
         }`}
       >
         {icon}
       </div>
 
       {(heading || description) && (
-        <div className="space-y-2">
-          {heading && (
-            <p className="text-xl font-black text-slate-900 dark:text-white">{heading}</p>
-          )}
+        <div className="space-y-1.5 text-sm text-ink-2">
+          {heading && <p className="text-lg font-bold text-ink">{heading}</p>}
           {description}
         </div>
       )}
 
       {children}
 
-      <div className="flex gap-4 pt-4">
+      <div className="flex gap-3 pt-2">
         <button
           onClick={onClose}
-          className="flex-1 px-6 py-4 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 font-black hover:bg-slate-200 transition-all"
+          className="flex-1 px-5 py-3.5 rounded-xl bg-sunk border border-line text-ink-2 font-bold hover:text-ink transition-colors"
         >
           {cancelLabel}
         </button>
         <button
           onClick={onConfirm}
           disabled={disabled}
-          className={`flex-1 px-6 py-4 rounded-2xl text-white font-black shadow-xl transition-all flex items-center justify-center gap-2 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:shadow-none ${CONFIRM_BUTTON_CLASS[tone]}`}
+          className={`flex-1 px-5 py-3.5 rounded-xl font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-40 ${CONFIRM_BUTTON_CLASS[tone]}`}
         >
           {confirmIcon}
           {confirmLabel}

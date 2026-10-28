@@ -1,18 +1,189 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — "boarding pass" look (navy + amber), Manrope for figures.
+ *
+ * Components use the semantic names below (bg-surface, text-ink, border-line,
+ * bg-primary …) instead of raw Tailwind colours, so dark mode is handled here
+ * once rather than with a `dark:` twin on every class.
+ * Dark mode follows the OS (`prefers-color-scheme`), Tailwind v4's default.
+ */
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: #f8fafc;
+  --app-bg: #edf0f4;
+  --app-surface: #ffffff;
+  --app-sunk: #f5f7fa;
+  --app-ink: #14213d;
+  --app-ink-2: #46526d;
+  --app-muted: #7f8aa0;
+  --app-line: #dde2ea;
+
+  /* Ticket / sidebar surface: always dark, light text on top */
+  --app-navy: #14213d;
+  --app-navy-fg: #ffffff;
+  --app-navy-sub: #aeb7cb;
+  --app-perf: rgb(255 255 255 / 0.28);
+  --app-side: #14213d;
+
+  --app-accent: #f2a93b;
+  --app-on-accent: #14213d;
+  /* Primary buttons: navy in light mode, amber in dark mode */
+  --app-primary: #14213d;
+  --app-on-primary: #ffffff;
+
+  --app-pos: #1e8a5a;
+  --app-neg: #c2413a;
+  --app-warn: #a8670f;
+  --app-info: #3a5ba0;
+
+  --app-scrim: rgb(10 16 30 / 0.5);
+  --app-shadow: rgb(10 16 30 / 0.18);
+
+  color-scheme: light;
+  font-family: 'Noto Sans TC', system-ui, -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  background-color: var(--app-bg);
+  color: var(--app-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app-bg: #0d1320;
+    --app-surface: #151d2e;
+    --app-sunk: #111827;
+    --app-ink: #e6eaf2;
+    --app-ink-2: #b3bcce;
+    --app-muted: #808ba2;
+    --app-line: #253049;
+
+    --app-navy: #1c2a47;
+    --app-navy-fg: #f1f4fa;
+    --app-navy-sub: #93a0ba;
+    --app-perf: rgb(255 255 255 / 0.2);
+    --app-side: #0a0f1a;
+
+    --app-accent: #f4b451;
+    --app-on-accent: #121a2b;
+    --app-primary: #f4b451;
+    --app-on-primary: #121a2b;
+
+    --app-pos: #45c28a;
+    --app-neg: #f07a70;
+    --app-warn: #f0b155;
+    --app-info: #7d9ce0;
+
+    --app-scrim: rgb(0 0 0 / 0.62);
+    --app-shadow: rgb(0 0 0 / 0.5);
+
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--app-bg);
+  --color-surface: var(--app-surface);
+  --color-sunk: var(--app-sunk);
+  --color-ink: var(--app-ink);
+  --color-ink-2: var(--app-ink-2);
+  --color-muted: var(--app-muted);
+  --color-line: var(--app-line);
+  --color-navy: var(--app-navy);
+  --color-navy-fg: var(--app-navy-fg);
+  --color-navy-sub: var(--app-navy-sub);
+  --color-side: var(--app-side);
+  --color-accent: var(--app-accent);
+  --color-on-accent: var(--app-on-accent);
+  --color-primary: var(--app-primary);
+  --color-on-primary: var(--app-on-primary);
+  --color-pos: var(--app-pos);
+  --color-neg: var(--app-neg);
+  --color-warn: var(--app-warn);
+  --color-info: var(--app-info);
+  --color-scrim: var(--app-scrim);
+}
+
+@theme {
+  --font-sans: 'Noto Sans TC', system-ui, -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  --font-num: 'Manrope', 'Noto Sans TC', system-ui, sans-serif;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  background-color: var(--app-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Ensure root is responsive */
 #root {
   width: 100%;
+}
+
+/* Figures: Manrope with tabular digits so amounts line up in columns */
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dashed tear line with two notches, used on the ticket cards */
+.perforation {
+  position: relative;
+  height: 0;
+  margin: 0 14px;
+  border-top: 1.5px dashed var(--app-perf);
+}
+.perforation::before,
+.perforation::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--notch-bg, var(--app-bg));
+}
+.perforation::before { left: -24px; }
+.perforation::after { right: -24px; }
+
+/*
+ * Itinerary themes (src/features/itinerary/themes.ts lists the keys).
+ * --t-accent: links, rail dots, active day · --t-soft: tinted backgrounds
+ * --t-on: text on --t-accent · --t-cover: the cover band behind the trip title
+ */
+.it-theme-default { --t-accent: #3a5ba0; --t-soft: #e6ecf7; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #14213d 0%, #2b4377 100%); }
+.it-theme-maple { --t-accent: #a8432c; --t-soft: #f7e9e3; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #6e2618 0%, #a8432c 55%, #d08a3c 100%); }
+.it-theme-sakura { --t-accent: #b84a6e; --t-soft: #f8e7ed; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #6f2a45 0%, #b84a6e 55%, #e3a0b4 100%); }
+.it-theme-lake { --t-accent: #17808a; --t-soft: #ddeff0; --t-on: #ffffff; --t-cover: linear-gradient(160deg, #0d4f5c 0%, #17808a 55%, #5bb7a6 100%); }
+.it-theme-plum { --t-accent: #8e3b6b; --t-soft: #f3e5ee; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #4b1e3a 0%, #8e3b6b 60%, #c77a8f 100%); }
+.it-theme-mystery { --t-accent: #5a4bc4; --t-soft: #ece9fb; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #17132e 0%, #2e2766 55%, #5a4bc4 100%); }
+.it-theme-alpine { --t-accent: #3d7a4f; --t-soft: #e3efe6; --t-on: #ffffff; --t-cover: linear-gradient(160deg, #1f3b2a 0%, #3d7a4f 60%, #8fb48a 100%); }
+
+@media (prefers-color-scheme: dark) {
+  .it-theme-default { --t-accent: #8eabe8; --t-soft: #1a2640; --t-on: #0d1320; --t-cover: linear-gradient(135deg, #111a2e 0%, #23365f 100%); }
+  .it-theme-maple { --t-accent: #f08c6a; --t-soft: #3a2220; --t-on: #1a0e0b; --t-cover: linear-gradient(135deg, #4a1a12 0%, #7a3020 60%, #94552a 100%); }
+  .it-theme-sakura { --t-accent: #f09ab6; --t-soft: #3a1f2b; --t-on: #22101a; --t-cover: linear-gradient(135deg, #3f1828 0%, #74304b 60%, #9c5a72 100%); }
+  .it-theme-lake { --t-accent: #5cc6c6; --t-soft: #132f35; --t-on: #062024; --t-cover: linear-gradient(160deg, #08323b 0%, #0f5862 60%, #2f7e73 100%); }
+  .it-theme-plum { --t-accent: #e597c4; --t-soft: #35192b; --t-on: #22101a; --t-cover: linear-gradient(135deg, #2e1224 0%, #5c2648 60%, #80506a 100%); }
+  .it-theme-mystery { --t-accent: #a99bff; --t-soft: #221d42; --t-on: #140f2e; --t-cover: linear-gradient(135deg, #0f0c22 0%, #221d4d 55%, #3d3390 100%); }
+  .it-theme-alpine { --t-accent: #86c99a; --t-soft: #18291e; --t-on: #0c1a11; --t-cover: linear-gradient(160deg, #13251a 0%, #24492f 60%, #4f7a55 100%); }
+}
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Room for the floating bottom nav, including the iPhone home indicator */
+.pb-nav { padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)); }
+
+@keyframes sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.anim-sheet { animation: sheet-up 0.22s ease-out; }
+.anim-fade { animation: fade-in 0.18s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-sheet, .anim-fade { animation: none; }
 }

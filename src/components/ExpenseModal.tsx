@@ -6,17 +6,16 @@ import {
   Unlock,
   AlertCircle,
   Loader2,
-  Coins,
-  Receipt,
   Plus,
-  CreditCard,
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
   Save,
-  GripVertical
+  GripVertical,
+  Star
 } from 'lucide-react';
 import Modal from './Modal';
+import { ui } from './ui';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
@@ -238,7 +237,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     const names = [...splitActive];
     if (names.length === 0) return '尚未選擇分攤成員';
     if (names.length === trip.members.length) return '全員均分';
-    if (names.length === 1) return `${names[0]} 全額負擔`;
+    if (names.length === 1) return `只有${names[0]}`;
     return `${names.length} 人分攤`;
   }, [splitActive, trip.members.length]);
 
@@ -458,265 +457,229 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   };
 
   const ValidationBadge = ({ isValid, current, target }: { isValid: boolean, current: number, target: number }) => (
-    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black transition-all ${isValid ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400 animate-pulse'}`}>
-      {isValid ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}
-      <span>{isValid ? '符合' : `不符: ${current.toFixed(precision)} / ${target}`}</span>
-    </div>
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium ${isValid ? 'bg-pos/10 text-pos' : 'bg-neg/10 text-neg'}`}>
+      {isValid ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
+      <span className="num">{isValid ? '金額相符' : `${current.toFixed(precision)} / ${target}`}</span>
+    </span>
+  );
+
+  // 付款與分攤兩張成員表的共用畫法；兩邊的差別只在資料來源與「吸收尾差」的星號
+  const renderMemberRows = (type: 'payer' | 'split') => {
+    const active = type === 'payer' ? payerActive : splitActive;
+    const locked = type === 'payer' ? payerLocked : splitLocked;
+    const data = type === 'payer' ? payerData : splitData;
+    const setLocked = type === 'payer' ? setPayerLocked : setSplitLocked;
+    return (
+      <ul className="border border-line rounded-xl divide-y divide-line">
+        {trip.members.map(member => {
+          const on = active.has(member);
+          const isLocked = locked.has(member);
+          return (
+            <li key={member} className="flex items-center gap-2 pl-2.5 pr-1.5 py-2">
+              <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-[18px] h-[18px] rounded accent-[var(--app-primary)] cursor-pointer shrink-0"
+                  checked={on}
+                  onChange={() => toggleActive(member, type)}
+                />
+                <span className={`text-sm truncate ${on ? 'text-ink' : 'text-muted'}`}>{member}</span>
+              </label>
+              {type === 'split' && (
+                <button
+                  type="button"
+                  onClick={() => setAdjustmentMember(member)}
+                  disabled={!on}
+                  aria-label={`由 ${member} 吸收尾差`}
+                  aria-pressed={adjustmentMember === member}
+                  className={`p-1 shrink-0 transition-colors disabled:opacity-30 ${adjustmentMember === member ? 'text-accent' : 'text-line hover:text-muted'}`}
+                >
+                  <Star size={15} className={adjustmentMember === member ? 'fill-accent' : ''} />
+                </button>
+              )}
+              <div className="flex items-center gap-0.5 shrink-0">
+                <input
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="0"
+                  aria-label={`${member} 百分比`}
+                  disabled={!on}
+                  className={`num w-[58px] text-right rounded-lg bg-sunk border px-1.5 py-1.5 text-base sm:text-xs outline-none transition disabled:opacity-40 ${isLocked ? 'border-ink-2 text-ink' : 'border-transparent text-ink-2'}`}
+                  value={pctValue(member, type)}
+                  onChange={e => handlePctChange(member, e.target.value, type)}
+                  onBlur={() => setPctDraft(null)}
+                />
+                <span className="text-[11px] text-muted">%</span>
+              </div>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                placeholder="0"
+                aria-label={`${member} 金額`}
+                disabled={!on}
+                className={`num w-[86px] sm:w-28 text-right rounded-lg border px-2 py-1.5 text-base sm:text-sm font-bold outline-none transition disabled:opacity-40 shrink-0 ${isLocked ? 'bg-accent/10 border-accent/40 text-ink' : 'bg-transparent border-transparent text-ink-2'}`}
+                value={data[member] ?? ''}
+                onChange={e => handleManualEdit(member, e.target.value, type)}
+              />
+              <button
+                type="button"
+                onClick={() => setLocked(prev => { const n = new Set(prev); if (n.has(member)) { n.delete(member); } else { n.add(member); } return n; })}
+                disabled={!on}
+                aria-label={isLocked ? `解除鎖定 ${member} 的金額` : `鎖定 ${member} 的金額`}
+                aria-pressed={isLocked}
+                className={`p-1.5 shrink-0 transition-colors disabled:opacity-30 ${isLocked ? 'text-ink' : 'text-muted/60 hover:text-muted'}`}
+              >
+                {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
+  const sectionHeader = (title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
+    <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
+      <span className="text-sm font-bold text-ink shrink-0">{title}</span>
+      <ValidationBadge isValid={valid} current={sum} target={numAmount} />
+      {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
+      <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
   );
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? "編輯支出紀錄" : "新增支出紀錄"}>
-      <div className="w-full max-w-lg mx-auto overflow-hidden px-1">
-        <form onSubmit={handleSubmit} className="space-y-6 max-h-[75vh] overflow-y-auto no-scrollbar py-2">
-          
-          {/* Header Info */}
-          <div className="grid grid-cols-1 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">支出描述<span className="ml-1 normal-case tracking-normal text-slate-300">(選填)</span></label>
-              <div className="relative">
-                <Receipt className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="text" placeholder={`例如：機場晚餐（留空則記為「${category}」）`} className="w-full pl-11 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm" value={description} onChange={e => setDescription(e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">金額</label>
-              <div className="flex gap-2">
-                <div className="relative w-24 shrink-0">
-                  <select className="w-full pl-3 pr-8 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 border-2 border-transparent font-bold text-xs outline-none appearance-none" value={currency} onChange={e => setCurrency(e.target.value)}>
-                    {[...new Set([...Object.keys(trip.rates), currency].filter(Boolean))].map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={12} />
-                </div>
-                <input required autoFocus type="number" step="any" inputMode="decimal" placeholder="0.00" className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-black text-lg" value={amount} onChange={e => setAmount(e.target.value)} />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">日期</label>
-              <input type="date" className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 font-bold text-xs outline-none" value={date} onChange={e => setDate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">分類</label>
-              <select className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-900 font-bold text-xs outline-none" value={category} onChange={e => setCategory(e.target.value)}>
-                {/* 編輯「結清」或已從清單移除的分類時，原值也要顯示，否則畫面與實際存入的值不一致 */}
-                {[...new Set([...trip.categories, category].filter(Boolean))].map(cat => <option key={cat} value={cat}>{cat}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Payers */}
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => setShowPayerDetail(v => !v)}
-              className="w-full flex items-center justify-between ml-1 pr-1 text-left group"
+    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? '編輯支出' : '新增支出'} maxWidth="sm:max-w-lg">
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="flex gap-2">
+          <div className="relative w-[104px] shrink-0">
+            <select
+              aria-label="幣別"
+              className={`${ui.select} num font-bold appearance-none pr-8 h-full`}
+              value={currency}
+              onChange={e => setCurrency(e.target.value)}
             >
-              <div className="flex items-center gap-2 min-w-0">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0 cursor-pointer">誰付的錢？</label>
-                <ValidationBadge isValid={isPayerValid} current={payerSum} target={numAmount} />
-                {!showPayerDetail && (
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{payerSummary}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <CreditCard size={14} className="text-slate-300" />
-                <ChevronDown size={14} className={`text-slate-400 transition-transform ${showPayerDetail ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            <div className={`bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 ${showPayerDetail ? '' : 'hidden'}`}>
-              {trip.members.map(member => (
-                <div key={member} className="flex items-center justify-between p-3 gap-2">
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input type="checkbox" className="w-4 h-4 rounded-lg accent-blue-600 cursor-pointer" checked={payerActive.has(member)} onChange={() => toggleActive(member, 'payer')} />
-                    <span className={`text-[11px] sm:text-xs font-bold truncate max-w-[60px] sm:max-w-[100px] ${payerActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
-                  </div>
-                  
-                  <div className="flex items-center justify-end flex-1 gap-1 sm:gap-3 min-w-0">
-                    {/* Percentage Input */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        placeholder="0"
-                        disabled={!payerActive.has(member)}
-                        className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${payerLocked.has(member) ? 'text-emerald-600 ring-1 ring-emerald-500/30' : 'text-slate-500'}`}
-                        value={pctValue(member, 'payer')}
-                        onChange={e => handlePctChange(member, e.target.value, 'payer')}
-                        onBlur={() => setPctDraft(null)}
-                      />
-                      <span className="text-[9px] font-black text-slate-300">%</span>
-                    </div>
-
-                    {/* Amount Input */}
-                    <div className="shrink-0">
-                      <input 
-                        type="number" 
-                        step="any" 
-                        disabled={!payerActive.has(member)} 
-                        placeholder="0" 
-                        className={`w-16 sm:w-28 text-right bg-transparent font-black text-[11px] sm:text-sm outline-none transition-all ${payerLocked.has(member) ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1 sm:px-2 py-1.5 rounded-lg' : 'text-slate-400'}`} 
-                        value={payerData[member] ?? ''} 
-                        onChange={e => handleManualEdit(member, e.target.value, 'payer')} 
-                      />
-                    </div>
-
-                    <button type="button" onClick={() => setPayerLocked(prev => { const n = new Set(prev); if (n.has(member)) { n.delete(member); } else { n.add(member); } return n; })} disabled={!payerActive.has(member)} className={`p-1 transition-colors shrink-0 ${payerLocked.has(member) ? 'text-emerald-500' : 'text-slate-200'}`}>
-                      {payerLocked.has(member) ? <Lock size={13} /> : <Unlock size={13} />}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+              {[...new Set([...Object.keys(trip.rates), currency].filter(Boolean))].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" size={14} />
           </div>
+          <input
+            required
+            autoFocus
+            type="number"
+            step="any"
+            inputMode="decimal"
+            placeholder="0"
+            aria-label="金額"
+            className={`${ui.input} num flex-1 min-w-0 text-2xl sm:text-2xl font-extrabold py-2.5`}
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+          />
+        </div>
 
-          {/* Splitters */}
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => setShowSplitDetail(v => !v)}
-              className="w-full flex items-center justify-between ml-1 pr-1 text-left group"
-            >
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0 cursor-pointer">每人分攤</label>
-                  <ValidationBadge isValid={isSplitValid} current={splitSum} target={numAmount} />
-                  {!showSplitDetail && (
-                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">{splitSummary}</span>
-                  )}
-                </div>
-                {showSplitDetail && (
-                  <p className="text-[8px] text-slate-400 font-medium">點擊 ⭐ 以指定成員吸收餘數</p>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <Coins size={14} className="text-slate-300" />
-                <ChevronDown size={14} className={`text-slate-400 transition-transform ${showSplitDetail ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            <div className={`bg-slate-50/50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 ${showSplitDetail ? '' : 'hidden'}`}>
-              {trip.members.map(member => (
-                <div key={member} className="flex items-center justify-between p-3 gap-2">
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input type="checkbox" className="w-4 h-4 rounded-lg accent-blue-600 cursor-pointer" checked={splitActive.has(member)} onChange={() => toggleActive(member, 'split')} />
-                    <button type="button" onClick={() => setAdjustmentMember(member)} disabled={!splitActive.has(member)} className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all ${adjustmentMember === member ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-300 border-slate-200'}`}>
-                      {adjustmentMember === member ? '⭐' : member.charAt(0)}
-                    </button>
-                    <span className={`text-[11px] sm:text-xs font-bold truncate max-w-[50px] sm:max-w-[100px] ${splitActive.has(member) ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>{member}</span>
-                  </div>
+        <div>
+          <label htmlFor="exp-desc" className={ui.label}>項目 <span className="text-muted font-normal">· 選填，留空會記成「{category}」</span></label>
+          <input id="exp-desc" type="text" placeholder="例如：機場晚餐" className={ui.input} value={description} onChange={e => setDescription(e.target.value)} />
+        </div>
 
-                  <div className="flex items-center justify-end flex-1 gap-1 sm:gap-3 min-w-0">
-                    {/* Percentage Input */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        placeholder="0"
-                        disabled={!splitActive.has(member)}
-                        className={`w-11 sm:w-16 text-right bg-slate-100 dark:bg-slate-800 rounded-lg px-1.5 py-1.5 text-[10px] sm:text-xs font-black outline-none transition-all ${splitLocked.has(member) ? 'text-blue-600 ring-1 ring-blue-500/30' : 'text-slate-500'}`}
-                        value={pctValue(member, 'split')}
-                        onChange={e => handlePctChange(member, e.target.value, 'split')}
-                        onBlur={() => setPctDraft(null)}
-                      />
-                      <span className="text-[9px] font-black text-slate-300">%</span>
-                    </div>
-
-                    {/* Amount Input */}
-                    <div className="shrink-0">
-                      <input 
-                        type="number" 
-                        step="any" 
-                        disabled={!splitActive.has(member)} 
-                        placeholder="0" 
-                        className={`w-16 sm:w-28 text-right bg-transparent font-black text-[11px] sm:text-sm outline-none transition-all ${splitLocked.has(member) ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-1 sm:px-2 py-1.5 rounded-lg' : 'text-slate-400'}`} 
-                        value={splitData[member] ?? ''} 
-                        onChange={e => handleManualEdit(member, e.target.value, 'split')} 
-                      />
-                    </div>
-
-                    <button type="button" onClick={() => setSplitLocked(prev => { const n = new Set(prev); if (n.has(member)) { n.delete(member); } else { n.add(member); } return n; })} disabled={!splitActive.has(member)} className={`p-1 transition-colors shrink-0 ${splitLocked.has(member) ? 'text-blue-500' : 'text-slate-200'}`}>
-                      {splitLocked.has(member) ? <Lock size={13} /> : <Unlock size={13} />}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="exp-date" className={ui.label}>日期</label>
+            <input id="exp-date" type="date" className={`${ui.input} num`} value={date} onChange={e => setDate(e.target.value)} />
           </div>
+          <div>
+            <label htmlFor="exp-cat" className={ui.label}>分類</label>
+            <select id="exp-cat" className={ui.select} value={category} onChange={e => setCategory(e.target.value)}>
+              {/* 編輯「結清」或已從清單移除的分類時，原值也要顯示，否則畫面與實際存入的值不一致 */}
+              {[...new Set([...trip.categories, category].filter(Boolean))].map(cat => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+          </div>
+        </div>
 
-          {/* Photos */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 ml-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">收據照片</label>
-              {photoList.length > 1 && (
-                <span className="flex items-center gap-1 text-[9px] text-slate-400 font-medium">
-                  <GripVertical size={10} />拖拉可調整順序
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {photoList.map((item, i) => {
-                const src = item.kind === 'existing'
-                  ? photoUrl(item.url)
-                  : item.preview;
-                const isDragging = dragIndex === i;
-                const isDropTarget = dropTarget === i && dragIndex !== null && dragIndex !== i;
-                return (
-                  <div
-                    key={item.key}
-                    draggable
-                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragIndex(i); }}
-                    onDragEnter={e => { e.preventDefault(); setDropTarget(i); }}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={e => {
-                      e.preventDefault();
-                      if (dragIndex !== null && dragIndex !== i) {
-                        setPhotoList(prev => {
-                          const next = [...prev];
-                          const [moved] = next.splice(dragIndex, 1);
-                          next.splice(i, 0, moved);
-                          return next;
-                        });
-                      }
-                      setDragIndex(null);
-                      setDropTarget(null);
-                    }}
-                    onDragEnd={() => { setDragIndex(null); setDropTarget(null); }}
-                    className={`relative w-20 h-20 rounded-xl overflow-hidden border cursor-move transition-all select-none
-                      ${isDragging ? 'opacity-40 scale-95' : ''}
-                      ${isDropTarget ? 'ring-2 ring-blue-500 border-blue-400 scale-105' : item.kind === 'new' ? 'border-blue-200' : 'border-slate-200 dark:border-slate-700'}
-                    `}
+        <section className="space-y-2">
+          {sectionHeader('誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
+          {showPayerDetail && renderMemberRows('payer')}
+        </section>
+
+        <section className="space-y-2">
+          {sectionHeader('怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
+          {showSplitDetail && (
+            <>
+              {renderMemberRows('split')}
+              <p className={ui.hint}>除不盡的尾差由 <Star size={11} className="inline fill-accent text-accent -mt-0.5" /> 標記的人吸收；鎖定的金額不會被重新分配。</p>
+            </>
+          )}
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold">收據照片</span>
+            {photoList.length > 1 && (
+              <span className="flex items-center gap-1 text-xs text-muted"><GripVertical size={12} />拖拉可調整順序</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            {photoList.map((item, i) => {
+              const src = item.kind === 'existing'
+                ? photoUrl(item.url)
+                : item.preview;
+              const isDragging = dragIndex === i;
+              const isDropTarget = dropTarget === i && dragIndex !== null && dragIndex !== i;
+              return (
+                <div
+                  key={item.key}
+                  draggable
+                  onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragIndex(i); }}
+                  onDragEnter={e => { e.preventDefault(); setDropTarget(i); }}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => {
+                    e.preventDefault();
+                    if (dragIndex !== null && dragIndex !== i) {
+                      setPhotoList(prev => {
+                        const next = [...prev];
+                        const [moved] = next.splice(dragIndex, 1);
+                        next.splice(i, 0, moved);
+                        return next;
+                      });
+                    }
+                    setDragIndex(null);
+                    setDropTarget(null);
+                  }}
+                  onDragEnd={() => { setDragIndex(null); setDropTarget(null); }}
+                  className={`relative w-20 h-20 rounded-xl overflow-hidden border cursor-move transition select-none
+                    ${isDragging ? 'opacity-40 scale-95' : ''}
+                    ${isDropTarget ? 'ring-2 ring-accent border-accent scale-105' : 'border-line'}
+                  `}
+                >
+                  <img src={src} className="w-full h-full object-cover pointer-events-none" alt={`收據 ${i + 1}`} />
+                  <button
+                    type="button"
+                    aria-label="移除這張照片"
+                    onClick={() => setPhotoList(prev => prev.filter(p => p.key !== item.key))}
+                    className="absolute top-1 right-1 bg-black/60 text-white p-1 rounded-full z-10"
                   >
-                    <img src={src} className="w-full h-full object-cover pointer-events-none" alt="photo" />
-                    <button
-                      type="button"
-                      onClick={() => setPhotoList(prev => prev.filter(p => p.key !== item.key))}
-                      className="absolute top-1 right-1 bg-rose-500 text-white p-1 rounded-full z-10"
-                    >
-                      <X size={10} />
-                    </button>
-                    <div className="absolute bottom-1 left-1 bg-black/30 rounded p-0.5 pointer-events-none">
-                      <GripVertical size={10} className="text-white/80" />
-                    </div>
-                  </div>
-                );
-              })}
-              <label className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-slate-400 hover:border-blue-400 cursor-pointer">
-                <ImagePlus size={20} /><span className="text-[8px] font-bold mt-1">添加</span><input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoChange} />
-              </label>
-            </div>
+                    <X size={11} />
+                  </button>
+                </div>
+              );
+            })}
+            <label className="w-20 h-20 rounded-xl border border-dashed border-ink-2/40 flex flex-col items-center justify-center text-ink-2 hover:bg-sunk cursor-pointer transition-colors">
+              <ImagePlus size={20} /><span className="text-[11px] mt-1">加照片</span>
+              <input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoChange} />
+            </label>
           </div>
+        </section>
 
-          {error && <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-xl flex items-center gap-3 text-red-600 dark:text-red-400 text-xs font-bold"><AlertCircle size={16} />{error}</div>}
+        {error && <div className={ui.errorBox} role="alert"><AlertCircle size={16} className="shrink-0 mt-0.5" />{error}</div>}
 
-          <div className="sticky bottom-0 -mx-1 px-1 pt-3 pb-1 bg-gradient-to-t from-white via-white to-white/0 dark:from-slate-800 dark:via-slate-800 dark:to-slate-800/0">
-            <button disabled={loading} type="submit" className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white font-black py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
-              {loading ? <Loader2 className="animate-spin" size={20} /> : (editData ? <Save size={20} /> : <Plus size={20} strokeWidth={3} />)}
-              <span>{loading ? '儲存中...' : (editData?.id ? '儲存修改' : '確認新增支出')}</span>
-            </button>
-          </div>
-        </form>
-      </div>
+        <div className="sticky bottom-0 -mx-5 px-5 pt-3 -mb-1 bg-gradient-to-t from-surface from-70% to-transparent">
+          <button disabled={loading} type="submit" className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}>
+            {loading ? <Loader2 className="animate-spin" size={18} /> : (editData?.id ? <Save size={18} /> : <Plus size={18} strokeWidth={2.6} />)}
+            {loading ? '儲存中…' : (editData?.id ? '儲存修改' : '新增支出')}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 };

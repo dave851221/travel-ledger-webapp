@@ -4,25 +4,19 @@ import {
   Save, 
   Trash2, 
   Plus, 
-  Users, 
-  Globe, 
-  Tag, 
-  Settings as SettingsIcon, 
   Lock,
   Unlock, 
   AlertCircle,
   Loader2,
-  ChevronRight,
   Archive,
   Download,
-  ShieldCheck,
   Copy,
   Check,
   MessageCircle,
-  Bot,
-  Clock
+  Bot
 } from 'lucide-react';
 import Modal from './Modal';
+import { ui } from './ui';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV } from '../utils/finance';
@@ -445,345 +439,306 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     if (defaultCategory === cat) setDefaultCategory(next[0] ?? '');
   };
 
+  const tabs: { key: TabType; label: string }[] = [
+    { key: 'basic', label: '基本' },
+    { key: 'members', label: '成員' },
+    { key: 'finance', label: '幣別匯率' },
+    { key: 'categories', label: '分類' },
+  ];
+
+  const chipToggle = (on: boolean) => `${ui.chip} text-sm px-3.5 ${on ? ui.chipOn : ui.chipOff}`;
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="旅程進階設定" maxWidth="max-w-3xl">
-      <div className="flex flex-col sm:flex-row h-[70vh] -m-6 overflow-hidden">
-        <div className="w-full sm:w-56 bg-slate-50 dark:bg-slate-900/50 border-b sm:border-b-0 sm:border-r border-slate-100 dark:border-slate-800 p-2 sm:p-3 flex sm:flex-col gap-1 sm:gap-2 overflow-x-auto no-scrollbar shrink-0">
-          <TabButton active={activeTab === 'basic'} icon={<SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5" />} label="基本設定" onClick={() => setActiveTab('basic')} />
-          <TabButton active={activeTab === 'members'} icon={<Users className="w-4 h-4 sm:w-5 sm:h-5" />} label="成員管理" onClick={() => setActiveTab('members')} />
-          <TabButton active={activeTab === 'finance'} icon={<Globe className="w-4 h-4 sm:w-5 sm:h-5" />} label="匯率精度" onClick={() => setActiveTab('finance')} />
-          <TabButton active={activeTab === 'categories'} icon={<Tag className="w-4 h-4 sm:w-5 sm:h-5" />} label="消費類別" onClick={() => setActiveTab('categories')} />
+    <Modal isOpen={isOpen} onClose={onClose} title="旅程設定" maxWidth="sm:max-w-2xl">
+      <div className="-mt-5 -mx-5">
+        <div className="sticky -top-5 z-10 bg-surface px-5 pt-4 pb-3 border-b border-line">
+          <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-sunk border border-line" role="tablist">
+            {tabs.map(t => (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={activeTab === t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={`py-2 rounded-lg text-[13px] transition-colors ${activeTab === t.key ? 'bg-surface text-ink font-bold shadow-sm' : 'text-ink-2 hover:text-ink'}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-10 no-scrollbar">
+        <div className="px-5 pt-5 pb-2 min-h-[50dvh]">
           {activeTab === 'basic' && (
-            <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="space-y-2">
-                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">旅程名稱</label>
-                <input type="text" className="w-full px-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={name} onChange={e => setName(e.target.value)} />
+            <div className="space-y-5 anim-fade">
+              <div>
+                <label htmlFor="set-name" className={ui.label}>旅程名稱</label>
+                <input id="set-name" type="text" className={ui.input} value={name} onChange={e => setName(e.target.value)} />
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">
-                  訪問密碼 <span className="text-[9px] font-normal opacity-60 ml-2">(選填)</span>
-                </label>
+              <div>
+                <label htmlFor="set-code" className={ui.label}>進入密碼 <span className="text-muted font-normal">· 選填</span></label>
                 <div className="relative">
                   {accessCode.trim()
-                    ? <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
-                    : <Unlock className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 w-4 h-4 sm:w-5 sm:h-5" />}
-                  <input type="text" maxLength={6} placeholder="留空 = 不需要密碼" className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base" value={accessCode} onChange={e => setAccessCode(e.target.value)} />
+                    ? <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" size={15} />
+                    : <Unlock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-pos" size={15} />}
+                  <input id="set-code" type="text" maxLength={6} placeholder="留空即免密碼" className={`${ui.input} pl-10`} value={accessCode} onChange={e => setAccessCode(e.target.value)} />
                 </div>
-                <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">
+                <p className={`${ui.hint} mt-1.5`}>
                   {accessCode.trim()
-                    ? '儲存後，未驗證過的人進入此旅程時需要輸入密碼。清空此欄位即可取消密碼。'
-                    : '目前為免密碼旅程：任何拿到連結的人都可以直接進入，LINE Bot 綁定時也免驗證。'}
+                    ? '儲存後，還沒驗證過的人進入這趟旅程時要輸入密碼。清空這一欄就能取消密碼。'
+                    : '目前免密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}
                 </p>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">
-                  旅程分類 <span className="text-[9px] font-normal opacity-60 ml-2">(選填，可自由輸入)</span>
-                </label>
-                <div className="relative">
-                  <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
-                  <input
-                    type="text"
-                    list="settings-trip-categories"
-                    placeholder="例如：家族、朋友、情侶、出差"
-                    className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base"
-                    value={tripCategory}
-                    onChange={e => setTripCategory(e.target.value)}
-                  />
-                  <datalist id="settings-trip-categories">
-                    {knownTripCategories.map(c => <option key={c} value={c} />)}
-                  </datalist>
-                </div>
-                <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">同名分類的旅程會在首頁分組顯示，方便按家族／朋友／出差等情境分類管理。</p>
+              <div>
+                <label htmlFor="set-tripcat" className={ui.label}>旅程分類 <span className="text-muted font-normal">· 選填</span></label>
+                <input
+                  id="set-tripcat"
+                  type="text"
+                  list="settings-trip-categories"
+                  placeholder="例如：家族、朋友、出差"
+                  className={ui.input}
+                  value={tripCategory}
+                  onChange={e => setTripCategory(e.target.value)}
+                />
+                <datalist id="settings-trip-categories">
+                  {knownTripCategories.map(c => <option key={c} value={c} />)}
+                </datalist>
+                <p className={`${ui.hint} mt-1.5`}>同一個分類的旅程會在首頁排在一起。</p>
               </div>
 
               {/* 旅程時區：LINE Bot 判斷「今天」用的就是它（M4）。
                   幣別不等於所在地 —— 主幣 TWD 的日本旅程用台北時間，
                   日本時間 23:30 記帳會被記到前一天去。 */}
-              <div className="space-y-2">
-                <label className="text-[10px] sm:text-sm font-black text-slate-400 uppercase tracking-widest ml-1">
-                  旅程時區 <span className="text-[9px] font-normal opacity-60 ml-2">(選填)</span>
-                </label>
-                <div className="relative">
-                  <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 sm:w-5 sm:h-5" />
-                  <select
-                    className="w-full pl-11 sm:pl-12 pr-4 py-3 sm:py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 outline-none transition-all font-bold text-sm sm:text-base appearance-none"
-                    value={timezone}
-                    onChange={e => setTimezone(e.target.value)}
-                  >
-                    <option value="">自動（依幣別推測）</option>
-                    {TIMEZONE_OPTIONS.map(tz => (
-                      <option key={tz.value} value={tz.value}>{tz.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <p className="text-[9px] sm:text-[10px] text-slate-400 px-1 mt-1">
-                  LINE Bot 判斷「今天」用的時區。留「自動」時會從幣別推測 ——
-                  主幣別是台幣的日本旅程會猜成台北時間，深夜記帳容易差一天，建議直接指定。
+              <div>
+                <label htmlFor="set-tz" className={ui.label}>旅程時區 <span className="text-muted font-normal">· 選填</span></label>
+                <select id="set-tz" className={ui.select} value={timezone} onChange={e => setTimezone(e.target.value)}>
+                  <option value="">自動（依幣別推測）</option>
+                  {TIMEZONE_OPTIONS.map(tz => (
+                    <option key={tz.value} value={tz.value}>{tz.label}</option>
+                  ))}
+                </select>
+                <p className={`${ui.hint} mt-1.5`}>
+                  LINE 機器人判斷「今天」用的時區。選自動時會從幣別推測，主幣別是台幣的日本旅程會被當成台北時間，深夜記帳容易差一天，建議直接指定。
                 </p>
               </div>
 
               {/* AI 記帳偏好：LINE Bot 解析文字與收據時的參考，整趟旅程共用一份 */}
-              <div className="p-4 sm:p-6 bg-violet-50/50 dark:bg-violet-900/10 rounded-2xl border border-violet-100 dark:border-violet-900/30">
-                <div className="flex items-center gap-3 sm:gap-4 mb-3 sm:mb-5">
-                  <div className="p-2 sm:p-3 bg-violet-100 dark:bg-violet-900/30 text-violet-600 rounded-lg sm:rounded-xl"><Bot size={20} /></div>
+              <section className="rounded-2xl border border-line p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Bot size={18} /></span>
                   <div>
-                    <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">🤖 AI 記帳偏好</p>
-                    <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">耀西解析你說的話或收據時會參考這段描述</p>
+                    <p className="text-sm font-bold">AI 記帳偏好</p>
+                    <p className="text-xs text-muted mt-0.5">耀西解析你說的話或收據時，會參考這段描述</p>
                   </div>
                 </div>
                 <textarea
                   rows={4}
+                  aria-label="AI 記帳偏好"
                   placeholder={`例如：預設由${trip.members[0] || '我'}付款，大家均分；日幣一律不換算`}
-                  className="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border-2 border-violet-100 dark:border-violet-900/30 focus:border-violet-600 outline-none transition-all font-bold text-sm resize-none"
+                  className={`${ui.input} resize-none`}
                   value={aiPreference}
                   onChange={e => setAiPreference(e.target.value)}
                 />
-                <p className="mt-2 text-[9px] sm:text-[10px] text-slate-400 font-medium leading-relaxed">
-                  <strong>整趟旅程共用一份</strong>，在 LINE 裡按「⚙️ 記帳偏好」看到的也是這一份。
-                  留空即代表沒有偏好。<br />
-                  不要在這裡寫「我是○○」—— 群組裡每個人看到的都是同一句，耀西已經會用 LINE 顯示名稱判斷「我」是誰。
+                <p className={ui.hint}>
+                  整趟旅程共用一份，在 LINE 裡按「⚙️ 記帳偏好」看到的也是這一份，留空代表沒有偏好。
+                  不要在這裡寫「我是○○」：群組裡每個人看到的都是同一句，耀西會用 LINE 顯示名稱判斷「我」是誰。
                 </p>
-              </div>
+              </section>
 
               {/* LineBot Binding Section */}
-              <div className="p-4 sm:p-6 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
-                <div className="flex items-center justify-between mb-3 sm:mb-5">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className="p-2 sm:p-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-lg sm:rounded-xl"><MessageCircle size={20} /></div>
-                    <div>
-                      <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">LINE Bot 快速記帳</p>
-                      <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">使用專屬 ID 綁定 LINE 機器人</p>
-                    </div>
+              <section className="rounded-2xl border border-line p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-[#06c755]/12 text-[#06a147] flex items-center justify-center shrink-0"><MessageCircle size={18} /></span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold">用 LINE 記帳</p>
+                    <p className="text-xs text-muted mt-0.5">加機器人好友後，傳送下面的 ID 就能綁定這趟旅程</p>
                   </div>
-                  <a 
-                    href="https://line.me/R/ti/p/%40457ctfgb" 
-                    target="_blank" 
+                  <a
+                    href="https://line.me/R/ti/p/%40457ctfgb"
+                    target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] sm:text-xs font-black rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                    className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#06c755] text-white text-xs font-bold hover:brightness-95"
                   >
-                    <Plus size={14} />
-                    <span>加入好友</span>
+                    <Plus size={14} />加好友
                   </a>
                 </div>
-                <div className="flex gap-2 sm:gap-3">
-                  <div className="flex-1 px-4 py-3 sm:py-4 bg-white dark:bg-slate-800 border-2 border-emerald-100 dark:border-emerald-900/30 rounded-xl sm:rounded-2xl font-black text-center text-xl sm:text-2xl tracking-[0.2em] text-emerald-600">
+                <div className="flex gap-2">
+                  <div className="flex-1 px-4 py-3 rounded-xl bg-sunk border border-line num font-extrabold text-center text-xl tracking-[0.2em]">
                     ID:{lineBotId || '------'}
                   </div>
-                  <button 
-                    onClick={handleCopy}
-                    className="px-4 sm:px-6 flex items-center justify-center bg-white dark:bg-slate-800 border-2 border-emerald-100 dark:border-emerald-900/30 hover:border-emerald-600 text-emerald-600 rounded-xl sm:rounded-2xl transition-all active:scale-95"
-                  >
-                    {copied ? <Check size={20} className="text-emerald-500" /> : <Copy size={20} />}
+                  <button onClick={handleCopy} aria-label="複製綁定 ID" className={`${ui.btnSecondary} px-4`}>
+                    {copied ? <Check size={18} className="text-pos" /> : <Copy size={18} />}
                   </button>
                 </div>
-                <p className="mt-3 text-[9px] sm:text-xs text-slate-400 font-medium leading-relaxed">點擊上方按鈕加入好友後，貼上複製的 ID 即可完成綁定。</p>
-              </div>
+              </section>
 
-              <div className="pt-4 sm:pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4 sm:space-y-6">
-                <div className="flex items-center justify-between p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className={`p-2 sm:p-3 rounded-lg sm:rounded-xl ${isArchived ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}><Archive size={20} /></div>
-                    <div>
-                      <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">封存旅程</p>
-                      <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">封存後將進入唯讀模式</p>
-                    </div>
+              <section className="rounded-2xl border border-line divide-y divide-line">
+                <div className="flex items-center gap-3 p-4">
+                  <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isArchived ? 'bg-warn/15 text-warn' : 'bg-sunk text-ink-2'}`}><Archive size={18} /></span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold">封存旅程</p>
+                    <p className="text-xs text-muted mt-0.5">封存後只能查看，不能新增或修改</p>
                   </div>
-                  <button onClick={() => setIsArchived(!isArchived)} className={`w-10 sm:w-14 h-5 sm:h-7 rounded-full transition-all relative ${isArchived ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'}`}><div className={`absolute top-0.5 sm:top-1 w-4 sm:w-5 h-4 sm:h-5 rounded-full bg-white transition-all ${isArchived ? 'left-5.5 sm:left-8' : 'left-0.5 sm:left-1'}`} /></button>
+                  <button
+                    role="switch"
+                    aria-checked={isArchived}
+                    aria-label="封存旅程"
+                    onClick={() => setIsArchived(!isArchived)}
+                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${isArchived ? 'bg-warn' : 'bg-line'}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${isArchived ? 'left-[22px]' : 'left-0.5'}`} />
+                  </button>
                 </div>
-
-                <div className="p-4 sm:p-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-2xl border border-blue-100 dark:border-blue-900/30">
-                  <div className="flex items-center gap-3 sm:gap-4 mb-3 sm:mb-5">
-                    <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg sm:rounded-xl"><ShieldCheck size={20} /></div>
-                    <div>
-                      <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">數據備份</p>
-                      <p className="text-[9px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5 font-medium">匯出所有支出紀錄至 CSV 檔案</p>
-                    </div>
+                <div className="flex items-center gap-3 p-4">
+                  <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Download size={18} /></span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold">匯出 CSV</p>
+                    <p className="text-xs text-muted mt-0.5">下載所有支出紀錄，可以用試算表開啟</p>
                   </div>
-                  <button onClick={() => exportExpensesToCSV(expenses, trip.name)} className="w-full flex items-center justify-center gap-2 py-3 sm:py-4 px-4 bg-white dark:bg-slate-800 border-2 border-blue-100 dark:border-blue-900/30 hover:border-blue-600 text-blue-600 dark:text-blue-400 font-black rounded-xl sm:rounded-2xl transition-all shadow-sm active:scale-95 text-[10px] sm:text-sm"><Download size={16} /><span>導出 CSV 檔案</span></button>
+                  <button onClick={() => exportExpensesToCSV(expenses, trip.name)} className={`${ui.btnSecondary} py-2 shrink-0`}>下載</button>
                 </div>
-              </div>
+              </section>
             </div>
           )}
 
           {activeTab === 'members' && (
-            <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="flex gap-2 sm:gap-3">
-                <input type="text" placeholder="新增成員" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newMember} onChange={e => setNewMember(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addMember()} />
-                <button onClick={addMember} className="px-4 sm:px-5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg active:scale-95"><Plus size={20} strokeWidth={3} /></button>
+            <div className="space-y-5 anim-fade">
+              <div className="flex gap-2">
+                <input type="text" aria-label="新成員名稱" placeholder="新增成員" className={ui.input} value={newMember} onChange={e => setNewMember(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addMember()} />
+                <button onClick={addMember} aria-label="新增成員" className={`${ui.btnPrimary} px-4 shrink-0`}><Plus size={18} strokeWidth={2.6} /></button>
               </div>
-              <div className="space-y-3 sm:space-y-4">
+              <ul className="rounded-2xl border border-line divide-y divide-line">
                 {members.map((m, idx) => (
-                  <div key={idx} className="flex items-center gap-2 sm:gap-3 group animate-in fade-in duration-200">
-                    <div className="flex-1 flex items-center gap-3 sm:gap-4 p-3 sm:p-4 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl sm:rounded-2xl shadow-sm">
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-black text-xs sm:text-sm shrink-0">{m.charAt(0)}</div>
-                      <input type="text" className="flex-1 bg-transparent font-black text-sm sm:text-base outline-none focus:text-blue-600" value={m} onChange={e => handleMemberRename(idx, e.target.value)} placeholder="成員姓名" />
-                    </div>
+                  <li key={idx} className="flex items-center gap-3 pl-3 pr-1.5 py-1.5 group">
+                    <span className="w-8 h-8 rounded-full bg-sunk text-ink-2 flex items-center justify-center text-sm font-bold shrink-0">{m.charAt(0)}</span>
+                    <input
+                      type="text"
+                      aria-label={`成員 ${idx + 1} 的名稱`}
+                      className="flex-1 min-w-0 bg-transparent text-base sm:text-sm py-2 outline-none rounded-lg focus:bg-sunk px-2 -mx-2"
+                      value={m}
+                      onChange={e => handleMemberRename(idx, e.target.value)}
+                      placeholder="成員名稱"
+                    />
                     {/* 觸控裝置沒有 hover：只有滑鼠操作時才「滑過才顯示」，否則手機、平板上按鈕永遠是透明的 */}
-                    <button onClick={() => removeMember(idx)} aria-label={`移除 ${m}`} className="p-2 text-slate-300 hover:text-rose-500 transition-colors pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus:opacity-100"><Trash2 size={16} /></button>
-                  </div>
+                    <button onClick={() => removeMember(idx)} aria-label={`移除 ${m}`} className={`${ui.iconBtn} hover:text-neg pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus:opacity-100`}><Trash2 size={16} /></button>
+                  </li>
                 ))}
-              </div>
-              <p className="text-[10px] sm:text-xs text-slate-400 px-2 font-medium bg-slate-50 dark:bg-slate-900/50 p-3 sm:p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 leading-relaxed">💡 <b>提示：</b> 您可以直接點擊姓名進行修改，系統會自動同步歷史紀錄。</p>
+              </ul>
+              <p className={ui.hint}>直接點名字就能改名，所有支出紀錄裡的名字會一起更新。</p>
 
-              {/* Default payer & split */}
-              <div className="pt-2 space-y-5 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest pt-2">記帳預設值</p>
-
-                {/* Default payer */}
-                <div className="space-y-2">
-                  <label className="text-[10px] sm:text-xs font-bold text-slate-500">預設付款人</label>
+              <div className="pt-4 border-t border-line space-y-4">
+                <p className="text-sm font-bold">記帳預設值</p>
+                <div>
+                  <p className={ui.label}>預設付款人</p>
                   <div className="flex flex-wrap gap-2">
                     {members.map(m => {
                       const checked = defaultPayer.includes(m);
                       return (
-                        <button
-                          key={m}
-                          onClick={() =>
-                            setDefaultPayer(prev =>
-                              checked ? prev.filter(x => x !== m) : [...prev, m]
-                            )
-                          }
-                          className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${
-                            checked
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
-                          }`}
-                        >
+                        <button key={m} aria-pressed={checked} onClick={() => setDefaultPayer(prev => checked ? prev.filter(x => x !== m) : [...prev, m])} className={chipToggle(checked)}>
                           {m}
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400">未選則以登入身分為準，若未登入則使用第一位成員。</p>
+                  <p className={`${ui.hint} mt-1.5`}>沒選的話，以「我是誰」選的人為準；還沒選身分就用第一位成員。</p>
                 </div>
-
-                {/* Default split members */}
-                <div className="space-y-2">
-                  <label className="text-[10px] sm:text-xs font-bold text-slate-500">預設分攤成員</label>
+                <div>
+                  <p className={ui.label}>預設分攤成員</p>
                   <div className="flex flex-wrap gap-2">
                     {members.map(m => {
                       const checked = defaultSplitMembers.includes(m);
                       return (
-                        <button
-                          key={m}
-                          onClick={() =>
-                            setDefaultSplitMembers(prev =>
-                              checked ? prev.filter(x => x !== m) : [...prev, m]
-                            )
-                          }
-                          className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${
-                            checked
-                              ? 'bg-indigo-600 text-white border-indigo-600'
-                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
-                          }`}
-                        >
+                        <button key={m} aria-pressed={checked} onClick={() => setDefaultSplitMembers(prev => checked ? prev.filter(x => x !== m) : [...prev, m])} className={chipToggle(checked)}>
                           {m}
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400">未選則預設全部成員分攤。</p>
+                  <p className={`${ui.hint} mt-1.5`}>沒選的話，預設全部成員一起分攤。</p>
                 </div>
               </div>
             </div>
           )}
 
           {activeTab === 'finance' && (
-            <div className="space-y-8 sm:space-y-10 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                <div className="p-4 sm:p-6 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/30">
-                  <label className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">當前主幣別</label>
-                  <div className="relative mt-1 sm:mt-2">
-                    <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-blue-700 dark:text-blue-300 outline-none cursor-pointer appearance-none" value={baseCurrency} onChange={e => changeBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
-                    <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-blue-300 pointer-events-none" />
-                  </div>
+            <div className="space-y-5 anim-fade">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="set-base" className={ui.label}>主幣別</label>
+                  <select id="set-base" className={`${ui.select} num font-bold`} value={baseCurrency} onChange={e => changeBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
                 </div>
-                <div className="p-4 sm:p-6 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
-                  <label className="text-[10px] sm:text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">預設記帳幣別</label>
-                  <div className="relative mt-1 sm:mt-2">
-                    <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-indigo-700 dark:text-indigo-300 outline-none cursor-pointer appearance-none" value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
-                    <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-indigo-300 pointer-events-none" />
-                  </div>
+                <div>
+                  <label htmlFor="set-defcur" className={ui.label}>預設記帳幣別</label>
+                  <select id="set-defcur" className={`${ui.select} num font-bold`} value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
                 </div>
               </div>
-              <div className="space-y-4 sm:space-y-6">
-                <div className="flex items-center justify-between px-1"><label className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest">幣別與匯率配置</label><span className="text-[9px] sm:text-xs text-slate-400 font-bold">(1 幣別 = ? {baseCurrency})</span></div>
-                {baseCurrency !== trip.base_currency && (
-                  <p className="text-[9px] sm:text-[10px] text-amber-600 dark:text-amber-400 font-bold px-1">
-                    主幣別已從 {trip.base_currency} 改為 {baseCurrency}，下面的匯率已自動換算成「1 幣別 = ? {baseCurrency}」，存檔前請確認。
-                  </p>
-                )}
-                <div className="space-y-3 sm:space-y-4">
+              {baseCurrency !== trip.base_currency && (
+                <div className={ui.warnBox}>
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <p>主幣別從 {trip.base_currency} 改成 {baseCurrency}，下面的匯率已經自動換算成「1 單位 = ? {baseCurrency}」，儲存前請確認。</p>
+                </div>
+              )}
+              <div>
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <p className="text-sm font-bold">幣別與匯率</p>
+                  <span className="text-xs text-muted">1 單位 = ? {baseCurrency}</span>
+                </div>
+                <div className="grid grid-cols-[64px_minmax(0,1fr)_76px_36px] gap-2 px-1 pb-1 text-[11px] text-muted">
+                  <span>幣別</span><span>匯率</span><span>小數位數</span><span />
+                </div>
+                <ul className="space-y-2">
                   {Object.keys(ratesStr).map(code => (
-                    <div key={code} className="p-4 sm:p-6 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl sm:rounded-[2rem] shadow-sm space-y-4 sm:space-y-5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-black text-blue-600 dark:text-blue-400 text-sm sm:text-xl">{code}</span>
-                        {code !== baseCurrency && (<button onClick={() => removeCurrency(code)} className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors"><X size={16} /></button>)}
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 sm:gap-6">
-                        <div className="space-y-1 sm:space-y-2">
-                          <label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">基準匯率</label>
-                          <input type="text" inputMode="decimal" className="w-full px-3 py-2 sm:px-4 sm:py-3 bg-slate-50 dark:bg-slate-900 rounded-xl font-black text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-500/20" value={ratesStr[code] ?? ''} onChange={e => setRatesStr({...ratesStr, [code]: e.target.value})} />
-                        </div>
-                        <div className="space-y-1 sm:space-y-2">
-                          <label className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">小數精度</label>
-                          <input type="text" inputMode="numeric" className="w-full px-3 py-2 sm:px-4 sm:py-3 bg-slate-50 dark:bg-slate-900 rounded-xl font-black text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-500/20" value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({...precisionStr, [code]: e.target.value})} />
-                        </div>
-                      </div>
-                    </div>
+                    <li key={code} className="grid grid-cols-[64px_minmax(0,1fr)_76px_36px] gap-2 items-center">
+                      <span className="num font-bold pl-1">{code}</span>
+                      <input type="text" inputMode="decimal" aria-label={`${code} 匯率`} className={`${ui.input} num py-2`} value={ratesStr[code] ?? ''} onChange={e => setRatesStr({ ...ratesStr, [code]: e.target.value })} />
+                      <input type="text" inputMode="numeric" aria-label={`${code} 小數位數`} className={`${ui.input} num py-2`} value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({ ...precisionStr, [code]: e.target.value })} />
+                      {code !== baseCurrency
+                        ? <button onClick={() => removeCurrency(code)} aria-label={`移除 ${code}`} className={`${ui.iconBtn} hover:text-neg`}><X size={16} /></button>
+                        : <span className="text-[11px] text-muted text-center">主</span>}
+                    </li>
                   ))}
-                </div>
-                <div className="flex gap-2 sm:gap-3 pt-4 sm:pt-6">
-                  <input type="text" placeholder="新增幣別" className="flex-1 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs sm:text-sm font-bold outline-none border-2 border-transparent focus:border-blue-600" value={newCurrency} onChange={e => setNewCurrency(e.target.value)} />
-                  <button onClick={addCurrency} className="px-4 sm:px-8 py-3 sm:py-4 bg-slate-900 dark:bg-slate-700 text-white rounded-xl text-xs sm:text-sm font-black hover:bg-black transition-all shadow-lg active:scale-95">新增</button>
-                </div>
+                </ul>
+              </div>
+              <div className="flex gap-2">
+                <input type="text" aria-label="新幣別代碼" placeholder="新增幣別，例如 KRW" className={`${ui.input} uppercase placeholder:normal-case`} value={newCurrency} onChange={e => setNewCurrency(e.target.value)} />
+                <button onClick={addCurrency} className={`${ui.btnSecondary} shrink-0`}>新增</button>
               </div>
             </div>
           )}
 
           {activeTab === 'categories' && (
-            <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="p-4 sm:p-6 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/30">
-                <label className="text-[10px] sm:text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">預設記帳類別</label>
-                <div className="relative mt-1 sm:mt-2">
-                  <select className="w-full bg-transparent font-black text-xl sm:text-3xl text-indigo-700 dark:text-indigo-300 outline-none cursor-pointer appearance-none" value={defaultCategory} onChange={e => setDefaultCategory(e.target.value)}>{categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select>
-                  <ChevronRight size={20} className="absolute right-0 top-1/2 -translate-y-1/2 rotate-90 text-indigo-300 pointer-events-none" />
-                </div>
+            <div className="space-y-5 anim-fade">
+              <div>
+                <label htmlFor="set-defcat" className={ui.label}>預設記帳分類</label>
+                <select id="set-defcat" className={ui.select} value={defaultCategory} onChange={e => setDefaultCategory(e.target.value)}>{categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}</select>
               </div>
-              <div className="flex gap-2 sm:gap-3">
-                <input type="text" placeholder="新增類別" className="flex-1 px-4 py-2.5 sm:py-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 font-bold text-sm sm:text-base outline-none border-2 border-transparent focus:border-blue-600" value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addCategory()} />
-                <button onClick={addCategory} className="px-4 sm:px-5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg active:scale-95"><Plus size={20} strokeWidth={3} /></button>
+              <div className="flex gap-2">
+                <input type="text" aria-label="新分類名稱" placeholder="新增分類" className={ui.input} value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addCategory()} />
+                <button onClick={addCategory} aria-label="新增分類" className={`${ui.btnPrimary} px-4 shrink-0`}><Plus size={18} strokeWidth={2.6} /></button>
               </div>
-              <div className="flex flex-wrap gap-2 sm:gap-3">
+              <ul className="flex flex-wrap gap-2">
                 {categories.map(cat => (
-                  <div key={cat} className="flex items-center gap-2 sm:gap-3 px-3 py-1.5 sm:px-5 sm:py-2.5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-full shadow-sm group hover:border-blue-200 transition-all">
-                    <span className="text-xs sm:text-base font-black text-slate-700 dark:text-slate-200">{cat}</span>
-                    <button onClick={() => removeCategory(cat)} className="text-slate-300 hover:text-rose-500 transition-colors"><X size={14} /></button>
-                  </div>
+                  <li key={cat} className="flex items-center gap-1.5 pl-3.5 pr-1.5 py-1.5 rounded-full bg-surface border border-line text-sm">
+                    {cat}
+                    <button onClick={() => removeCategory(cat)} aria-label={`移除分類 ${cat}`} className="p-0.5 rounded-full text-muted hover:text-neg"><X size={14} /></button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
         </div>
-      </div>
 
-      <div className="flex items-center justify-between mt-4 sm:mt-8 pt-4 sm:pt-6 border-t border-slate-100 dark:border-slate-800">
-        {error && <div className="flex items-center gap-1.5 text-rose-500 text-[10px] font-black shrink min-w-0 mr-2"><AlertCircle size={14} className="shrink-0" /> <span className="truncate">{error}</span></div>}
-        {!error && <div className="hidden sm:block text-xs text-slate-400 font-bold uppercase tracking-widest">點擊儲存後生效</div>}
-        <div className="flex gap-2 sm:gap-3 shrink-0 ml-auto">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-xs sm:text-sm font-black text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">取消</button>
-          <button disabled={loading} onClick={handleSave} className="flex items-center gap-2 sm:gap-3 bg-blue-600 hover:bg-blue-700 text-white font-black px-5 sm:px-8 py-2 sm:py-3 rounded-xl shadow-xl shadow-blue-500/20 active:scale-95 transition-all whitespace-nowrap text-xs sm:text-sm">{loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}<span>儲存設定</span></button>
+        <div className="sticky -bottom-5 z-10 bg-surface border-t border-line px-5 pt-3 pb-[max(16px,env(safe-area-inset-bottom))] -mb-5 space-y-2">
+          {error && <div className={ui.errorBox} role="alert"><AlertCircle size={16} className="shrink-0 mt-0.5" /><span>{error}</span></div>}
+          <div className="flex gap-2.5">
+            <button onClick={onClose} className={`${ui.btnSecondary} flex-1 sm:flex-none sm:px-6 py-3`}>取消</button>
+            <button disabled={loading} onClick={handleSave} className={`${ui.btnPrimary} flex-1 py-3`}>
+              {loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}儲存設定
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
   );
 };
-
-const TabButton: React.FC<{ active: boolean; icon: React.ReactNode; label: string; onClick: () => void }> = ({ active, icon, label, onClick }) => (
-  <button onClick={onClick} className={`flex items-center gap-2 sm:gap-4 px-3 py-2.5 sm:px-5 sm:py-4 rounded-xl transition-all ${active ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-md font-black' : 'text-slate-400 hover:bg-white/50 dark:hover:bg-slate-800/30 font-bold'}`}><div className={`${active ? 'text-blue-600' : 'text-slate-300'}`}>{icon}</div><span className="text-[10px] sm:text-sm truncate">{label}</span></button>
-);
 
 export default SettingsModal;

@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
-import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import { getLocalDateString } from '../utils/date';
 
 const LiffEdit: React.FC = () => {
@@ -197,7 +197,7 @@ const LiffEdit: React.FC = () => {
   const toastPortal = toast
     ? createPortal(
         <div
-          className={`fixed top-4 left-4 right-4 px-4 py-3 rounded-xl font-bold text-sm text-white shadow-xl ${toast.isError ? 'bg-rose-500' : 'bg-emerald-500'}`}
+          className={`fixed top-[max(16px,env(safe-area-inset-top))] left-4 right-4 px-4 py-3 rounded-xl text-sm font-medium text-white shadow-xl ${toast.isError ? 'bg-neg' : 'bg-navy'}`}
           style={{ zIndex: 99999 }}
         >
           {toast.msg}
@@ -206,46 +206,21 @@ const LiffEdit: React.FC = () => {
       )
     : null;
 
-  if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-white">
-      <Loader2 className="animate-spin text-blue-500 mb-4" size={40} />
-      <div className="text-slate-400 font-bold text-xs uppercase tracking-widest">Yoshi! 正在準備資料...</div>
-    </div>
-  );
+  if (loading) return <LiffLoading message="正在準備資料…" />;
 
-  if (error) return (
-    <div className="min-h-screen p-10 flex flex-col items-center justify-center bg-white text-center">
-      <AlertTriangle className="text-rose-500 mb-4" size={60} />
-      <h2 className="text-xl font-bold text-slate-900">載入失敗</h2>
-      <p className="text-slate-500 text-sm mt-2">{error}</p>
-      <button onClick={() => window.location.reload()} className="mt-8 bg-slate-900 text-white px-8 py-3 rounded-xl font-bold">重試</button>
-    </div>
-  );
+  if (error) return <LiffError message={error} />;
 
   if (isSuccess) return (
-    <div className="min-h-screen p-10 flex flex-col items-center justify-center bg-white text-center">
-      <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-6 text-emerald-600">
-        <CheckCircle2 size={40} />
-      </div>
-      <h2 className="text-2xl font-black text-slate-900">記帳成功！</h2>
-
-      {canCloseWindow ? (
-        <button
-          onClick={closeLiffWindow}
-          className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full"
-        >
-          返回 LINE
-        </button>
-      ) : (
-        <p className="mt-6 text-sm font-bold text-slate-500 leading-relaxed">
-          已存入帳目，可直接關閉此頁面回到 LINE。
-        </p>
-      )}
-    </div>
+    <LiffSuccess
+      title="記帳成功"
+      canClose={canCloseWindow}
+      onClose={closeLiffWindow}
+      closedHint="已存入帳目，可以直接關閉這個頁面回到 LINE。"
+    />
   );
 
   return (
-    <div className="liff-shell-container min-h-screen bg-white">
+    <div className="liff-shell-container min-h-dvh bg-canvas">
       {toastPortal}
       {trip && initialData && (
         <ExpenseModal

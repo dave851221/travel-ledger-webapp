@@ -3,7 +3,7 @@ import { Zap, Plus, Loader2, Settings2 } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import { buildQuickAddDraft, parseQuickAddInput } from '../utils/quickAdd';
-import { formatAmount } from '../utils/finance';
+import { formatMoney } from '../utils/money';
 import { isSubmitEnter } from '../utils/keyboard';
 
 interface QuickAddBarProps {
@@ -69,19 +69,19 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
       if (error) throw error;
 
       setInput('');
-      showToast(`已記一筆：${draft.description} ${formatAmount(draft.amount, draft.currency, trip.precision_config)}`);
+      showToast(`已記一筆：${draft.description} ${formatMoney(draft.amount, draft.currency, trip.precision_config)}`);
       onSaved();
     } catch (err) {
-      showToast('記帳失敗: ' + (err instanceof Error ? err.message : String(err)), 'error');
+      showToast('記帳失敗：' + (err instanceof Error ? err.message : String(err)), 'error');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2 rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 focus-within:border-blue-500 transition-colors shadow-sm px-3 py-2">
-        <Zap size={16} className="text-blue-500 shrink-0" />
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 rounded-xl bg-surface border border-line focus-within:border-ink-2 focus-within:ring-4 focus-within:ring-accent/20 transition pl-3 pr-1.5 py-1.5">
+        <Zap size={16} className="text-accent shrink-0" />
         <input
           type="text"
           value={input}
@@ -89,8 +89,8 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
           onKeyDown={(e) => {
             if (isSubmitEnter(e)) { e.preventDefault(); submit(); }
           }}
-          placeholder="拉麵 3000"
-          className="flex-1 min-w-0 bg-transparent outline-none font-bold text-sm py-1.5"
+          placeholder="快速記帳：拉麵 3000"
+          className="flex-1 min-w-0 bg-transparent outline-none text-base sm:text-sm text-ink placeholder:text-muted py-1"
           aria-label="快速記帳"
         />
 
@@ -99,7 +99,8 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
             type="button"
             onClick={() => onOpenFullForm({ description: parsed.description, amount: String(parsed.amount) })}
             title="改用完整表單編輯細節"
-            className="p-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all shrink-0"
+            aria-label="改用完整表單編輯細節"
+            className="p-2 rounded-lg text-muted hover:text-ink hover:bg-sunk transition-colors shrink-0"
           >
             <Settings2 size={16} />
           </button>
@@ -109,9 +110,9 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
           type="button"
           onClick={submit}
           disabled={!parsed || saving}
-          className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-black text-xs transition-all"
+          className="shrink-0 flex items-center gap-1 px-3 py-2 rounded-lg bg-primary text-on-primary font-bold text-xs transition disabled:bg-sunk disabled:text-muted disabled:border disabled:border-line"
         >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} strokeWidth={3} />}
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} strokeWidth={2.8} />}
           記一筆
         </button>
       </div>
@@ -119,13 +120,13 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
       {/* 讓使用者在按下去之前就知道會存成什麼。
           手機寬度有限，所以只列必要資訊並讓它自然換行。 */}
       {preview && (
-        <p className="text-[10px] font-bold text-slate-400 px-2 leading-relaxed">
+        <p className="text-[11px] text-muted px-1 leading-relaxed">
           {preview.description} ·{' '}
-          {formatAmount(preview.amount, preview.currency, trip.precision_config)} {preview.currency} · {preview.category} ·{' '}
-          {Object.keys(preview.payer_data).join('、')}付
+          <span className="num">{formatMoney(preview.amount, preview.currency, trip.precision_config)}</span> · {preview.category} ·{' '}
+          {Object.keys(preview.payer_data).join('、')} 付
           {Object.keys(preview.split_data).length === trip.members.length
-            ? '・全員均分'
-            : `・${Object.keys(preview.split_data).length} 人分攤`}
+            ? ' · 全員均分'
+            : ` · ${Object.keys(preview.split_data).length} 人分攤`}
         </p>
       )}
     </div>

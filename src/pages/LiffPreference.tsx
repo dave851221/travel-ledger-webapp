@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../api/supabase';
+import { ui } from '../components/ui';
+import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import type { Trip } from '../types';
-import { Loader2, AlertTriangle, CheckCircle2, Bot, Save } from 'lucide-react';
+import { Loader2, AlertTriangle, Bot, Save } from 'lucide-react';
 
 /**
  * 在 LINE 裡編輯「這趟旅程的 AI 記帳偏好」。
@@ -115,90 +117,61 @@ const LiffPreference: React.FC = () => {
     }
   };
 
-  if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-white">
-      <Loader2 className="animate-spin text-blue-500 mb-4" size={40} />
-      <div className="text-slate-400 font-bold text-xs uppercase tracking-widest">Yoshi! 正在讀取偏好設定...</div>
-    </div>
-  );
+  if (loading) return <LiffLoading message="正在讀取偏好設定…" />;
 
-  if (error && !trip) return (
-    <div className="min-h-screen p-10 flex flex-col items-center justify-center bg-white text-center">
-      <AlertTriangle className="text-rose-500 mb-4" size={60} />
-      <h2 className="text-xl font-bold text-slate-900">載入失敗</h2>
-      <p className="text-slate-500 text-sm mt-2">{error}</p>
-      <button onClick={() => window.location.reload()} className="mt-8 bg-slate-900 text-white px-8 py-3 rounded-xl font-bold">重試</button>
-    </div>
-  );
+  if (error && !trip) return <LiffError message={error} />;
 
   if (isSuccess) return (
-    <div className="min-h-screen p-10 flex flex-col items-center justify-center bg-white text-center">
-      <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-6 text-emerald-600">
-        <CheckCircle2 size={40} />
-      </div>
-      <h2 className="text-2xl font-black text-slate-900">偏好已更新！</h2>
-      <p className="mt-3 text-sm font-bold text-slate-400">之後記帳時耀西會參考這份設定。</p>
-
-      {canCloseWindow ? (
-        <button
-          onClick={closeLiffWindow}
-          className="mt-10 bg-emerald-600 text-white px-10 py-4 rounded-2xl font-bold w-full"
-        >
-          返回 LINE
-        </button>
-      ) : (
-        <p className="mt-6 text-sm font-bold text-slate-500 leading-relaxed">
-          已儲存，可直接關閉此頁面回到 LINE。
-        </p>
-      )}
-    </div>
+    <LiffSuccess
+      title="偏好已更新"
+      detail="之後記帳時，耀西會參考這份設定。"
+      canClose={canCloseWindow}
+      onClose={closeLiffWindow}
+      closedHint="已儲存，可以直接關閉這個頁面回到 LINE。"
+    />
   );
 
   return (
-    <div className="min-h-screen bg-white px-5 py-8">
-      <div className="max-w-lg mx-auto space-y-6">
+    <div className="min-h-dvh bg-canvas text-ink px-4 pt-[max(24px,env(safe-area-inset-top))] pb-[max(24px,env(safe-area-inset-bottom))]">
+      <div className="max-w-lg mx-auto space-y-5">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-violet-100 text-violet-600 rounded-xl"><Bot size={22} /></div>
-          <div>
-            <h1 className="text-lg font-black text-slate-900 leading-none">AI 記帳偏好</h1>
-            <p className="text-[11px] text-slate-400 font-bold mt-1.5">{trip?.name}</p>
+          <span className="w-10 h-10 rounded-xl bg-navy text-accent flex items-center justify-center shrink-0"><Bot size={20} /></span>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold leading-tight">AI 記帳偏好</h1>
+            <p className="text-xs text-muted mt-0.5 truncate">{trip?.name}</p>
           </div>
         </div>
 
-        <p className="text-xs text-slate-500 font-medium leading-relaxed bg-slate-50 rounded-xl p-4">
-          耀西在解析你說的話或收據時會參考這段描述。
-          <strong className="text-slate-700">整趟旅程共用一份</strong>，網頁的旅程設定頁看到的是同一份。
-          留空即代表沒有偏好。
+        <p className="text-sm text-ink-2 leading-relaxed bg-surface border border-line rounded-xl p-4">
+          耀西解析你說的話或收據時，會參考這段描述。這份設定<strong className="text-ink">整趟旅程共用</strong>，
+          網頁上的旅程設定看到的也是同一份。留空代表沒有偏好。
         </p>
 
-        <div className="space-y-2">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">偏好內容</label>
+        <div>
+          <label htmlFor="liff-pref" className={ui.label}>偏好內容</label>
           <textarea
+            id="liff-pref"
             rows={7}
             placeholder={`例如：預設由${trip?.members?.[0] || '我'}付款，大家均分；日幣一律不換算`}
-            className="w-full px-4 py-3 rounded-xl bg-slate-50 border-2 border-transparent focus:border-violet-600 outline-none transition-all font-bold text-sm resize-none"
+            className={`${ui.input} resize-none`}
             value={preference}
             onChange={e => setPreference(e.target.value)}
           />
-          <p className="text-[10px] text-slate-400 px-1 leading-relaxed">
-            不要寫「我是○○」—— 群組裡每個人看到的都是同一句，耀西已經會用 LINE 顯示名稱判斷「我」是誰。
+          <p className={`${ui.hint} mt-1.5`}>
+            不要寫「我是○○」：群組裡每個人看到的都是同一句，耀西會用 LINE 顯示名稱判斷「我」是誰。
           </p>
         </div>
 
         {error && (
-          <div className="flex items-start gap-2 text-rose-600 text-xs font-bold bg-rose-50 rounded-xl p-3">
+          <div className={ui.errorBox} role="alert">
             <AlertTriangle size={16} className="shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full flex items-center justify-center gap-2 bg-violet-600 disabled:bg-slate-300 text-white py-4 rounded-2xl font-black transition-all active:scale-95"
-        >
+        <button onClick={handleSave} disabled={saving} className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}>
           {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-          <span>{saving ? '儲存中...' : '儲存偏好'}</span>
+          {saving ? '儲存中…' : '儲存偏好'}
         </button>
       </div>
     </div>
