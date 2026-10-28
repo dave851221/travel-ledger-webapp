@@ -6,6 +6,7 @@ import { formatMoney } from '../utils/money';
 import { CategoryTile } from '../features/dashboard/ExpenseRow';
 import MemberAvatar from '../features/dashboard/MemberAvatar';
 import { ui } from './ui';
+import { useSheetDrag } from './useSheetDrag';
 import Decimal from 'decimal.js';
 
 interface Props {
@@ -18,10 +19,12 @@ interface Props {
   onDelete?: (exp: Expense) => void;
 }
 
-/** 支出明細。手機上點一筆支出就開這個面板，編輯與刪除放在底部。 */
+/** 支出明細。手機上點一筆支出就開這個面板，編輯與刪除放在底部，往下拉可以收起。 */
 const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null, onClose, onEdit, onDelete }) => {
   const [photoIdx, setPhotoIdx] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // 明細只能看不能改，從內容區捲到頂端再往下拉也可以收起
+  const { sheetRef, handleRef, scrollRef } = useSheetDrag(onClose);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -103,14 +106,16 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null
 
       <div className="fixed inset-0 z-[70] bg-scrim flex items-end sm:items-center justify-center sm:p-4 anim-fade" onClick={onClose}>
         <div
+          ref={sheetRef}
           role="dialog"
           aria-modal="true"
           aria-label={expense.description}
           className="bg-surface text-ink w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] flex flex-col anim-sheet"
           onClick={e => e.stopPropagation()}
         >
-          <div className="sm:hidden pt-2.5 flex justify-center shrink-0" aria-hidden><span className="w-9 h-1 rounded-full bg-line" /></div>
-          <div className="flex items-start gap-3 px-5 pt-3 sm:pt-5 pb-4 shrink-0">
+          <div ref={handleRef} className="shrink-0">
+          <div className="sm:hidden pt-2.5 flex justify-center" aria-hidden><span className="w-9 h-1 rounded-full bg-line" /></div>
+          <div className="flex items-start gap-3 px-5 pt-3 sm:pt-5 pb-4">
             <CategoryTile category={expense.category} categories={trip.categories} size={40} />
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-bold leading-snug text-balance">{expense.description}</h2>
@@ -120,8 +125,9 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null
               <X size={20} />
             </button>
           </div>
+          </div>
 
-          <div className="overflow-y-auto overscroll-contain flex-1 px-5 pb-5 space-y-5">
+          <div ref={scrollRef} className="overflow-y-auto overscroll-contain flex-1 px-5 pb-5 space-y-5">
             <div className="rounded-xl bg-sunk border border-line px-4 py-3 flex items-baseline justify-between gap-3">
               <span className="text-xs text-muted">{expense.is_settlement ? '結清金額' : '總金額'}</span>
               <span className={`num text-2xl font-extrabold ${expense.is_settlement ? 'text-pos' : 'text-ink'}`}>{money(expense.amount)}</span>

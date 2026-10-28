@@ -118,6 +118,36 @@ body {
   width: 100%;
 }
 
+/*
+ * Touch screens: no long-press text selection. On iPhone Safari a long press on a row
+ * or button otherwise starts selecting text and shows the magnifier and the copy callout,
+ * which feels broken in an app. Form fields keep normal selection so typing and
+ * moving the caret still work.
+ */
+@media (hover: none) and (pointer: coarse) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input,
+  textarea,
+  [contenteditable='true'] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+}
+
+/* Taps on controls fire immediately, without waiting to see if it's a double-tap zoom */
+button,
+a,
+label,
+select,
+[role='button'] {
+  touch-action: manipulation;
+}
+
 /* Figures: Manrope with tabular digits so amounts line up in columns */
 .num {
   font-family: var(--font-num);

@@ -80,6 +80,9 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   **版面**：手機是頂列 + 浮起的底部導覽（分頁膠囊 + 右側 ＋ 新增，`其他旅程`與`垃圾桶`在 ⋯ 選單）；
   `md` 以上換成左側欄；`lg` 以上帳目改成表格欄位；`xl` 以上帳目頁多一欄右側面板（淨額、成員餘額、建議結清）。
   手機上點一筆支出開 `ExpenseDetailModal`，編輯與刪除在它底部；電腦上滑鼠移過那一列才出現。
+  手機的底部面板都能往下拉收起（`components/useSheetDrag.ts`）：明細從內容區捲到頂再拉也行，
+  `Modal`（多半是表單）只認把手與標題列，避免半填好的表單被拉掉。
+  觸控裝置上整頁關掉長按選字（`index.css`，iPhone 會跳放大鏡與拷貝選單），輸入框例外。
 - **`ExpenseModal.tsx`**：支出新增與編輯。付款人/分攤的鎖定機制、多幣別、
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
   ⚠️ 表單只在「開啟的那一刻」或 `editData` 換了才灌初始值（`initializedFor` ref）——
