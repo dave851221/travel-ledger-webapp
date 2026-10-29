@@ -19,7 +19,7 @@ import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { extractJSON } from "../guards.ts"
 import { prepareExpense } from "../../_shared/tools/expenses.ts"
 import { aiUnavailableMessage, FALLBACK_NOTICES, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
-import { type EventContext, tripToday } from "../context.ts"
+import { type EventContext, extendFollowup, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { storePendingExpense } from "../drafts.ts"
 import { ai, OCR_RESPONSE_SCHEMA } from "../ai.ts"
@@ -299,6 +299,8 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         heroUrl: publicUrl,
         nonce, webUrl, liffUrl, needsAmount, unidentified,
       })], sourceId)
+      // 傳完照片接著打「這是抹茶冰淇淋 600」來補充，群組的提及模式下也不必再 @
+      extendFollowup(ctx)
     }
   } catch (e) {
     console.error('[OCR_ERROR]', e)

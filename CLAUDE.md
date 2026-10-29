@@ -326,7 +326,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    提及模式下另有兩種不必 @ 的情況（`TextRoute.trigger`）：
    - `quote`：對機器人的訊息按 LINE 的「回覆」。`line-api.ts` 把群組裡送出的訊息 id 記在 `line_bot_messages`，
      對得上 `quotedMessageId` 就算（7 天後由 pg_cron 清掉）。
-   - `followup`：機器人剛回覆過的**同一個人**，3 分鐘內的下一句（`line_user_states.followup_*`，每次回覆往後延）。
+   - `followup`：機器人剛回覆過的**同一個人**，3 分鐘內的下一句（`line_user_states.followup_*`，每次回覆往後延，照片卡片也算）。
      可能只是在跟別人聊天，所以多給一支 `stay_silent`、不給上網搜尋、出錯也不回；
      AI 決定不回時那句話不寫進對話歷史。
    群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者，
