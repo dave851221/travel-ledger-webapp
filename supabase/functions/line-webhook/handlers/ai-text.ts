@@ -146,7 +146,7 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
   // 一對一顯示「輸入中…」。不等它 —— 那只是一個動畫，不該拖慢回覆
   runInBackground(showLoading(sourceId))
 
-  const [{ data: trip }, { data: expenses }, { data: history }, itinerary] = await Promise.all([
+  const [{ data: trip }, { data: expenses }, { data: history }, itinerary, outstandingDrafts] = await Promise.all([
     supabase.from('trips').select('*').eq('id', tripId).single(),
     supabase.from('expenses')
       // id 是給 ref 用的（uuid 前 8 碼），模型要靠它指名「哪一筆」
@@ -165,6 +165,8 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
     supabase.from('line_chat_history').select('role, content, speaker_name').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: false }).limit(CHAT_HISTORY_TURNS),
     // 沒有行程頁的旅程是 null（見 itinerary.ts，有快取）
     loadItinerary(tripId),
+    // 記憶化的，路由層查過就直接回（見 context.ts）
+    loadDrafts(),
   ])
   // 旅程可能已被後台刪除（見 docs/DB_MAINTENANCE.md）。
   // 以前這裡直接讀 trip.name，整個 event 丟出例外 → 500 → LINE 會重送同一則訊息（M5）。
@@ -218,7 +220,6 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
   // 還等在聊天室裡、使用者既沒確認也沒取消的草稿。
   // 一定要把 nonce 一起給 AI：使用者說「剛剛那筆改 500」時，
   // 只有 AI 講得出「我在修哪一張」，路由層才知道該讓哪一張卡片失效（H1）。
-  const outstandingDrafts = await loadDrafts()
   const draftSummary = outstandingDrafts.map((d) => {
     const e = d.exp ?? {}
     const payers = Object.keys(e.p ?? {}).join('、') || '未指定'

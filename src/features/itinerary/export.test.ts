@@ -4,7 +4,7 @@ import { exportItineraries, ITINERARY_JSON_VERSION, toItineraryJson } from './ex
 import { defineItinerary } from './plan';
 import { ITINERARIES, isPlan } from './registry';
 // Bot 那邊讀同一份 JSON（supabase/functions/_shared/tools/itinerary.ts）
-import { formatDay, formatOverview, searchItinerary } from '../../../supabase/functions/_shared/tools/itinerary';
+import { formatDay, formatOverview, MAX_URL_CHARS, searchItinerary } from '../../../supabase/functions/_shared/tools/itinerary';
 import type { ItineraryDoc } from '../../../supabase/functions/_shared/tools/types';
 
 describe('toItineraryJson', () => {
@@ -45,8 +45,8 @@ describe('Bot 讀得懂輸出的 JSON', () => {
     for (const day of doc.days) {
       const text = formatDay(doc, day.date);
       expect(text).toContain(day.date);
-      // 網址是最佔 token 的部分，給模型的文字裡只留沒寫地址的住宿那一條地圖搜尋
-      expect(text!.replace(/https:\/\/www\.google\.com\/maps\/search\/\S+/g, '')).not.toMatch(/https?:\/\//);
+      // 網址照樣給（模型回答時要附上），但超過上限的一律拿掉，免得燒 token
+      for (const url of text!.match(/https?:\/\/\S+/g) ?? []) expect(url.length).toBeLessThanOrEqual(MAX_URL_CHARS);
     }
     expect(searchItinerary(doc, doc.days[0].title.split(/[\s，・]/)[0]).length).toBeGreaterThan(0);
   });

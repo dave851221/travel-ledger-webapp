@@ -5,6 +5,8 @@ import {
   formatOverview,
   getItineraryDay,
   itineraryTodayLine,
+  linkedText,
+  MAX_URL_CHARS,
   noteLines,
   plainText,
   searchItinerary,
@@ -44,25 +46,44 @@ describe('行程的文字格式', () => {
     expect(noteLines([{ text: '必看', tone: 'warn', items: ['子項'] }])).toEqual(['· ⚠️ 必看', '  · 子項']);
   });
 
-  it('某一天：時間、類型、預約、未定、當晚住宿都在，網址不在', () => {
+  it('某一天：時間、類型、預約、未定、當晚住宿都在，行程附的網址跟著名稱', () => {
     const text = formatDay(PLAN, '2026-04-05')!;
     expect(text).toContain('第 2/2 天｜犬山｜犬山祭');
-    expect(text).toContain('09:00 [景點] 犬山城 〔已付清〕');
+    expect(text).toContain('09:00 [景點] 犬山城 https://maps.app.goo.gl/x 〔已付清〕');
     expect(text).toContain('午餐 [餐飲] 五平餅 地點：本町通 （未定）');
     expect(text).toContain('今晚住宿：下呂溫泉水明館');
     expect(text).toContain('⚠️ 最晚 19:00 入住');
-    // 行程資料裡的網址一律拿掉；沒寫地址的住宿另外給一個地圖搜尋連結
-    expect(text).not.toContain('example.com');
-    expect(text).not.toContain('maps.app.goo.gl');
+    // 住宿沒有附地圖、也沒寫地址：用名稱組一個地圖搜尋連結
     expect(text).toContain('地圖：https://www.google.com/maps/search/?api=1&query=');
     expect(formatDay(PLAN, '2026-05-01')).toBeNull();
+  });
+
+  it('地點、車票的網址都附上；太長的網址只留名稱', () => {
+    const long = `https://www.google.com/maps/place/${'x'.repeat(MAX_URL_CHARS)}`;
+    expect(linkedText(`[清水寺](https://maps.app.goo.gl/a)與[金閣寺](${long})`)).toBe('清水寺 https://maps.app.goo.gl/a與金閣寺');
+    const plan: ItineraryDoc = {
+      ...PLAN,
+      stays: [{ id: 's', name: '飯店', checkIn: '2026-04-05', checkOut: '2026-04-06', href: 'https://maps.app.goo.gl/h' }],
+      days: [{
+        date: '2026-04-05', title: 'd', stay: 's',
+        items: [{
+          time: '16:02', kind: 'train', title: '小火車',
+          places: [{ name: 'トロッコ嵯峨', href: 'https://maps.app.goo.gl/s' }, { name: '嵐山', query: '嵐山' }],
+          booking: { status: 'paid', href: 'https://linkt.to/t' },
+        }],
+      }],
+    };
+    const text = formatDay(plan, '2026-04-05')!;
+    expect(text).toContain('地點：トロッコ嵯峨 https://maps.app.goo.gl/s、嵐山');
+    expect(text).toContain('〔已付清 https://linkt.to/t〕');
+    expect(text).toContain('地圖：https://maps.app.goo.gl/h');
   });
 
   it('總覽：每天一行，加上航班、住宿與待預訂提醒', () => {
     const text = formatOverview(PLAN);
     expect(text).toContain('D2 2026-04-05（日） 犬山：犬山祭（住 下呂溫泉水明館）');
     expect(text).toContain('CI150');
-    expect(text).toContain('白川鄉 停車場〔待預訂〕');
+    expect(text).toContain('白川鄉 https://example.com 停車場〔待預訂〕');
     expect(text).toContain('還有 1 項待預訂或未確認');
   });
 });

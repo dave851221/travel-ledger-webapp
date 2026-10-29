@@ -127,9 +127,16 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
     (event.type === 'message'
       && (event.message?.type === 'text' || event.message?.type === 'image' || event.message?.type === 'audio'))
     || event.type === 'postback';
+  // 名字與綁定狀態互不相依，一起查。冷啟動的 isolate 每個連線都要重新握手，
+  // 依序查的話第一則訊息光這兩步就要一秒多。
+  const chatId = event.source.groupId || event.source.roomId || speakerUserId
+  const [fetchedName, stateResult] = await Promise.all([
+    needsMemberName && speakerUserId && chatId
+      ? getChatMemberName(sourceType, chatId, speakerUserId)
+      : Promise.resolve(''),
+    supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle(),
+  ])
   if (needsMemberName && speakerUserId) {
-    const chatId = event.source.groupId || event.source.roomId || speakerUserId
-    const fetchedName = await getChatMemberName(sourceType, chatId, speakerUserId);
     // 群組抓不到名字時至少給個可區分的代號；一對一就維持「未知」，
     // 那只是拿來餵 prompt，寫個假名字反而會誤導 AI 去對應成員。
     memberName = fetchedName || (isGroup ? `User_${speakerUserId.substring(0, 8)}` : '未知');
@@ -138,7 +145,7 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
   // 但 memberName 兩邊都要有：AI 靠它把「我付的」對應到成員（見 H9）。
   const speakerLabel = isGroup ? memberName : null
 
-  let { data: userState } = await supabase.from('line_user_states').select('*').eq('line_user_id', sourceId).maybeSingle()
+  let userState = stateResult.data
   if (!userState) {
     console.log(`[DB] Registering new state for sourceId: ${sourceId}`)
     const { data: newState } = await supabase.from('line_user_states').insert({ line_user_id: sourceId }).select().single()

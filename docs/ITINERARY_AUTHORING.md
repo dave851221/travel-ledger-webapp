@@ -129,6 +129,7 @@ export const ITINERARIES: Record<string, ItineraryEntry> = {
 | `extra` | 客製區塊，畫在備註下面 |
 
 **地點的寫法**：`href` 是現成的地圖連結（例如 `maps.app.goo.gl` 短網址）；沒有的話填 `query` 讓頁面去搜尋 Google 地圖。
+地圖連結**一律用 `maps.app.goo.gl` 短網址**：LINE Bot 回答地點時會附上行程裡的網址，但超過 160 字的（`google.com/maps/place/…` 長網址）會被省略。
 地點的 `name` 若出現在 `title` 裡，標題裡那幾個字會自動變成連結，不會在下面重複列一次。
 
 **住宿不要放進時間軸**：入住時間、Mapcode、停車費這些寫在 `stays[].notes`，每天的「今晚住宿」卡片會帶出來。

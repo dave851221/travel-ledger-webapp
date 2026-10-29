@@ -5,8 +5,9 @@
 //   get_itinerary_overview  一天一行的總覽 + 航班、住宿、還沒訂的東西
 //   get_itinerary_day       某一天的完整內容（含當晚住宿的備註）
 //   search_itinerary        關鍵字找出相關的那幾段（「水明館停車」）
-// 輸出一律是精簡的純文字：連結只留名稱，網址省掉 —— 那是最佔 token 的部分，
-// 而使用者真的要地圖時網頁的行程頁一點就開。唯一的例外是沒寫地址的住宿（stayMapLine）。
+// 輸出是精簡的純文字。行程裡附的網址（地圖、車票、訂位）照樣給模型，
+// 它回答地點時才能把連結一起附上；但超過 MAX_URL_CHARS 的網址只留名稱 ——
+// 舊資料裡的 google.com/maps/place/… 動輒三百字，那只會燒 token。
 //
 // 行程從哪裡來由呼叫端決定（ctx.loadItinerary），這裡只負責格式化。
 // ============================================================
@@ -34,17 +35,33 @@ const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 /** 搜尋最多回這麼多段，再多模型也讀不完 */
 const MAX_SEARCH_HITS = 12
 
+/** 比這個長的網址不給模型，只留名稱（maps.app.goo.gl 短網址約 45 字） */
+export const MAX_URL_CHARS = 160
+
+const usableUrl = (url: string | undefined): string | null =>
+  url && /^https?:\/\//.test(url) && url.length <= MAX_URL_CHARS ? url : null
+
 /** `[名稱](網址)` → 名稱、`**粗體**` → 粗體 */
 export function plainText(rich: string): string {
   return rich.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\*\*(.+?)\*\*/g, '$1')
 }
 
+/** `[名稱](網址)` → `名稱 網址`（網址太長就只留名稱）、`**粗體**` → 粗體 */
+export function linkedText(rich: string): string {
+  return rich
+    .replace(/\[([^\]]+)\]\(([^)]*)\)/g, (_m, label: string, url: string) => {
+      const usable = usableUrl(url)
+      return usable ? `${label} ${usable}` : label
+    })
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+}
+
 /** 備註攤平成一行一條。warn 是行程頁上的紅字（必看），這裡加個 ⚠️ */
 export function noteLines(notes: ItineraryNote[] | undefined, indent = ''): string[] {
   return (notes ?? []).flatMap((note) => {
-    if (typeof note === 'string') return [`${indent}· ${plainText(note)}`]
+    if (typeof note === 'string') return [`${indent}· ${linkedText(note)}`]
     const mark = note.tone === 'warn' ? '⚠️ ' : ''
-    return [`${indent}· ${mark}${plainText(note.text)}`, ...noteLines(note.items, `${indent}  `)]
+    return [`${indent}· ${mark}${linkedText(note.text)}`, ...noteLines(note.items, `${indent}  `)]
   })
 }
 
@@ -58,12 +75,20 @@ const dayNumber = (plan: ItineraryDoc, date: string) => plan.days.findIndex((d) 
 function itemLine(item: ItineraryItemDoc): string[] {
   const when = item.time ?? item.slot ?? ''
   const kind = KIND_LABELS[item.kind] ?? item.kind
-  const title = plainText(item.title)
-  // 名稱已經出現在標題裡的地點就不重複列
-  const places = (item.places ?? []).map((p) => p.name).filter((n) => !title.includes(n))
+  const plain = plainText(item.title)
+  const title = linkedText(item.title)
+  // 名稱已經出現在標題裡的地點不再列名字，但有網址還是要附上（模型回答時才拿得到連結）
+  const places = (item.places ?? []).flatMap((p) => {
+    const url = usableUrl(p.href)
+    if (plain.includes(p.name)) return url && !title.includes(url) ? [`${p.name} ${url}`] : []
+    return [url ? `${p.name} ${url}` : p.name]
+  })
+  // 備註裡已經有同一個網址（「車票連結」）就不重複
+  const bookingUrl = usableUrl(item.booking?.href)
+  const bookingLink = bookingUrl && !JSON.stringify(item.notes ?? []).includes(bookingUrl) ? ` ${bookingUrl}` : ''
   const extras = [
     places.length > 0 ? `地點：${places.join('、')}` : '',
-    item.booking ? `〔${item.booking.label ? `${plainText(item.booking.label)} ` : ''}${BOOKING_LABELS[item.booking.status] ?? item.booking.status}〕` : '',
+    item.booking ? `〔${item.booking.label ? `${plainText(item.booking.label)} ` : ''}${BOOKING_LABELS[item.booking.status] ?? item.booking.status}${bookingLink}〕` : '',
     item.undecided ? '（未定）' : '',
     item.tag ? `#${item.tag}` : '',
   ].filter(Boolean).join(' ')
@@ -74,14 +99,16 @@ function stayLines(plan: ItineraryDoc, stayId: string | undefined): string[] {
   const stay = stayId ? plan.stays?.find((s) => s.id === stayId) : undefined
   if (!stay) return []
   const head = `今晚住宿：${stay.name}${stay.city ? `（${stay.city}）` : ''}｜${stay.checkIn} 入住 → ${stay.checkOut} 退房`
-  return [head, ...(stay.address ? [`  · 地址：${stay.address}`] : stayMapLine(stay)), ...noteLines(stay.notes, '  ')]
+  return [head, ...(stay.address ? [`  · 地址：${stay.address}`] : []), ...stayMapLine(stay), ...noteLines(stay.notes, '  ')]
 }
 
 /**
- * 沒寫地址的住宿給一個 Google 地圖搜尋連結 ——「地址給我」時至少有東西可以點。
- * 這是唯一留下來的網址：行程資料裡原本的地圖連結動輒三百字，用名稱組一個短的。
+ * 住宿的地圖連結：行程有附（而且不是落落長的那種）就用它；
+ * 都沒有、也沒寫地址時用名稱組一個 Google 地圖搜尋 ——「地址給我」時至少有東西可以點。
  */
-export function stayMapLine(stay: { name: string; address?: string }): string[] {
+export function stayMapLine(stay: { name: string; address?: string; href?: string }): string[] {
+  const url = usableUrl(stay.href)
+  if (url) return [`  · 地圖：${url}`]
   if (stay.address) return []
   return [`  · 地圖：https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stay.name)}`]
 }
@@ -119,7 +146,7 @@ export function formatOverview(plan: ItineraryDoc): string {
       ? ['住宿：', ...plan.stays.map((s) => `- ${s.checkIn}～${s.checkOut} ${s.name}${s.city ? `（${s.city}）` : ''}`)]
       : []),
     ...(plan.bookings?.length
-      ? ['預訂：', ...plan.bookings.map((b) => `- ${b.date}${b.time ? ` ${b.time}` : ''} ${plainText(b.item)}〔${BOOKING_LABELS[b.status] ?? b.status}〕`)]
+      ? ['預訂：', ...plan.bookings.map((b) => `- ${b.date}${b.time ? ` ${b.time}` : ''} ${linkedText(b.item)}〔${BOOKING_LABELS[b.status] ?? b.status}〕`)]
       : []),
     ...(pending.length ? [`⚠️ 還有 ${pending.length} 項待預訂或未確認`] : []),
     ...(plan.notes?.length ? ['其他備註：', ...noteLines(plan.notes, '  ')] : []),
@@ -137,14 +164,15 @@ function searchableSections(plan: ItineraryDoc): string[] {
     ]),
     ...(plan.stays ?? []).map((s) => [
       `住宿 ${s.name}${s.nameEn ? ` ${s.nameEn}` : ''}${s.city ? `（${s.city}）` : ''}｜${s.checkIn} 入住 → ${s.checkOut} 退房`,
-      ...(s.address ? [`· 地址：${s.address}`] : stayMapLine(s).map((l) => l.trim())),
+      ...(s.address ? [`· 地址：${s.address}`] : []),
+      ...stayMapLine(s).map((l) => l.trim()),
       ...noteLines(s.notes),
     ].join('\n')),
     ...(plan.flights ?? []).map((f) => [
       `航班 ${f.label} ${f.date} ${f.number ?? ''} ${f.from ?? ''}${f.depart ? ` ${f.depart} 出發` : ''}${f.to ? ` → ${f.to}` : ''}${f.arrive ? ` ${f.arrive} 抵達` : ''}`.replace(/\s+/g, ' '),
       ...noteLines(f.notes),
     ].join('\n')),
-    ...(plan.bookings ?? []).map((b) => `預訂 ${b.date}${b.time ? ` ${b.time}` : ''}${b.category ? ` ${b.category}` : ''} ${plainText(b.item)}〔${BOOKING_LABELS[b.status] ?? b.status}〕`),
+    ...(plan.bookings ?? []).map((b) => `預訂 ${b.date}${b.time ? ` ${b.time}` : ''}${b.category ? ` ${b.category}` : ''} ${linkedText(b.item)}〔${BOOKING_LABELS[b.status] ?? b.status}〕`),
     ...(plan.checklist?.items.length ? [`行前準備清單\n${plan.checklist.items.map((i) => `· ${plainText(i)}`).join('\n')}`] : []),
     ...(plan.notes?.length ? [`其他備註\n${noteLines(plan.notes).join('\n')}`] : []),
   ]
