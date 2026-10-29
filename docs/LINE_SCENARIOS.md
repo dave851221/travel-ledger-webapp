@@ -332,6 +332,35 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | L13 | 群組裡的 `說明`／`功能` | 提及模式打 `功能` | 需 @ 才回 | ✅ 不在 `isManagement` | P3 |
 | L14 | @提及其他人 | `@耀西 @小明 你付的晚餐 300` | 只拿掉提及機器人的那一段，`@小明` 要留著 | ✅ M16 已修：改用 `stripSelfMentions()` 依 `mentionees[].index/length` 只切 `isSelf` 的那幾段 | `stripSelfMentions` |
 | L15 | 對話歷史在群組是共用的 | A 與 B 交錯講話 | AI 看到的是同一串歷史，附發言者 | ✅ M17 已修：歷史查詢一併撈 `speaker_name`，`summarizeHistoryEntry()` 把 user 訊息壓成「發言者：內容」 | `summarizeHistoryEntry` |
+| L16 | 引用回覆機器人 | 對耀西的回答按「回覆」打 `那後天呢` | 不必 @ 就處理，等同提及 | ✅ 2026-10-29：群組裡送出的訊息 id 記在 `line_bot_messages`，`quotedMessageId` 對得上就是 `trigger: 'quote'` | `isQuotingBot` |
+| L17 | 接話 | A `@耀西 明天去哪` → 耀西回 → A `那住哪` | 3 分鐘內同一個人的下一句不必 @ | ✅ 2026-10-29：`trigger: 'followup'`，每次回覆把 `followup_until` 往後延 | `isInFollowupWindow`、`extendFollowup` |
+| L18 | 接話其實是在跟別人聊 | A 問完耀西後接著對 B 說 `你要吃什麼` | 不回，也不寫進對話歷史 | ✅ AI 呼叫 `stay_silent`（只有接話才給這支）；接話不上網、出錯也不回 | `handleAiText` |
+| L19 | 別人插話 | A 問完耀西，B 沒 @ 接著講 | B 的話照舊忽略；A 的接話時間不受影響 | ✅ 接話只認 `followup_user_id` 那個人 | `isInFollowupWindow` |
+| L20 | 接話時打快捷指令 | A 查完 `今日支出` 後打 `本週支出` | 快捷指令本來就免觸發；查完也會延長接話時間 | ✅ `handleCommands` 認領後 `extendFollowup` | `index.ts` |
+
+### 7.1 行程、天氣與上網查詢（2026-10-29）
+
+AI 讀得到這趟旅程的行程頁（網頁 build 時輸出的 JSON）。context 只放一行「今天第幾天、在哪、住哪」，
+其餘由模型用工具查需要的那一段。
+
+| # | 情境 | 範例輸入 | 預期行為 | 現況 | 進入點 |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| Q1 | 問明天的行程 | `明天幾點出門？` | 換算成日期 → `get_itinerary_day` → 挑重點回答，不貼整天 | ✅ | `get_itinerary_day` |
+| Q2 | 問住宿細節 | `水明館停車要錢嗎` | `search_itinerary` 找到住宿備註 | ✅ | `search_itinerary` |
+| Q3 | 今晚住哪、幾點前入住 | `今晚住哪` | context 那一行就有住宿名稱；入住須知查當天 | ✅ | `itineraryTodayLine` |
+| Q4 | 還有什麼沒訂 | `還有什麼沒訂？` | 總覽列出待預訂／未確認 | ✅ | `get_itinerary_overview` |
+| Q5 | 航班 | `回程幾點的飛機` | 總覽或搜尋「回程」 | ✅ | `search_itinerary` |
+| Q6 | 接著問 | `那後天呢？` | 靠對話歷史知道在問行程 | ✅ | 歷史 8 輪 |
+| Q7 | 天氣 | `明天高山會下雨嗎` | `get_weather`（免費），早／午／晚降雨機率；不上網搜 | ✅ | `get_weather` |
+| Q8 | 16 天以後的天氣 | `下個月的天氣` | 照實說預報只到 16 天 | ✅ 工具回錯誤 | `get_weather` |
+| Q9 | 營業時間、票價 | `白川鄉現在幾點關門` | 行程沒寫 → `web_search`（只有 Claude），附來源 | ✅ 一則最多 2 次 | `webSearch` |
+| Q10 | 附近推薦 | `金澤車站附近推薦晚餐` | 上網搜尋，帶今天的城市與時區當位置 | ✅ | `searchLocation` |
+| Q11 | 混合 | `明天哪些要現場付錢` | 先查行程，必要時再搜尋 | ✅ | — |
+| Q12 | 沒有行程頁的旅程 | 任何行程問題 | 照實說這趟沒有行程表 | ✅ | `NO_ITINERARY` |
+| Q13 | 行程頁客製區塊的內容 | 問 RailStops 裡的時刻 | 看不到（`extra` 不輸出）—— 重點要寫在 notes | 🟡 已知限制 | `export.ts` |
+| Q14 | 用聊天改行程 | `把明天晚餐改成燒肉` | 不支援：行程是程式碼檔 | ⬜ 不做 | — |
+| Q15 | 主動提醒 | 「30 分鐘後要 check-in」 | 不支援：要用推播，免費方案每月只有 200 則 | ⬜ 不做 | — |
+| Q16 | Gemini 備援時問即時資訊 | Claude 額度用完後問營業時間 | Gemini 沒有搜尋，照實說查不到即時資訊 | ✅ prompt 寫「如果有 web_search」 | — |
 
 ---
 
@@ -340,8 +369,8 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | # | 情境 | 範例輸入 | 預期行為 | 現況 | 進入點 |
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | N1 | Gemini 全部 429 | 免費額度用盡 | 回「達到免費使用量上限」 | ✅ | `RATE_LIMIT_MSG`。只要有一個模型是逾時或 5xx 就改回 `AI_BUSY_MSG`「過幾分鐘再試」（2026-10-29 伺服器過載時曾被誤報成額度用完） |
-| N2 | Gemini 5xx／連線失敗／404／400 | — | 換下一個模型 | ✅ | `askGemini` |
-| N3 | Gemini 回空內容 | 安全機制擋下 | 換模型 | ✅ | `askGemini` |
+| N2 | Gemini 5xx／連線失敗／404／400 | — | 換下一個模型 | ✅ | `createGeminiProvider().generate` |
+| N3 | Gemini 回空內容 | 安全機制擋下 | 換模型 | ✅ | `createGeminiProvider().generate` |
 | N4 | AI 回的 JSON 壞掉 | — | 回「AI 處理時發生錯誤」 | ✅ | P8 catch |
 | N5 | reply token 過期 | 處理超過 1 分鐘 | 改 push | ✅ Feature G：改為 push **原本那組 messages**，卡片不會再丟失（以前 push 的是一段英文錯誤文字）。會計入推播額度，但免費方案下這是罕見路徑 | `replyMessage` |
 | N6 | 貼圖、位置、檔案、影片 | — | 跳過不回 | ✅ | P2.5 之後 `[SKIP]` |
@@ -354,13 +383,20 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | N11 | 使用者封鎖機器人後 | push 失敗 | 只記 log | ✅ | `pushMessage` |
 | N12 | 對話歷史保留 | — | `line_chat_history` 14 天、`line_processed_actions` 7 天由 pg_cron 清 | ✅ | migration `cron_purge` |
 | N13 | 歷史被清掉後按舊卡 | 8 天前的卡片 | 回「找不到待確認的支出資料」 | ✅ | P1 `getPendingExpense` |
+| N14 | `AI_PROVIDER=claude` 時 Claude 逾時／429／5xx | — | 429／5xx 先補打一次，仍失敗就整個交給 Gemini 免費版，回覆最前面多一句「Claude 暫時連不上，這次改用免費版 Gemini」 | ✅ | `_shared/ai/fallback.ts`、`FALLBACK_NOTICES` |
+| N15 | Claude 的每月花費上限或儲值用完 | Console 設的 Workspace 上限 | 一樣交給 Gemini，回覆開頭說「Claude 本月額度已用完」；之後 10 分鐘內直接用 Gemini 不再先試。Gemini 也失敗時回 Gemini 的訊息，沒有備援時回「AI 本月的使用額度已經用完」（`AI_QUOTA:`） | ✅ | `classifyClaudeError`、`QUOTA_COOLDOWN_MS` |
+| N16 | `AI_PROVIDER=claude` 時傳語音 | — | 不經過 Claude（沒有音訊輸入），直接由 Gemini 轉錄 | ✅ | `supports('audio')` |
+| N17 | 設了 `AI_PROVIDER=claude` 卻沒有 `ANTHROPIC_API_KEY` | 部署疏失 | 退回 Gemini，log 留 `[AI] AI_PROVIDER=claude but ANTHROPIC_API_KEY is not set` | ✅ | `line-webhook/ai.ts` |
+| N18 | Console 沒開放 web search | 組織設定 | 第一次搜尋被 400 拒絕 → 關掉搜尋重打同一輪，照常回答；log 留 `Web search rejected` | ✅ | `claude.ts` 限制 7 |
+| N19 | 行程 JSON 讀不到 | GitHub Pages 掛了、網頁還沒部署 | 當作沒有行程表回答；404 快取 10 分鐘，其他錯誤下一則訊息再試 | ✅ | `line-webhook/itinerary.ts` |
+| N20 | 一對一等 AI 回覆 | — | 顯示「輸入中…」動畫，回覆送出後自己消失（群組不支援） | ✅ | `showLoading` |
 
 ---
 
 ## 9. 目前的硬性限制（改邏輯時不要忘記）
 
 - **AI 可以「提議」修改或刪除已存檔的紀錄，但不能自己動手**（Feature G）：
-  它只拿得到唯讀工具（`list_expenses` / `get_balance` / `get_settlement_plan`）與 `propose_*`，
+  它只拿得到唯讀工具（帳務、行程、天氣，Claude 另有 `web_search`）與 `propose_*`，
   真正的 UPDATE／軟刪除發生在使用者按下卡片按鈕之後（`act: 'upd'` / `act: 'del'`）。
   工具層的 `create_expense` / `update_expense` / `delete_expense` **刻意不公開給模型**。
   `claimsCompletedAction` 仍在把關「已經幫你刪掉了」這種話。
@@ -753,8 +789,8 @@ T3 → T1 → T4 → T2。前三個只動 Edge Function，可以一起部署驗�
 ## 14. Feature G：文字路徑改用 Gemini function calling
 
 > **狀態（2026-09-05）**：✅ 已實作並部署上線，已通過真機回歸（見本章末的驗證紀錄）。
-> 迴圈在 [`_shared/gemini.ts`](../supabase/functions/_shared/gemini.ts)（由 `gemini.test.ts` 看守），
-> 函式清單在 `line-webhook/gemini.ts`，分派在 `handlers/ai-text.ts`。
+> 迴圈在 [`_shared/ai/`](../supabase/functions/_shared/ai/)（Gemini／Claude 各一支，由 `gemini.test.ts`／`claude.test.ts` 看守），
+> 函式清單在 `line-webhook/ai.ts`，分派在 `handlers/ai-text.ts`。
 > **OCR 路徑（`handlers/image.ts`）維持 JSON mode 不動。**
 
 ### 動機
@@ -772,7 +808,7 @@ T3 → T1 → T4 → T2。前三個只動 Edge Function，可以一起部署驗�
 
 ### 設計
 
-**對模型公開的函式**（`line-webhook/gemini.ts` 的 `TEXT_TOOL_DECLARATIONS`）
+**對模型公開的函式**（`line-webhook/ai.ts` 的 `TEXT_TOOL_DECLARATIONS`）
 
 | 名稱 | 種類 | 參數 schema | 效果 |
 | :--- | :--- | :--- | :--- |
@@ -790,7 +826,7 @@ T3 → T1 → T4 → T2。前三個只動 Edge Function，可以一起部署驗�
 但**刻意不公開給模型** —— 那三支按下去就落地了，LINE 這條路一律要經過使用者按確認。
 `get_trip` 也不給（旅程設定已經在 context 裡）。
 
-**迴圈**（`runToolLoop`，`_shared/gemini.ts`）
+**迴圈**（`runGeminiToolLoop`／Claude 的 `runToolLoop`，`_shared/ai/`）
 
 1. `toolConfig.functionCallingConfig.mode = 'ANY'`，強迫每一輪都回 function call；**不帶 `responseMimeType`**。
 2. 外層對模型清單逐一嘗試，**內層迴圈全程用同一個模型**；任一輪遇到可重試錯誤（429／404／5xx／逾時／空回應）

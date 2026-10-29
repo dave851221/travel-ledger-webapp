@@ -23,6 +23,16 @@ export default defineConfig([
     },
   },
 
+  // Vite 設定（Node）。是 TS 檔，沒列在這裡會被當成 JS 解析，連 `type` import 都讀不懂
+  {
+    files: ['vite.config.ts'],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: globals.node,
+    },
+  },
+
   // Supabase Edge Functions（Deno，不是瀏覽器，也沒有 React）
   {
     files: ['supabase/functions/**/*.ts'],

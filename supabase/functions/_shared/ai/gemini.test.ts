@@ -1,15 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
   allModelsFailedError,
+  createGeminiProvider,
   FatalError,
   RetryableError,
-  runToolLoop,
+  runGeminiToolLoop,
   toFunctionResponseObject,
+  toGeminiContents,
+  toGeminiSchema,
   type GeminiClient,
   type GeminiContent,
   type GenerateParams,
 } from './gemini';
-import type { GeminiFunctionDeclaration } from './tools/types';
+import type { GeminiFunctionDeclaration } from '../tools/types';
 
 /**
  * function calling 迴圈是 LINE 文字路徑的骨幹：模型先查、再提議，
@@ -58,14 +61,14 @@ const base = (client: GeminiClient) => ({
   execute: () => Promise.resolve({ ok: true }),
 });
 
-describe('runToolLoop', () => {
+describe('runGeminiToolLoop', () => {
   it('先跑讀取工具，再由終結函式收尾', async () => {
     const client = scriptedClient([
       modelCalls({ name: 'list_expenses', args: { keyword: '拉麵' } }),
       modelCalls({ name: 'reply', args: { text: '找到了' } }),
     ]);
     const executed: string[] = [];
-    const result = await runToolLoop({
+    const result = await runGeminiToolLoop({
       ...base(client),
       execute: (name) => {
         executed.push(name);
@@ -92,7 +95,7 @@ describe('runToolLoop', () => {
       modelCalls({ name: 'get_balance' }, { name: 'list_expenses' }),
       modelCalls({ name: 'reply', args: { text: 'ok' } }),
     ]);
-    await runToolLoop({
+    await runGeminiToolLoop({
       ...base(client),
       execute: (name) => Promise.resolve({ from: name }),
     });
@@ -111,7 +114,7 @@ describe('runToolLoop', () => {
       parts: [{ functionCall: { name: 'list_expenses', args: {} }, thoughtSignature: 'sig-abc' }],
     };
     const client = scriptedClient([signed, modelCalls({ name: 'reply', args: { text: 'ok' } })]);
-    await runToolLoop(base(client));
+    await runGeminiToolLoop(base(client));
 
     const echoed = client.calls[1].contents[1];
     expect(echoed).toBe(signed);
@@ -123,7 +126,7 @@ describe('runToolLoop', () => {
       modelCalls({ name: 'list_expenses' }),
       modelCalls({ name: 'reply', args: { text: 'ok' } }),
     ]);
-    await runToolLoop({ ...base(client), maxRounds: 2 });
+    await runGeminiToolLoop({ ...base(client), maxRounds: 2 });
 
     // 第一輪不限制、第二輪（＝最後一輪）限制成只能叫終結函式
     expect(client.calls[0].toolConfig?.functionCallingConfig).toEqual({ mode: 'ANY' });
@@ -135,7 +138,7 @@ describe('runToolLoop', () => {
 
   it('已經超過 deadline 時第一輪就強迫收尾', async () => {
     const client = scriptedClient([modelCalls({ name: 'reply', args: { text: 'ok' } })]);
-    await runToolLoop({ ...base(client), deadlineAt: Date.now() - 1000 });
+    await runGeminiToolLoop({ ...base(client), deadlineAt: Date.now() - 1000 });
 
     expect(client.calls[0].toolConfig?.functionCallingConfig.allowedFunctionNames).toEqual(TERMINALS);
   });
@@ -146,7 +149,7 @@ describe('runToolLoop', () => {
       new RetryableError('HTTP 429'),
       modelCalls({ name: 'reply', args: { text: 'ok' } }),
     ]);
-    const result = await runToolLoop(base(client));
+    const result = await runGeminiToolLoop(base(client));
 
     expect(result.model).toBe('model-b');
     // 第三次呼叫是換模型之後的第一輪：contents 必須只剩原始那一則，
@@ -163,7 +166,7 @@ describe('runToolLoop', () => {
         { name: 'propose_expenses', args: { expenses: [{ description: '晚餐', amount: 300 }] } },
       ),
     ]);
-    const result = await runToolLoop(base(client));
+    const result = await runGeminiToolLoop(base(client));
 
     expect(result.call.name).toBe('propose_expenses');
     expect(result.extraText).toBe('幫你記好了，確認一下');
@@ -173,7 +176,7 @@ describe('runToolLoop', () => {
     const client = scriptedClient([
       { role: 'model', parts: [{ text: '今天總共 1200 元' }] },
     ]);
-    const result = await runToolLoop(base(client));
+    const result = await runGeminiToolLoop(base(client));
 
     expect(result.call).toEqual({ name: 'reply', args: { text: '今天總共 1200 元' } });
   });
@@ -183,13 +186,13 @@ describe('runToolLoop', () => {
       { role: 'model', parts: [{ text: '' }] },
       modelCalls({ name: 'reply', args: { text: 'ok' } }),
     ]);
-    const result = await runToolLoop(base(client));
+    const result = await runGeminiToolLoop(base(client));
     expect(result.model).toBe('model-b');
   });
 
   it('FatalError 直接往外丟，不換模型', async () => {
     const client = scriptedClient([new FatalError('Gemini 400 (schema/tool)')]);
-    await expect(runToolLoop(base(client))).rejects.toThrow('schema/tool');
+    await expect(runGeminiToolLoop(base(client))).rejects.toThrow('schema/tool');
     expect(client.calls).toHaveLength(1);
   });
 
@@ -198,7 +201,7 @@ describe('runToolLoop', () => {
       new RetryableError('HTTP 429'),
       new RetryableError('HTTP 429'),
     ]);
-    await expect(runToolLoop(base(client))).rejects.toThrow(/^RATE_LIMIT:/);
+    await expect(runGeminiToolLoop(base(client))).rejects.toThrow(/^RATE_LIMIT:/);
   });
 
   it('有任何一個是逾時或 503 時丟出 AI_BUSY，而不是叫人隔天再試', async () => {
@@ -206,7 +209,7 @@ describe('runToolLoop', () => {
       new RetryableError('fetch failed: Signal timed out.'),
       new RetryableError('HTTP 503'),
     ]);
-    await expect(runToolLoop(base(client))).rejects.toThrow(/^AI_BUSY:/);
+    await expect(runGeminiToolLoop(base(client))).rejects.toThrow(/^AI_BUSY:/);
   });
 
   it('工具丟例外時把錯誤回給模型，不中斷迴圈', async () => {
@@ -214,7 +217,7 @@ describe('runToolLoop', () => {
       modelCalls({ name: 'list_expenses' }),
       modelCalls({ name: 'reply', args: { text: 'ok' } }),
     ]);
-    await runToolLoop({
+    await runGeminiToolLoop({
       ...base(client),
       execute: () => Promise.reject(new Error('db down')),
     });
@@ -258,5 +261,90 @@ describe('toFunctionResponseObject', () => {
     const out = toFunctionResponseObject(huge);
     expect(out.truncated).toBe(true);
     expect(String(out.result).length).toBe(6000);
+  });
+});
+
+describe('Gemini 的格式轉換', () => {
+  it('assistant 轉成 model，media 轉成 inlineData', () => {
+    expect(toGeminiContents([
+      { role: 'user', parts: [{ text: '嗨' }, { media: { mimeType: 'image/jpeg', data: 'AAA' } }] },
+      { role: 'assistant', parts: [{ text: '好' }] },
+    ])).toEqual([
+      { role: 'user', parts: [{ text: '嗨' }, { inlineData: { mimeType: 'image/jpeg', data: 'AAA' } }] },
+      { role: 'model', parts: [{ text: '好' }] },
+    ]);
+  });
+
+  // OCR 的 schema 從大寫改成共用的小寫寫法，送給 Gemini 的內容必須與改之前一字不差
+  it('responseSchema 的 type 遞迴轉成大寫', () => {
+    expect(toGeminiSchema({
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['expense', 'not_receipt'] },
+        list: { type: 'array', items: { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] } },
+      },
+      required: ['type'],
+    })).toEqual({
+      type: 'OBJECT',
+      properties: {
+        type: { type: 'STRING', enum: ['expense', 'not_receipt'] },
+        list: { type: 'ARRAY', items: { type: 'OBJECT', properties: { amount: { type: 'NUMBER' } }, required: ['amount'] } },
+      },
+      required: ['type'],
+    });
+  });
+});
+
+describe('createGeminiProvider', () => {
+  const models = { text: ['text-a', 'text-b'], vision: ['vision-a'] };
+
+  it('視覺工作用視覺模型清單，JSON 與 schema 放進 generationConfig', async () => {
+    const client = scriptedClient([{ role: 'model', parts: [{ text: '{"type":"expense"}' }] }]);
+    const provider = createGeminiProvider({ client, models });
+    const text = await provider.generate({
+      task: 'vision',
+      messages: [{ role: 'user', parts: [{ text: '收據' }] }],
+      json: true,
+      schema: { type: 'object', properties: { type: { type: 'string' } } },
+      temperature: 0.2,
+    });
+
+    expect(text).toBe('{"type":"expense"}');
+    expect(client.calls[0].model).toBe('vision-a');
+    expect(client.calls[0].generationConfig).toEqual({
+      responseMimeType: 'application/json',
+      responseSchema: { type: 'OBJECT', properties: { type: { type: 'STRING' } } },
+      temperature: 0.2,
+    });
+  });
+
+  it('沒有文字就換下一個模型，全部失敗時丟 AI_BUSY', async () => {
+    const client = scriptedClient([
+      { role: 'model', parts: [{ text: '' }] },
+      new RetryableError('HTTP 503'),
+    ]);
+    const provider = createGeminiProvider({ client, models });
+    await expect(provider.generate({ task: 'text', messages: [{ role: 'user', parts: [{ text: '嗨' }] }] }))
+      .rejects.toThrow(/^AI_BUSY:/);
+    expect(client.calls.map((c) => c.model)).toEqual(['text-a', 'text-b']);
+  });
+
+  it('runToolLoop 轉成 Gemini 的 contents 與 temperature', async () => {
+    const client = scriptedClient([modelCalls({ name: 'reply', args: { text: 'ok' } })]);
+    const provider = createGeminiProvider({ client, models });
+    const result = await provider.runToolLoop({
+      task: 'text',
+      messages: [{ role: 'user', parts: [{ text: '嗨' }] }],
+      system: '你是耀西',
+      declarations: DECLARATIONS,
+      terminalNames: TERMINALS,
+      execute: () => Promise.resolve({}),
+      temperature: 0.4,
+    });
+
+    expect(result.call.name).toBe('reply');
+    expect(client.calls[0].systemInstruction).toBe('你是耀西');
+    expect(client.calls[0].generationConfig).toEqual({ temperature: 0.4 });
+    expect(client.calls[0].contents).toEqual([{ role: 'user', parts: [{ text: '嗨' }] }]);
   });
 });

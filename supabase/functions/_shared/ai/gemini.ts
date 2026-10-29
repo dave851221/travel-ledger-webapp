@@ -1,9 +1,8 @@
 // ============================================================
-// _shared/gemini.ts —— Gemini 的單次呼叫與 function calling 迴圈
+// _shared/ai/gemini.ts —— Google Gemini 的單次呼叫、function calling 迴圈與 AiProvider
 //
 // 這一層與 LINE 無關，也**不碰 Deno.env**：API key 與 fetch 都由呼叫端注入，
 // 所以整支可以在 vitest（Node）下用假 client 測試（見 gemini.test.ts）。
-// 未來的 MCP transport 若也要跑 AI 迴圈，用的是同一份。
 //
 // ⚠️ 三條已查證的 API 限制，違反的話症狀都很難看懂：
 //   1. `generateContent` **不能同時**帶 `tools` 與 `responseMimeType: application/json`
@@ -19,7 +18,25 @@
 // 那是 proto3 JSON 的正式名稱，新程式碼不要再混用 snake_case。
 // ============================================================
 
-import type { GeminiFunctionDeclaration } from "./tools/types.ts"
+import { executeSafely, pickTerminal, planRound, toFunctionResponseObject } from "./loop.ts"
+import {
+  type AiMessage,
+  type AiProvider,
+  type AiTask,
+  allModelsFailedError,
+  FatalError,
+  type FunctionDeclaration,
+  type GenerateRequest,
+  isMediaPart,
+  type JsonSchema,
+  RetryableError,
+  type ToolCall,
+  type ToolLoopRequest,
+  type ToolLoopResult,
+} from "./types.ts"
+
+export { toFunctionResponseObject }
+export { allModelsFailedError, FatalError, RetryableError } from "./types.ts"
 
 // ============================================================
 // 往來的資料形狀
@@ -40,16 +57,13 @@ export interface GeminiPart {
   thoughtSignature?: string
 }
 
-export interface GeminiTextPart { text: string }
-export interface GeminiInlineDataPart { inlineData: { mimeType: string; data: string } }
-
 export interface GeminiContent {
   role: 'user' | 'model'
   parts: GeminiPart[]
 }
 
 export interface GeminiTool {
-  functionDeclarations: GeminiFunctionDeclaration[]
+  functionDeclarations: FunctionDeclaration[]
 }
 
 export interface GeminiToolConfig {
@@ -61,35 +75,27 @@ export interface GeminiToolConfig {
   }
 }
 
-/** 換一個模型再試就有機會成功的錯誤：429、404、5xx、逾時、空回應。 */
-export class RetryableError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'RetryableError'
-  }
+/** 與供應商無關的訊息 → Gemini 的 contents */
+export function toGeminiContents(messages: AiMessage[]): GeminiContent[] {
+  return messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: m.parts.map((p) => isMediaPart(p) ? { inlineData: p.media } : { text: p.text }),
+  }))
 }
 
 /**
- * 所有模型都失敗時要丟的錯誤。
- *
- * 只有**每個**模型都回 429（免費額度用完）才是 `RATE_LIMIT:`，那種情況要隔天才會恢復。
- * 逾時、503 過載、空回應一律是 `AI_BUSY:` —— Google 那邊暫時忙不過來，過幾分鐘再試就好。
- * 以前不分青紅皂白都丟 RATE_LIMIT，伺服器過載時使用者會被叫去「隔天再試」。
+ * responseSchema 的 `type` 用 proto 的大寫列舉（OBJECT／STRING…）。
+ * 共用的 schema 一律小寫（function declaration 那邊也是小寫），送出前在這裡轉。
  */
-export const allModelsFailedError = (failures: string[]): Error => {
-  const last = failures[failures.length - 1] ?? 'no model was tried'
-  const quota = failures.length > 0 && failures.every((f) => f === 'HTTP 429')
-  return quota
-    ? new Error(`RATE_LIMIT: Every Gemini model is out of free quota. Last error: ${last}`)
-    : new Error(`AI_BUSY: All Gemini models failed or timed out. Last error: ${last}`)
-}
-
-/** 換模型也沒用的錯誤（schema 寫錯、金鑰不對）。直接往外丟，不要吞。 */
-export class FatalError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'FatalError'
+export function toGeminiSchema(schema: JsonSchema): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...schema, type: schema.type.toUpperCase() }
+  if (schema.properties) {
+    out.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([k, v]) => [k, toGeminiSchema(v)]),
+    )
   }
+  if (schema.items) out.items = toGeminiSchema(schema.items)
+  return out
 }
 
 // ============================================================
@@ -106,7 +112,7 @@ export interface GenerateParams {
   signal?: AbortSignal
 }
 
-/** 單一模型、單次呼叫。模型的退化與重試由呼叫端（askGemini／runToolLoop）決定。 */
+/** 單一模型、單次呼叫。模型的退化與重試由呼叫端（provider／runGeminiToolLoop）決定。 */
 export interface GeminiClient {
   generate(params: GenerateParams): Promise<GeminiContent>
 }
@@ -183,57 +189,19 @@ export function createGeminiClient(opts: {
 // function calling 迴圈
 // ============================================================
 
-/**
- * 單次呼叫的逾時上限。正常的回應在 1–3 秒內，超過 10 秒多半是對面過載，
- * 換下一個模型比繼續等快得多（曾經設 25 秒，模型一慢使用者就等滿 25 秒）。
- */
-export const MAX_CALL_TIMEOUT_MS = 10_000
-/** 已經超過 deadline 時，最後一輪仍給這麼久 —— 遲到的回覆也好過完全不回。 */
-export const MIN_CALL_TIMEOUT_MS = 5_000
-/** 一次 functionResponse 的 JSON 上限。超過就截斷，免得整包 context 被一次查詢灌爆。 */
-export const MAX_TOOL_RESPONSE_CHARS = 6000
-
-export interface ToolLoopParams {
+export interface GeminiToolLoopParams {
   client: GeminiClient
   /** 依序嘗試。**內層迴圈全程用同一個模型**，換模型會從原始 contents 重來。 */
   models: string[]
   contents: GeminiContent[]
   systemInstruction?: string
-  declarations: GeminiFunctionDeclaration[]
-  /** 這幾支一被呼叫就結束迴圈，由呼叫端決定要做什麼 */
+  declarations: FunctionDeclaration[]
   terminalNames: string[]
-  /** 執行一支讀取工具。丟例外時會把錯誤訊息回給模型，不會中斷迴圈。 */
   execute: (name: string, args: Record<string, unknown>) => Promise<unknown>
-  /** 模型完全沒回 functionCall 時，純文字要當成哪一支終結函式（預設 `reply`） */
   replyName?: string
   maxRounds?: number
-  /** 絕對時間（epoch ms）。超過就強迫收尾，不再發讀工具的回合。 */
   deadlineAt?: number
   generationConfig?: Record<string, unknown>
-}
-
-export interface ToolCall {
-  name: string
-  args: Record<string, unknown>
-}
-
-export interface ToolLoopResult {
-  kind: 'terminal'
-  call: ToolCall
-  /** 同一輪裡除了終結呼叫之外，模型還講了的話（`reply` 與 `propose_*` 同時出現時） */
-  extraText?: string
-  /** 最後真正回答的是哪一個模型。記 log 用。 */
-  model: string
-}
-
-/** functionResponse.response 必須是物件（限制 3）；太大就截斷並標記。 */
-export function toFunctionResponseObject(value: unknown): Record<string, unknown> {
-  const wrapped = (value !== null && typeof value === 'object' && !Array.isArray(value))
-    ? value as Record<string, unknown>
-    : { result: value }
-  const json = JSON.stringify(wrapped) ?? ''
-  if (json.length <= MAX_TOOL_RESPONSE_CHARS) return wrapped
-  return { truncated: true, result: json.substring(0, MAX_TOOL_RESPONSE_CHARS) }
 }
 
 function callsIn(content: GeminiContent): ToolCall[] {
@@ -262,7 +230,7 @@ function textIn(content: GeminiContent): string {
  * ⚠️ 換模型一定要從**原始** contents 重來（限制 2）：中途累積的 model turn 帶著
  *    前一個模型的 thoughtSignature，送給另一個模型會直接 400。
  */
-export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResult> {
+export async function runGeminiToolLoop(params: GeminiToolLoopParams): Promise<ToolLoopResult> {
   const {
     client, models, contents, systemInstruction, declarations, terminalNames,
     execute, replyName = 'reply', maxRounds = 3, deadlineAt, generationConfig,
@@ -276,10 +244,8 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
     const working: GeminiContent[] = [...contents]
     try {
       for (let round = 0; round < maxRounds; round++) {
-        const budget = deadlineAt === undefined ? MAX_CALL_TIMEOUT_MS : deadlineAt - Date.now()
-        // 最後一輪，或時間已經用完 → 只准叫終結函式，強迫收尾
-        const forceFinish = round === maxRounds - 1 || (deadlineAt !== undefined && budget <= 0)
-        const timeout = Math.max(MIN_CALL_TIMEOUT_MS, Math.min(MAX_CALL_TIMEOUT_MS, budget))
+        const { forceFinish, timeoutMs } = planRound(round, maxRounds, deadlineAt)
+        const startedAt = Date.now()
 
         const content = await client.generate({
           model,
@@ -295,8 +261,9 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
             },
           },
           generationConfig,
-          signal: AbortSignal.timeout(timeout),
+          signal: AbortSignal.timeout(timeoutMs),
         })
+        console.log(`[AI] gemini ${model} r${round + 1} ${Date.now() - startedAt}ms`)
         // 原樣保留（含 thoughtSignature），下一輪必須把它送回去
         working.push(content)
 
@@ -310,15 +277,8 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
           return { kind: 'terminal', call: { name: replyName, args: { text } }, model }
         }
 
-        const terminals = calls.filter((c) => terminalNames.includes(c.name))
-        if (terminals.length > 0) {
-          // 同一輪同時有 propose_* 與 reply 時，propose_* 是主角，
-          // reply 的文字不能丟 —— 那通常是「幫你改成 500，確認一下」這種說明。
-          const primary = terminals.find((c) => c.name !== replyName) ?? terminals[0]
-          const spoken = terminals.find((c) => c !== primary && c.name === replyName)
-          const extraText = String(spoken?.args?.text ?? '').trim()
-          return { kind: 'terminal', call: primary, extraText: extraText || undefined, model }
-        }
+        const terminal = pickTerminal(calls, terminalNames, replyName, model)
+        if (terminal) return terminal
 
         // 只有讀取工具：依**同順序**執行，組成一個 user turn 的多個 functionResponse
         const responses: GeminiPart[] = []
@@ -326,13 +286,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
           // 查詢工具也留一行：出問題時光看日誌就知道模型查了什麼、查到第幾輪。
           // 終結函式在呼叫端記，這裡只補上中間這幾步。
           console.log(`[AI] ${model} r${round + 1} → ${call.name} ${JSON.stringify(call.args ?? {}).substring(0, 200)}`)
-          let result: unknown
-          try {
-            result = await execute(call.name, call.args)
-          } catch (err) {
-            console.error(`[AI] Tool ${call.name} failed:`, err)
-            result = { error: err instanceof Error ? err.message : String(err) }
-          }
+          const result = await executeSafely(execute, call)
           responses.push({
             functionResponse: { name: call.name, response: toFunctionResponseObject(result) },
           })
@@ -350,6 +304,92 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
     }
   }
 
-  // 與 askGemini 共用同一個判斷，呼叫端才能分辨「額度用完」與「暫時忙碌」
+  // 與 generate 共用同一個判斷，呼叫端才能分辨「額度用完」與「暫時忙碌」
   throw allModelsFailedError(failures)
+}
+
+// ============================================================
+// AiProvider
+// ============================================================
+
+/**
+ * 單次 JSON mode 呼叫的逾時。OCR 與轉錄都比文字慢，但也不能無限等下去 ——
+ * 模型過載時寧可早點換下一個（曾經設 25 秒，一慢就是整整 25 秒沒有回應）。
+ */
+const ASK_TIMEOUT_MS = 15_000
+
+export interface GeminiModels {
+  /** 純文字（聊天、記帳、從清單裡挑一筆） */
+  text: string[]
+  /** 圖片與音訊都走這一組 */
+  vision: string[]
+}
+
+export function createGeminiProvider(opts: {
+  client: GeminiClient
+  models: GeminiModels
+}): AiProvider {
+  const { client, models } = opts
+  const modelsFor = (task: AiTask) => task === 'text' ? models.text : models.vision
+
+  return {
+    name: 'gemini',
+    supports: () => true,
+
+    async generate(req: GenerateRequest): Promise<string> {
+      const generationConfig: Record<string, unknown> = {}
+      if (req.json) generationConfig.responseMimeType = 'application/json'
+      // 結構化輸出：由 API 保證格式，比在 prompt 裡描述 JSON 範例可靠得多。
+      // ⚠️ 這條路徑**不能**同時帶 tools —— 兩者併用 Gemini 3 以外一律 400。
+      if (req.json && req.schema) generationConfig.responseSchema = toGeminiSchema(req.schema)
+      if (req.temperature !== undefined) generationConfig.temperature = req.temperature
+
+      const contents = toGeminiContents(req.messages)
+      const failures: string[] = []
+
+      for (const model of modelsFor(req.task)) {
+        console.log(`[AI] Calling Gemini model: ${model}`)
+        const startedAt = Date.now()
+        try {
+          const content = await client.generate({
+            model, contents, systemInstruction: req.system, generationConfig,
+            signal: AbortSignal.timeout(ASK_TIMEOUT_MS),
+          })
+          const text = content.parts.map((part) => String(part.text ?? '')).filter(Boolean).join('')
+          if (!text) {
+            // 有 parts 卻沒有文字（例如只回了 thought）。換模型比直接失敗好。
+            failures.push('empty text')
+            console.warn(`[AI] ${model} returned no text, trying next model...`)
+            continue
+          }
+          console.log(`[AI] gemini ${model} ${req.task} ${Date.now() - startedAt}ms`)
+          return text
+        } catch (err) {
+          // schema 寫錯之類的問題換模型也沒用，直接往外丟
+          if (err instanceof FatalError) throw err
+          const reason = err instanceof RetryableError ? err.message : String(err)
+          failures.push(reason)
+          console.warn(`[AI] ${model} failed (${reason}), trying next model...`)
+        }
+      }
+
+      throw allModelsFailedError(failures)
+    },
+
+    runToolLoop(req: ToolLoopRequest): Promise<ToolLoopResult> {
+      return runGeminiToolLoop({
+        client,
+        models: modelsFor(req.task),
+        contents: toGeminiContents(req.messages),
+        systemInstruction: req.system,
+        declarations: req.declarations,
+        terminalNames: req.terminalNames,
+        execute: req.execute,
+        replyName: req.replyName,
+        maxRounds: req.maxRounds,
+        deadlineAt: req.deadlineAt,
+        generationConfig: req.temperature !== undefined ? { temperature: req.temperature } : undefined,
+      })
+    },
+  }
 }

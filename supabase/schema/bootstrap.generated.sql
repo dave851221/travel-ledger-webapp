@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS public.line_trip_id_mapping (
 --   pending_at：進入等待通行碼狀態的時間，超過 10 分鐘由 Edge Function 自動放棄
 --   mention_required：群組觸發模式，true = 需 @提及或以「耀西」開頭才回應
 --   last_active_at：每次收到事件時由 Edge Function 背景更新
+--   followup_user_id / followup_until：群組「接話」—— 機器人剛回覆過的那個人，
+--     在 followup_until 之前的下一句話不必 @ 也會處理（只有提及模式有作用）
 CREATE TABLE IF NOT EXISTS public.line_user_states (
     line_user_id     TEXT PRIMARY KEY,
     current_trip_id  UUID REFERENCES public.trips(id) ON DELETE SET NULL,
@@ -129,7 +131,9 @@ CREATE TABLE IF NOT EXISTS public.line_user_states (
     default_config   TEXT,
     mention_required BOOLEAN NOT NULL DEFAULT TRUE,
     last_active_at   TIMESTAMPTZ DEFAULT NOW(),
-    created_at       TIMESTAMPTZ DEFAULT NOW()
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    followup_user_id TEXT,
+    followup_until   TIMESTAMPTZ
 );
 
 -- 對話紀錄。role 目前有四種用途：
@@ -150,6 +154,17 @@ CREATE TABLE IF NOT EXISTS public.line_chat_history (
 
 CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON public.line_chat_history (line_user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_history_speaker ON public.line_chat_history (speaker_user_id);
+
+-- 機器人在群組／聊天室送出的訊息 id。
+-- 使用者在 LINE 對某則訊息按「回覆」時 webhook 會帶 quotedMessageId，
+-- 對得上這張表就代表是在回機器人，不必再 @。由 pg_cron 每天清掉 7 天前的。
+CREATE TABLE IF NOT EXISTS public.line_bot_messages (
+    message_id   TEXT PRIMARY KEY,
+    line_user_id TEXT NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_line_bot_messages_created_at ON public.line_bot_messages (created_at);
 
 -- 動作鎖：以 PK 衝突當作鎖，防止使用者連點 Flex 按鈕造成重複記帳
 CREATE TABLE IF NOT EXISTS public.line_processed_actions (
@@ -414,6 +429,8 @@ ALTER TABLE public.line_trip_id_mapping   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_user_states       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_chat_history      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_processed_actions ENABLE ROW LEVEL SECURITY;
+-- 刻意**沒有任何政策**：只有 Edge Function（service role，繞過 RLS）讀寫，前端用不到
+ALTER TABLE public.line_bot_messages      ENABLE ROW LEVEL SECURITY;
 
 -- 政策名稱與既有資料庫保持一致，重複執行不會產生重複政策
 DROP POLICY IF EXISTS "Allow public read/write on trips"    ON public.trips;

@@ -103,6 +103,34 @@ export const GET_BALANCE_SCHEMA: JsonSchema = {
   required: [],
 }
 
+export const ITINERARY_DAY_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    date: { type: 'string', description: 'YYYY-MM-DD。「明天」「第三天」請先依今天的日期換算好' },
+  },
+  required: ['date'],
+}
+
+export const SEARCH_ITINERARY_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string', description: '關鍵字，可用空白隔開多個，例如「水明館 停車」「check-in」「租車」' },
+  },
+  required: ['query'],
+}
+
+export const WEATHER_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    date: { type: 'string', description: 'YYYY-MM-DD，省略代表今天。只查得到今天起 16 天內' },
+    place: {
+      type: 'string',
+      description: '地名，用英文或當地文字（例如 Takayama、金沢、Kyoto）。省略就用行程表上那一天所在的地點',
+    },
+  },
+  required: [],
+}
+
 // ============================================================
 // 「提議」類的 schema —— 給對話式管道（LINE）用
 //

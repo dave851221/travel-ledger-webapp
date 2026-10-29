@@ -1,7 +1,7 @@
 // ============================================================
-// types.ts —— LINE webhook 事件、DB 列與 Gemini 往來的型別
+// types.ts —— LINE webhook 事件、DB 列與 AI 往來的型別
 //
-// 這支函式處理的東西幾乎都是「外部來的 payload」：LINE 的事件、Gemini 的回應、
+// 這支函式處理的東西幾乎都是「外部來的 payload」：LINE 的事件、AI 的回應、
 // 沒有產生型別的 Supabase 查詢結果。以前一律寫成 any，於是欄位打錯只會在
 // 正式環境安靜地變成 undefined。這裡只宣告**程式真的會讀到**的欄位，
 // 不追求完整覆蓋 LINE 的 API 文件 —— 沒用到的欄位寫上去只會變成要維護的謊言。
@@ -44,6 +44,8 @@ export interface TextMessage {
   id: string
   text: string
   mention?: { mentionees?: Mentionee[] }
+  /** 使用者對某一則訊息按了「回覆」時才有。對得上 line_bot_messages 就是在回機器人 */
+  quotedMessageId?: string
 }
 
 export interface ImageMessage {
@@ -218,6 +220,12 @@ export interface UserStateRow {
   /** 群組觸發模式，true＝需 @提及或以「耀西」開頭 */
   mention_required: boolean | null
   last_active_at: string | null
+  /**
+   * 群組「接話」：機器人剛回覆過的那個人，在 followup_until 之前的下一句話不必 @ 也會處理
+   * （FOLLOWUP_WINDOW_MS）。只有提及模式才有作用。
+   */
+  followup_user_id?: string | null
+  followup_until?: string | null
   /** 已不再讀寫，偏好改存 trips.ai_preference */
   default_config?: string | null
   created_at?: string
@@ -241,18 +249,12 @@ export interface SavedExpenseEntry {
 }
 
 // ============================================================
-// Gemini
+// AI
 // ============================================================
 
-// 往來的資料形狀（含 functionCall／functionResponse）定義在 _shared/gemini.ts ——
-// 那一層不碰 Deno.env，vitest 才測得動 function calling 迴圈。這裡原樣轉出，
-// 讓 line-webhook 這邊的 import 路徑不變。
-export type {
-  GeminiContent,
-  GeminiInlineDataPart,
-  GeminiPart,
-  GeminiTextPart,
-} from "../_shared/gemini.ts"
+// 送給模型的訊息形狀定義在 _shared/ai/types.ts，與用哪一家 AI 無關 ——
+// 那一層不碰 Deno.env，vitest 才測得動 function calling 迴圈。這裡原樣轉出。
+export type { AiMediaPart, AiMessage, AiPart } from "../_shared/ai/types.ts"
 
 /**
  * AI 回傳的支出內容。
@@ -322,6 +324,13 @@ export interface TextRoute {
   isMentioned: boolean
   /** 去掉自我提及之後是不是以「耀西」開頭 */
   startsWithYoshi: boolean
+  /**
+   * 為什麼要處理這句話：
+   *   direct   一對一、@提及、「耀西」開頭、全回應模式、免觸發的指令
+   *   quote    在群組裡對機器人的訊息按了「回覆」（使用者明確在跟它講話）
+   *   followup 同一個人在機器人回覆後幾分鐘內接著說的 —— 可能只是在跟別人聊天，交給 AI 判斷
+   */
+  trigger: 'direct' | 'quote' | 'followup'
 }
 
 /** getQuickReply 等函式回傳的快速回覆。內容是 LINE 的 action 物件，不再細分。 */

@@ -6,3 +6,5 @@
 
 export { default as Decimal } from 'https://esm.sh/decimal.js@10.4.3';
 export { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+// 版本與 package.json 的 devDependency 一致（vitest 用的是那一份）。升級時兩邊一起改。
+export { default as Anthropic } from 'npm:@anthropic-ai/sdk@0.135.0';

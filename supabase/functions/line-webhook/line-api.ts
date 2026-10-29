@@ -1,13 +1,52 @@
 // ============================================================
 // line-api.ts —— 與 LINE Messaging API 的往來
 //
-// 簽章驗證、reply／push、成員顯示名稱，以及從 LINE CDN 下載訊息內容。
-// 只 import config.ts（存取權杖與 channel secret）。
+// 簽章驗證、reply／push、「輸入中」動畫、成員顯示名稱，以及從 LINE CDN 下載訊息內容。
+// import config.ts（存取權杖與 channel secret）與 db.ts（記下群組裡送出的訊息 id）。
 // ============================================================
 
 import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET } from "./config.ts"
+import { supabase } from "./db.ts"
+import { runInBackground } from "./util.ts"
 import type { OutgoingMessage } from "./types.ts"
+
+/**
+ * 記下機器人在群組裡送出的訊息 id。使用者在 LINE 對它按「回覆」時，
+ * webhook 會帶 `quotedMessageId`，對得上這裡的 id 就代表是在跟機器人講話（不必再 @）。
+ * 一對一不需要：那邊每句話本來就會處理。
+ */
+async function recordSentMessages(res: Response, to: string | undefined): Promise<void> {
+  // groupId 以 C 開頭、roomId 以 R 開頭、userId 以 U 開頭
+  if (!to || to.startsWith('U')) return
+  try {
+    const body = await res.json() as { sentMessages?: { id: string }[] }
+    const rows = (body.sentMessages ?? []).map((m) => ({ message_id: m.id, line_user_id: to }))
+    if (rows.length === 0) return
+    runInBackground(supabase.from('line_bot_messages').upsert(rows, { onConflict: 'message_id', ignoreDuplicates: true }))
+  } catch (err) {
+    console.warn('[LINE] Could not read sentMessages:', err)
+  }
+}
+
+/**
+ * 一對一聊天顯示「輸入中…」的動畫，等 AI 的時候使用者才知道機器人有在動。
+ * LINE 只支援一對一（群組會 400），也不計入推播額度。回覆送出後動畫會自己消失。
+ */
+export async function showLoading(chatId: string, seconds = 30): Promise<void> {
+  if (!chatId.startsWith('U')) return
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/chat/loading/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+      // 5 的倍數，最多 60 秒
+      body: JSON.stringify({ chatId, loadingSeconds: Math.min(60, Math.max(5, Math.round(seconds / 5) * 5)) }),
+    })
+    if (!res.ok) console.warn(`[LINE] Loading animation failed: ${await res.text()}`)
+  } catch (err) {
+    console.warn('[LINE] Loading animation failed:', err)
+  }
+}
 
 export async function verifySignature(body: string, signature: string | null): Promise<boolean> {
   if (!signature || !LINE_CHANNEL_SECRET) return false
@@ -26,6 +65,7 @@ export async function pushMessage(to: string, messages: OutgoingMessage[]) {
     body: JSON.stringify({ to, messages }),
   })
   if (!res.ok) console.error(`[LINE] Push Error: ${await res.text()}`)
+  else await recordSentMessages(res, to)
 }
 
 export async function replyMessage(replyToken: string, messages: OutgoingMessage[], to?: string) {
@@ -46,7 +86,9 @@ export async function replyMessage(replyToken: string, messages: OutgoingMessage
     if (to) {
       await pushMessage(to, messages)
     }
+    return
   }
+  await recordSentMessages(res, to)
 }
 
 /**

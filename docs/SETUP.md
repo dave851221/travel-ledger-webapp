@@ -73,11 +73,17 @@ npx supabase link --project-ref <你的_PROJECT_REF>
 npx supabase secrets set LINE_CHANNEL_ACCESS_TOKEN=xxx
 npx supabase secrets set LINE_CHANNEL_SECRET=xxx
 npx supabase secrets set GEMINI_API_KEY=xxx
+# 選用：改用 Claude（付費）。不設就是 Gemini；設了之後 Gemini 變成備援、語音仍走 Gemini
+npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxx AI_PROVIDER=claude
 npx supabase secrets set WEBAPP_URL=https://<你的帳號>.github.io/travel-ledger-webapp
 ```
 
 `SUPABASE_URL` 與 `SUPABASE_SERVICE_ROLE_KEY` 由平台自動注入，不需自行設定。
 改動密鑰後必須重新部署才會生效。
+
+用 Claude 時，要讓 Bot 能上網搜尋，還要到 Anthropic Console 的組織設定（Privacy／Features 一類的頁面）
+開放 **web search**。沒開的話第一次搜尋會被拒絕，Bot 會自動關掉搜尋照常回答（log 有一行 `Web search rejected`）。
+Bot 讀行程用的是 `WEBAPP_URL` 底下的 `itinerary/<tripId>.json`，所以 `WEBAPP_URL` 必須指向**已部署**的網頁。
 
 ### C. 部署
 

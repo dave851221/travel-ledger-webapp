@@ -191,6 +191,9 @@ import RailStops from '../blocks/RailStops';
 - 顏色用 `var(--t-accent)`、`var(--t-soft)` 跟著行程風格走，其餘用全站的 `bg-surface`、`text-ink`、`border-line`，
   深色模式就不用另外處理。
 - 不要抓資料：行程頁是靜態內容，要顯示帳目請用其他分頁。
+- ⚠️ **LINE Bot 看不到客製區塊**：Bot 讀的是 build 時輸出的 JSON（`src/features/itinerary/export.ts`），
+  `extra` 是 React 元件，輸出時一律丟掉。使用者可能會問 Bot 的重點（集合時間、要帶的東西、注意事項）
+  請寫進 `title`／`notes`／`tips`，客製區塊只拿來做「畫得更好看」的事。
 
 真的連客製區塊都裝不下時，registry 也接受 `{ component: MyPage }` 整頁自己寫，但這應該很少見。
 

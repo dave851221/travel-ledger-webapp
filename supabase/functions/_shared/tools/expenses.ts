@@ -89,6 +89,10 @@ function sumsMatch(map: AmountMap, target: InstanceType<typeof Decimal>): boolea
   return sum.equals(target)
 }
 
+/** 名單有人、金額全是 0：只是在說「哪幾個人」，不是真的指定每人 0 元 */
+const sumsToZero = (map: AmountMap): boolean =>
+  Object.keys(map ?? {}).length > 0 && sumsMatch(map, new Decimal(0))
+
 export interface PrepareOptions {
   /** 這趟旅程的「今天」，日期驗證的基準 */
   today: string
@@ -155,12 +159,14 @@ export function prepareExpense(
   const splitMembers = Object.keys(splitMap)
   const adjustMember = pickAdjustmentMember(payerMembers, splitMembers)
 
-  // 補上的預設值只是 0 佔位，lockedData 必須傳 {} 讓它均分（H6）
+  // 補上的預設值只是 0 佔位，lockedData 必須傳 {} 讓它均分（H6）。
+  // 模型只列了名字、金額全填 0 也一樣是「這幾個人分」—— 照原樣鎖住的話，
+  // 全部的錢會落到調整成員一個人頭上（測試時 Haiku 真的這樣回過）
   const payer_data = payerMembers.length > 0
-    ? calculateDistribution(amount, payerMembers, filledPayer ? {} : payerMap, payerMembers[0], precision)
+    ? calculateDistribution(amount, payerMembers, filledPayer || sumsToZero(payerMap) ? {} : payerMap, payerMembers[0], precision)
     : {}
   const split_details = splitMembers.length > 0
-    ? calculateDistribution(amount, splitMembers, filledSplit ? {} : splitMap, adjustMember, precision)
+    ? calculateDistribution(amount, splitMembers, filledSplit || sumsToZero(splitMap) ? {} : splitMap, adjustMember, precision)
     : {}
 
   return {

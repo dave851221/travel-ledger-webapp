@@ -1,12 +1,51 @@
-import { defineConfig } from 'vite'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { createServer, defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/**
+ * build 結束後把每趟旅程的行程輸出成 `dist/itinerary/<tripId>.json`，給 LINE Bot 讀
+ * （見 src/features/itinerary/export.ts）。行程檔是 TS／TSX，要靠 Vite 的 SSR 載入才跑得動。
+ */
+function itineraryJson(): Plugin {
+  let outDir = 'dist'
+  return {
+    name: 'itinerary-json',
+    apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir)
+    },
+    async closeBundle() {
+      const server = await createServer({
+        configFile: false,
+        logLevel: 'error',
+        appType: 'custom',
+        server: { middlewareMode: true, hmr: false, ws: false },
+        optimizeDeps: { noDiscovery: true, include: [] },
+        esbuild: { jsx: 'automatic' },
+      })
+      try {
+        const mod = await server.ssrLoadModule('/src/features/itinerary/export.ts')
+        const plans = mod.exportItineraries() as Record<string, unknown>
+        const dir = path.join(outDir, 'itinerary')
+        await mkdir(dir, { recursive: true })
+        await Promise.all(Object.entries(plans).map(([tripId, json]) =>
+          writeFile(path.join(dir, `${tripId}.json`), JSON.stringify(json))))
+        console.log(`[itinerary-json] wrote ${Object.keys(plans).length} itineraries to ${dir}`)
+      } finally {
+        await server.close()
+      }
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   base: '/travel-ledger-webapp/',
   plugins: [
     react(),
+    itineraryJson(),
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',

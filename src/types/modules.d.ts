@@ -14,3 +14,8 @@ declare module 'https://esm.sh/decimal.js@10.4.3' {
 declare module 'https://esm.sh/@supabase/supabase-js@2.39.3' {
   export { createClient, type SupabaseClient } from '@supabase/supabase-js';
 }
+
+// Deno 的 npm: specifier 同理；vitest 中換成 devDependency 的那一份（版本要一致）
+declare module 'npm:@anthropic-ai/sdk@0.135.0' {
+  export { default } from '@anthropic-ai/sdk';
+}

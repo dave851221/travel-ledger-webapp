@@ -11,7 +11,7 @@
 //
 // LINE 的文字路徑用得到這裡的**讀取**工具（`toGeminiFunctionDeclarations(READ_TOOL_NAMES)`
 // 與 `runTool`），寫入類的 create／update／delete 則刻意不公開給模型 ——
-// 那三支會直接落地，對話式管道一律要先出一張確認卡（見 line-webhook/gemini.ts）。
+// 那三支會直接落地，對話式管道一律要先出一張確認卡（見 line-webhook/ai.ts）。
 // package.json 的 check:functions 仍把這個檔案列成獨立的進入點，
 // 免得沒人用到的那幾支工具漏掉 deno check。
 // ============================================================
@@ -29,14 +29,19 @@ import {
 } from "./expenses.ts"
 import { getBalance, getSettlementPlan } from "./balance.ts"
 import { getTrip } from "./trip.ts"
+import { getItineraryDay, getItineraryOverview, searchItineraryTool } from "./itinerary.ts"
+import { getWeather } from "./weather.ts"
 import { optionalString, toExpenseInput, toExpensePatch, toListFilters } from "./args.ts"
 import {
   EXPENSE_INPUT_SCHEMA,
   EXPENSE_REF_SCHEMA,
   GET_BALANCE_SCHEMA,
+  ITINERARY_DAY_SCHEMA,
   LIST_EXPENSES_SCHEMA,
   NO_ARGS_SCHEMA,
+  SEARCH_ITINERARY_SCHEMA,
   UPDATE_EXPENSE_SCHEMA,
+  WEATHER_SCHEMA,
 } from "./schemas.ts"
 import type {
   GeminiFunctionDeclaration,
@@ -73,6 +78,30 @@ export const TOOLS: ToolDefinition[] = [
     description: '最少轉帳次數的結清路徑：誰要付給誰多少錢。',
     inputSchema: NO_ARGS_SCHEMA,
     execute: (_args, ctx) => getSettlementPlan(ctx),
+  },
+  {
+    name: 'get_itinerary_overview',
+    description: '行程表的總覽：每天一行（日期、城市、主題、住哪），加上航班、住宿、預訂狀態與行前備註。問「明天去哪」「哪天住哪」「還有什麼沒訂」先看這個。',
+    inputSchema: NO_ARGS_SCHEMA,
+    execute: (_args, ctx) => getItineraryOverview(ctx),
+  },
+  {
+    name: 'get_itinerary_day',
+    description: '某一天的完整行程：每個時段做什麼、預約狀態、備註、當晚住宿與入住須知。',
+    inputSchema: ITINERARY_DAY_SCHEMA,
+    execute: (args, ctx) => getItineraryDay(optionalString(args.date), ctx),
+  },
+  {
+    name: 'search_itinerary',
+    description: '用關鍵字在行程表裡找（景點、餐廳、住宿備註、航班、預訂、行前清單）。問某個地點或細節（「水明館停車要錢嗎」「租車幾點還」）時用它，比整天的行程省。',
+    inputSchema: SEARCH_ITINERARY_SCHEMA,
+    execute: (args, ctx) => searchItineraryTool(optionalString(args.query), ctx),
+  },
+  {
+    name: 'get_weather',
+    description: '天氣預報（今天起 16 天內）：天氣、高低溫、早上／下午／晚上的降雨機率。不給地點就用行程表上那一天所在的地方。問天氣一律用它，不要上網搜尋。',
+    inputSchema: WEATHER_SCHEMA,
+    execute: (args, ctx) => getWeather({ date: optionalString(args.date), place: optionalString(args.place) }, ctx),
   },
   {
     name: 'create_expense',

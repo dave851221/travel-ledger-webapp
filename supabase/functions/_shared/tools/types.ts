@@ -31,6 +31,13 @@ export interface ToolContext {
   today: string
   /** 這次操作是誰做的（LINE 的傳訊者、MCP 的 token 標籤）。補預設付款人時會用到。 */
   actorName?: string | null
+  /**
+   * 這趟旅程的行程表，沒有就回 null。去哪裡讀是呼叫端的事
+   * （LINE 讀 GitHub Pages 上的 JSON，見 line-webhook/itinerary.ts），工具層只負責格式化與搜尋。
+   */
+  loadItinerary?: () => Promise<ItineraryDoc | null>
+  /** 對外的 HTTP（天氣）。不給就用全域的 fetch，測試塞假的。 */
+  fetch?: typeof fetch
 }
 
 /**
@@ -279,6 +286,62 @@ export interface TripInfo {
 }
 
 // ============================================================
+// 行程
+//
+// 網頁的 src/features/itinerary/types.ts 輸出成 JSON 之後的形狀
+// （src/features/itinerary/export.ts）。少了 React 的客製區塊，其餘欄位照抄 ——
+// **改網頁的行程格式時記得同步這裡**。
+// ============================================================
+
+/** 字串或帶語氣、子項目的備註。文字裡可以有 `[名稱](網址)` 與 `**粗體**` */
+export type ItineraryNote = string | { text: string; tone?: 'warn' | 'tip' | 'muted'; items?: ItineraryNote[] }
+
+export interface ItineraryPlace {
+  name: string
+  href?: string
+  query?: string
+  lat?: number
+  lng?: number
+}
+
+export type ItineraryBookingStatus = 'paid' | 'booked' | 'walkin' | 'todo' | 'pending'
+
+export interface ItineraryItemDoc {
+  time?: string
+  slot?: string
+  kind: string
+  title: string
+  places?: ItineraryPlace[]
+  notes?: ItineraryNote[]
+  booking?: { label?: string; status: ItineraryBookingStatus; href?: string }
+  tag?: string
+  undecided?: boolean
+}
+
+export interface ItineraryDayDoc {
+  date: string
+  title: string
+  city?: string
+  items: ItineraryItemDoc[]
+  stay?: string
+  tips?: ItineraryNote[]
+  route?: [number, number][]
+}
+
+export interface ItineraryDoc {
+  version: number
+  title: string
+  tagline?: string
+  timeZone?: string
+  flights?: { label: string; date: string; depart?: string; arrive?: string; from?: string; to?: string; number?: string; notes?: ItineraryNote[] }[]
+  stays?: { id: string; name: string; city?: string; nameEn?: string; address?: string; checkIn: string; checkOut: string; href?: string; notes?: ItineraryNote[] }[]
+  bookings?: { date: string; time?: string; category?: string; item: string; status: ItineraryBookingStatus }[]
+  checklist?: { items: string[] }
+  notes?: ItineraryNote[]
+  days: ItineraryDayDoc[]
+}
+
+// ============================================================
 // 工具定義
 // ============================================================
 
@@ -308,12 +371,18 @@ export interface ToolDefinition {
   execute(args: ToolArgs, ctx: ToolContext): Promise<unknown>
 }
 
-/** Gemini 的 function declaration（`tools[0].functionDeclarations` 的元素） */
-export interface GeminiFunctionDeclaration {
+/**
+ * 對模型公開的一支函式。各家 AI 的寫法不同（Gemini 的 `functionDeclarations`、
+ * Claude 的 `tools[].input_schema`），轉換在 `_shared/ai/` 各自的檔案裡做。
+ */
+export interface FunctionDeclaration {
   name: string
   description: string
   parameters: JsonSchema
 }
+
+/** 舊名稱。Gemini 的 `tools[0].functionDeclarations` 就是這個形狀。 */
+export type GeminiFunctionDeclaration = FunctionDeclaration
 
 /** re-export，讓呼叫端只 import 這一個檔案就夠 */
 export type { AmountMap, ExpenseRow, TripRow }

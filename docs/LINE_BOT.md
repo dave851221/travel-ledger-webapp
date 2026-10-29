@@ -13,6 +13,25 @@
   會由 AI 定位到那一筆並送出一張確認卡（「✏️ 修改預覽」或「🗑 確認刪除？」），
   **按下確認才會真的動到帳本**。要改的那筆不在最近 10 筆裡時，AI 會先呼叫 `list_expenses` 去查；
   找不到唯一一筆就反問，不會猜。清單式的「編輯支出」「刪除支出」仍然保留。
+- **問行程、天氣、當地資訊**（2026-10-29）: 綁定的旅程有行程頁時，AI 讀得到同一份行程
+  （網頁 build 時輸出的 `itinerary/<tripId>.json`）。context 只放**一行**今天的行程（第幾天、城市、今晚住哪），
+  其餘由模型用工具查需要的那一段：
+  - `search_itinerary`：關鍵字（「水明館 停車」「租車」「check-in」），回最相關的最多 12 段。
+  - `get_itinerary_day`：某一天的完整內容與當晚住宿須知（一天約 600 token）。
+  - `get_itinerary_overview`：每天一行 + 航班、住宿、預訂與待預訂提醒。
+  - `get_weather`：Open-Meteo 免費預報（16 天內），不給地點就用那天行程的座標；問天氣不會上網搜尋。
+  - `web_search`（只有 Claude）：行程與帳本回答不了、需要即時資訊（營業時間、票價、交通、附近推薦）時才上網，
+    一則訊息最多 2 次，回答附 1–2 個來源網址。搜尋關鍵字不放成員名字與金額。
+  行程頁的客製區塊（`extra`）是畫面元件，Bot 看不到。沒有行程頁的旅程照實說沒有行程表。
+- **群組裡的來回對話**（2026-10-29）: 提及模式下，除了 @耀西 與「耀西」開頭，還有兩種情況也會處理：
+  - 對機器人的訊息按 LINE 的「回覆」（引用回覆）—— 等同 @提及。
+  - 機器人剛回覆過的**同一個人**，3 分鐘內的下一句話（接話）。每次回覆往後延 3 分鐘，所以可以一直聊下去。
+    接話可能只是在跟別人講話，AI 判斷不是在問它就**不回**（`stay_silent`），那句話也不寫進對話歷史；
+    接話不會上網搜尋，出錯也不回錯誤訊息。其他人插話不會延長任何人的接話時間。
+- **改由備援回答時會說一聲**: `AI_PROVIDER=claude` 而 Claude 額度用完或連不上時，改用 Gemini 免費版回答，
+  回覆最前面多一句「⚠️ Claude 本月額度已用完，這次改用免費版 Gemini 回覆」（或「暫時連不上」）。
+  額度用完之後 10 分鐘內直接用 Gemini，不再每則先試一次 Claude。
+  一對一聊天在等 AI 時會顯示「輸入中…」動畫（LINE 只支援一對一）。
 - **收據 OCR 智慧辨識**: 
   - **自動流程**: 使用者上傳照片後，機器人會自動下載並同步存儲至 Supabase Storage (`expenses/{tripId}/{messageId}.jpg`)。
   - **AI 解析**: 使用 Gemini 視覺模型辨識商店、金額、幣別、日期與品項。
@@ -203,12 +222,13 @@
   撤銷按鈕的 postback **只帶 `eid`**，描述由 `undo` 分支回查 —— 塞描述進去會超過 300 bytes。
 - **全趟彙總餵給 AI**（`summarizeTripExpenses`，位於 `guards.ts`）: AI 的 context 只放得下
   最近 10 筆支出，所以「這趟總共花多少」「我還欠多少」「交通花了多少」以前一律答錯 ——
-  它只能把看得到的那 10 筆加一加（M6）。現在每次呼叫前先在伺服器端用 **Decimal** 算好，
-  以【全趟彙總】放進 `tripContext`：
+  它只能把看得到的那 10 筆加一加（M6）。現在在伺服器端用 **Decimal** 算好，
+  模型呼叫 `get_trip_summary` 時回給它（2026-10-29 以前是每則訊息都附在 `tripContext` 的【全趟彙總】，
+  記帳、問行程這些用不到它的訊息也要付那幾百個 token）：
   - 筆數、日期範圍、各幣別合計、各分類合計（分幣別）—— **不含結清紀錄**，與快捷查詢一致（K19）。
   - 每人的已付／應付／淨額（分幣別）—— **含結清紀錄**，否則「我還欠多少」永遠不會歸零。
     淨額為正代表這個人先墊了錢，別人要還他。
-  - system instruction 規則 7 明令：金額類問題一律引用彙總，不得自己加總近期支出；
+  - system instruction 規則 7 明令：金額類問題先呼叫 get_trip_summary、引用它的數字，不得自己加總近期支出；
     彙總裡沒有的切片（例如「第一天花多少」）就照實說算不出來，不要硬湊。
   - 這支查詢刻意**不設 limit**：只看到一部分算出來的總額是錯的，比不答更糟。
   - **逐日合計**（K12）：分幣別列出每一天的合計，「第一天花多少」「昨天花多少」都問得到。
@@ -300,15 +320,15 @@ Yoshi! Yoshi!
 - **檔案分工**: `index.ts` 只做驗簽、解析、建 `EventContext` 與分派（約 110 行）；
   五條路徑各自在 [`handlers/`](../supabase/functions/line-webhook/handlers/)
   （`postback.ts`、`image.ts`、`audio.ts`、`commands.ts`、`ai-text.ts`），
-  共用的東西在 `config.ts`／`db.ts`／`util.ts`／`line-api.ts`／`drafts.ts`／`messages.ts`／`gemini.ts`。
+  共用的東西在 `config.ts`／`db.ts`／`util.ts`／`line-api.ts`／`drafts.ts`／`messages.ts`／`ai.ts`。
   記帳的實際動作（驗證、寫入、查詢、餘額）在 [`_shared/tools/`](../supabase/functions/_shared/tools/)，
-  與未來的 MCP server 共用；Gemini 的呼叫與 function calling 迴圈在
-  [`_shared/gemini.ts`](../supabase/functions/_shared/gemini.ts)（不碰 `Deno.env`，所以測得動）。
+  與未來的 MCP server 共用；AI 的呼叫與 function calling 迴圈在
+  [`_shared/ai/`](../supabase/functions/_shared/ai/)（Gemini 與 Claude 各一個檔案，以 `AI_PROVIDER` 切換；不碰 `Deno.env`，所以測得動）。
   沒有副作用的純函式在 [`_shared/validate.ts`](../supabase/functions/_shared/validate.ts)（AI 回傳內容的驗證）
   與 [`guards.ts`](../supabase/functions/line-webhook/guards.ts)（與 LINE 有關的判斷與摘要），
   兩者都由 `guards.test.ts` 看守 —— 改這些行為請連同測試一起改。
-  `check:functions` 列了四個進入點（`line-webhook/index.ts`、`liff-notify/index.ts`、
-  `_shared/tools/registry.ts`、`_shared/gemini.ts`），其餘模組透過 import 一起被檢查。
+  `check:functions` 列了這幾個進入點：`line-webhook/index.ts`、`liff-notify/index.ts`、
+  `_shared/tools/registry.ts` 與 `_shared/ai/` 的三支，其餘模組透過 import 一起被檢查。
   完整的模組清單與 import 方向見 [`../CLAUDE.md`](../CLAUDE.md)。
 - **狀態管理**: 透過 `line_user_states` 維護綁定狀態（`current_trip_id`／`pending_trip_id`／
   `pending_at`）與群組觸發模式；`last_active_at` 每次收到事件時由 `runInBackground()` 更新
@@ -323,11 +343,12 @@ Yoshi! Yoshi!
   2. **真正的解法是 nonce 間接法**：postback 只帶 `{"act":"save","n":"<8碼>"}`（約 30 bytes），
      完整內容存在 `line_chat_history` 的 `pending` 列，點擊時再取回。
   3. 保留讀取舊格式內嵌欄位的相容分支，讓已發出的舊卡片仍可運作。
-- **Gemini 呼叫方式**: **文字與 OCR 是兩套不同的契約**，不要互相套用。
+- **AI 呼叫方式**（以下以 Gemini 描述；Claude 的對應做法與差異見 `CLAUDE.md` 的「AI 供應商層」）:
+  **文字與 OCR 是兩套不同的契約**，不要互相套用。
   - 人設與不可變規則放在 `systemInstruction`（`YOSHI_SYSTEM_INSTRUCTION`），與每次變動的旅程 context 分開。
   - 對話歷史組成真正的多輪 `contents`，而不是壓成一段文字塞進 prompt。
   - 記帳走低溫（0.2 ~ 0.4）以求穩定。
-  - **文字路徑：function calling**（Feature G，`runToolLoop()` 於 `_shared/gemini.ts`）。
+  - **文字路徑：function calling**（Feature G，`ai.runToolLoop()`，實作於 `_shared/ai/`）。
     模型可以先呼叫唯讀工具把資料查清楚，最後一定要呼叫一支「終結函式」：
 
     | 名稱 | 種類 | 效果 |
@@ -356,11 +377,11 @@ Yoshi! Yoshi!
   - **收尾與時限**：最多 3 輪；到最後一輪或超過 `deadlineAt` 時加 `allowedFunctionNames` 強迫收尾。
     `deadlineAt = event.timestamp + 45s`，以 **LINE 送出事件的時間**為準（排隊延遲要算進去），
     每次 fetch 的 timeout 取 `min(25s, 剩餘時間)`。
-  - **OCR 路徑：維持 JSON mode**（`askGemini` + `OCR_RESPONSE_SCHEMA`）。
+  - **OCR 路徑：維持 JSON mode**（`ai.generate` + `OCR_RESPONSE_SCHEMA`）。
     回應格式由 `responseSchema` 約束，prompt 不必手寫 JSON 範例。
     注意 Gemini 的 schema 不支援 `additionalProperties`，所以「成員 → 金額」是以
     `[{ member, amount }]` 陣列表達，解析後由 `toAmountMap()` 轉回程式內部慣用的 map。
-    語音轉錄與「重新閱讀收據」也走 `askGemini`。
+    語音轉錄與「重新閱讀收據」也走 `ai.generate`（語音一律由 Gemini 處理）。
 - **模型 fallback**: 依序嘗試多個模型。429（額度用盡）、404（模型下架）、400（不支援送出的設定）、
   5xx、連線失敗、逾時與空回應都會換下一個（`RetryableError`），全部失敗才回覆額度提示（`RATE_LIMIT:` 前綴）。
   `FatalError`（schema 問題、金鑰不對）直接往外丟，不浪費額度重試。

@@ -94,8 +94,9 @@ describe('toGeminiFunctionDeclarations', () => {
 
   it('工具清單涵蓋 MCP_SERVER_DESIGN §2 的那一組語意', () => {
     expect(TOOLS.map(t => t.name).sort()).toEqual([
-      'create_expense', 'delete_expense', 'get_balance', 'get_settlement_plan',
-      'get_trip', 'list_expenses', 'restore_expense', 'update_expense',
+      'create_expense', 'delete_expense', 'get_balance', 'get_itinerary_day', 'get_itinerary_overview',
+      'get_settlement_plan', 'get_trip', 'get_weather', 'list_expenses', 'restore_expense',
+      'search_itinerary', 'update_expense',
     ]);
   });
 });

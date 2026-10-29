@@ -15,7 +15,7 @@
 // ============================================================
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
-import { buildEventContext } from "./context.ts"
+import { buildEventContext, extendFollowup, isQuotingBot } from "./context.ts"
 import { replyMessage, verifySignature } from "./line-api.ts"
 import { BOT_SELF_INTRODUCTION, getQuickReply } from "./messages.ts"
 import { handleAiText } from "./handlers/ai-text.ts"
@@ -91,10 +91,16 @@ serve(async (req) => {
         ? textEvent.message.mention?.mentionees
         : undefined
 
-      const route = routeTextMessage(ctx, rawText, mentionees)
+      // 引用回覆只有打字的訊息才有；有引用才查資料庫
+      const quotingBot = transcript === null && await isQuotingBot(ctx, textEvent.message.quotedMessageId)
+      const route = routeTextMessage(ctx, rawText, mentionees, quotingBot)
       if (!route) continue
 
-      if (await handleCommands(ctx, route)) continue
+      if (await handleCommands(ctx, route)) {
+        // 查完「今日支出」接著問「那昨天呢」也不必再 @
+        extendFollowup(ctx)
+        continue
+      }
 
       if (isBound) {
         await handleAiText(ctx, route)

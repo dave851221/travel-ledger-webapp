@@ -240,6 +240,20 @@ describe('prepareExpense', () => {
 
     expect(expense.split_details).toEqual({ 代杰: 700, 小明: 300 });
   });
+
+  it('分攤只列名字、金額全填 0 時均分，不是整筆算在一個人頭上', () => {
+    const { expense } = prepareExpense({
+      description: '晚餐拉麵',
+      amount: 900,
+      currency: 'JPY',
+      currency_source: 'stated',
+      payer_data: [{ member: '代杰', amount: 900 }],
+      split_details: [{ member: '代杰', amount: 0 }, { member: '小明', amount: 0 }, { member: 'Amy', amount: 0 }],
+    }, TRIP, { today: TODAY, sourceText: '晚餐拉麵 900 日幣 我付的' });
+
+    expect(expense.split_details).toEqual({ 代杰: 300, 小明: 300, Amy: 300 });
+    expect(expense.payer_data).toEqual({ 代杰: 900 });
+  });
 });
 
 // ============================================================

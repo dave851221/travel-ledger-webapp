@@ -7,7 +7,7 @@
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "check:functions": "deno check --config supabase/functions/deno.json supabase/functions/line-webhook/index.ts supabase/functions/liff-notify/index.ts supabase/functions/_shared/tools/registry.ts supabase/functions/_shared/gemini.ts",
+    "check:functions": "deno check --config supabase/functions/deno.json supabase/functions/line-webhook/index.ts supabase/functions/liff-notify/index.ts supabase/functions/_shared/tools/registry.ts supabase/functions/_shared/ai/gemini.ts supabase/functions/_shared/ai/claude.ts supabase/functions/_shared/ai/fallback.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
@@ -27,6 +27,7 @@
     "recharts": "^3.8.1"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
     "@eslint/js": "^9.39.4",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^24.12.0",

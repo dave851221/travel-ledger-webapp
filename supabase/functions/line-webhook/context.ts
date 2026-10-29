@@ -10,6 +10,7 @@ import { supabase } from "./db.ts"
 import { getChatMemberName } from "./line-api.ts"
 import { getQuickReply } from "./messages.ts"
 import { getOutstandingDrafts, type OutstandingDraft } from "./drafts.ts"
+import { FOLLOWUP_WINDOW_MS } from "./config.ts"
 import { getTodayString, getTripTimezone, isPendingExpired, runInBackground } from "./util.ts"
 import type { QuickReply, SourceType, UserStateRow, WebhookEvent } from "./types.ts"
 
@@ -57,6 +58,44 @@ export interface EventContext {
  */
 export function tripToday(trip: { timezone?: string | null; base_currency?: string; rates?: Record<string, number> | null }): string {
   return getTodayString(getTripTimezone(trip))
+}
+
+/**
+ * 群組裡的這個人剛跟機器人講完話：接下來 FOLLOWUP_WINDOW_MS 內他的下一句話不必再 @。
+ * 每次回覆都往後延，所以一來一往的對話可以一直接下去。
+ * 一對一與全回應模式本來每句都會處理，不必記。
+ */
+export function extendFollowup(ctx: EventContext): void {
+  if (!ctx.isGroup || !ctx.mentionRequired || !ctx.speakerUserId) return
+  runInBackground(supabase.from('line_user_states')
+    .update({
+      followup_user_id: ctx.speakerUserId,
+      followup_until: new Date(Date.now() + FOLLOWUP_WINDOW_MS).toISOString(),
+    })
+    .eq('line_user_id', ctx.sourceId))
+}
+
+/** 這個人是不是還在接話的時間內（見 extendFollowup） */
+export function isInFollowupWindow(ctx: EventContext, now = Date.now()): boolean {
+  const { followup_user_id, followup_until } = ctx.userState ?? {}
+  return !!ctx.speakerUserId
+    && followup_user_id === ctx.speakerUserId
+    && !!followup_until
+    && new Date(followup_until).getTime() > now
+}
+
+/**
+ * 使用者在 LINE 對某則訊息按了「回覆」，而被回覆的是機器人送出的訊息
+ * （line-api.ts 的 recordSentMessages 記下的）。沒有引用就不查資料庫。
+ */
+export async function isQuotingBot(ctx: EventContext, quotedMessageId: string | undefined): Promise<boolean> {
+  if (!quotedMessageId || !ctx.isGroup) return false
+  const { data } = await supabase.from('line_bot_messages')
+    .select('message_id')
+    .eq('message_id', quotedMessageId)
+    .eq('line_user_id', ctx.sourceId)
+    .maybeSingle()
+  return !!data
 }
 
 /**

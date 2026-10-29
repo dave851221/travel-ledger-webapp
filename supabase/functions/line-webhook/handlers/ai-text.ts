@@ -1,9 +1,10 @@
 // ============================================================
-// handlers/ai-text.ts —— AI 核心（Gemini function calling）
+// handlers/ai-text.ts —— AI 核心（function calling）
 //
 // 走到這裡代表沒有任何明確指令認領這句話。查旅程、近期支出、對話歷史與
-// 全趟彙總組成 context，交給 `runToolLoop()`。模型可以先呼叫查詢工具
-// （list_expenses / get_balance / get_settlement_plan）把資料查清楚，
+// 一行「今天的行程」組成 context，交給 `ai.runToolLoop()`（用哪一家見 ai.ts）。
+// 其餘資料一律讓模型自己用工具查（帳務、彙總、行程、天氣；Claude 還能上網搜尋）——
+// 每則訊息都把整趟的彙總與行程塞進去既貴又會稀釋重點。
 // 最後一定要呼叫一支「終結函式」，這裡再依它決定送什麼出去：
 //
 //   propose_expenses       一到四張待確認的記帳卡片
@@ -11,15 +12,15 @@
 //   propose_expense_delete 「🗑 確認刪除？」卡（按了才軟刪除）
 //   analyze_receipt        重新閱讀某一筆的收據照片並回答
 //   reply                  一般聊天／查詢
+//   stay_silent            群組裡的「接話」其實不是在跟機器人講話 → 不回（只有接話才給這支）
 //
 // ⚠️ **模型不能直接改資料庫**：公開給它的只有唯讀工具與「提議」，
 //    真正的寫入一律要使用者按下卡片上的按鈕（handlers/postback.ts）。
-// ⚠️ 金額類的回答一律引用【全趟彙總】—— 那是伺服器用 Decimal 算好的（M6）；
+// ⚠️ 金額類的回答一律引用 get_trip_summary —— 那是伺服器用 Decimal 算好的（M6）；
 //    彙總沒涵蓋的角度才叫模型去 list_expenses。
 // ============================================================
 
 import { formatAmount } from "../../_shared/finance.ts"
-import { runToolLoop } from "../../_shared/gemini.ts"
 import { optionalString, toExpenseInput, toExpensePatch } from "../../_shared/tools/args.ts"
 import {
   expenseRef,
@@ -38,24 +39,32 @@ import {
   summarizeHistoryEntry,
   summarizeTripExpenses,
 } from "../guards.ts"
-import { aiUnavailableMessage, CHAT_HISTORY_TURNS, WEBAPP_URL } from "../config.ts"
-import { type EventContext, tripToday } from "../context.ts"
+import {
+  aiUnavailableMessage,
+  CHAT_HISTORY_TURNS,
+  FALLBACK_NOTICES,
+  WEB_SEARCH_MAX_USES,
+  WEBAPP_URL,
+} from "../config.ts"
+import { type EventContext, extendFollowup, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { type OutstandingDraft, photoPublicUrl, storePendingExpense, supersedeDraft } from "../drafts.ts"
 import {
+  ai,
   analyzeReceiptPhoto,
-  askGemini,
   fetchPhotoPart,
-  GEMINI_FALLBACK_MODELS,
-  GEMINI_OCR_MODELS,
-  geminiClient,
+  FOLLOWUP_TERMINAL_NAMES,
+  FOLLOWUP_TOOL_DECLARATIONS,
   memberAliasHint,
   READ_TOOL_NAMES,
+  STAY_SILENT_TOOL,
   TERMINAL_TOOL_NAMES,
   TEXT_TOOL_DECLARATIONS,
+  TRIP_SUMMARY_TOOL,
   YOSHI_SYSTEM_INSTRUCTION,
-} from "../gemini.ts"
-import { pushMessage, replyMessage } from "../line-api.ts"
+} from "../ai.ts"
+import { loadItinerary } from "../itinerary.ts"
+import { pushMessage, replyMessage, showLoading } from "../line-api.ts"
 import {
   buildDeleteConfirmCard,
   buildDraftLiffUrl,
@@ -65,11 +74,13 @@ import {
   replyEditPicker,
 } from "../messages.ts"
 import { runInBackground } from "../util.ts"
+import { itineraryTodayLine } from "../../_shared/tools/itinerary.ts"
+import { countryForTimezone } from "../../_shared/tools/weather.ts"
 import type { ToolArgs, ToolContext } from "../../_shared/tools/types.ts"
 import type { ExpenseRow, TripRow } from "../../_shared/types.ts"
 import type {
+  AiMessage,
   ChatHistoryRow,
-  GeminiContent,
   OutgoingMessage,
   PhotoSelectResponse,
   TextRoute,
@@ -99,6 +110,21 @@ interface AiScope {
   cleanText: string
   precision: Record<string, number>
   outstandingDrafts: OutstandingDraft[]
+  /** 改由備援回答時放在回覆最前面的一句話（FALLBACK_NOTICES） */
+  notice?: string
+}
+
+/** 所有終結分支都從這裡回覆，備援通知才不會漏掉哪一支 */
+function reply(scope: AiScope, messages: OutgoingMessage[]): Promise<void> {
+  return replyMessage(scope.ctx.replyToken, withNotice(scope.notice, messages), scope.ctx.sourceId)
+}
+
+/** 通知併進第一則文字；第一則是卡片就自己一則（LINE 一次最多 5 則） */
+export function withNotice(notice: string | undefined, messages: OutgoingMessage[]): OutgoingMessage[] {
+  if (!notice) return messages
+  const [first, ...rest] = messages
+  if (first?.type === 'text') return [{ ...first, text: `${notice}\n\n${first.text}` }, ...rest]
+  return [{ type: 'text', text: notice }, ...messages].slice(0, MAX_REPLY_MESSAGES)
 }
 
 function newNonce(): string {
@@ -109,14 +135,18 @@ function newNonce(): string {
 const REF_NOT_FOUND_TEXT = '😅 我找不到你說的那一筆（可能已經刪掉了，或我沒認出是哪一筆）。\n\n'
   + '請說得具體一點，例如「昨天的拉麵那筆」「9/3 小明付的計程車」，或輸入「編輯支出」「刪除支出」從清單點選。'
 
-/** 交給 Gemini。呼叫端已經確認 ctx.isBound，而且沒有任何指令認領這句話。 */
+/** 交給 AI。呼叫端已經確認 ctx.isBound，而且沒有任何指令認領這句話。 */
 export async function handleAiText(ctx: EventContext, route: TextRoute): Promise<void> {
   const { memberName, replyToken, sourceId, speakerLabel, speakerUserId, userState } = ctx
   const { cleanText } = route
   const tripId = userState.current_trip_id as string
   const loadDrafts = ctx.loadDrafts
+  const isFollowup = route.trigger === 'followup'
 
-  const [{ data: trip }, { data: expenses }, { data: history }, { data: allForSummary }] = await Promise.all([
+  // 一對一顯示「輸入中…」。不等它 —— 那只是一個動畫，不該拖慢回覆
+  runInBackground(showLoading(sourceId))
+
+  const [{ data: trip }, { data: expenses }, { data: history }, itinerary] = await Promise.all([
     supabase.from('trips').select('*').eq('id', tripId).single(),
     supabase.from('expenses')
       // id 是給 ref 用的（uuid 前 8 碼），模型要靠它指名「哪一筆」
@@ -133,14 +163,8 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
     // speaker_name 要一起撈：群組整串歷史是共用的，
     // 少了它 AI 分不出「我付的」是誰講的（L15、M17）。
     supabase.from('line_chat_history').select('role, content, speaker_name').eq('line_user_id', sourceId).in('role', ['user', 'model']).order('created_at', { ascending: false }).limit(CHAT_HISTORY_TURNS),
-    // 全趟支出，只為了算彙總（M6）。刻意不設 limit：
-    // 「這趟總共花多少」若只看得到一部分，答出來的數字是錯的，比不答更糟。
-    // 結清紀錄也要撈進來 —— summarizeTripExpenses 會自己決定哪些數字該含它。
-    supabase.from('expenses')
-      // description 是給「金額最大的幾筆」用的（K13）
-      .select('amount, currency, description, category, date, is_settlement, payer_data, split_data')
-      .eq('trip_id', tripId)
-      .is('deleted_at', null),
+    // 沒有行程頁的旅程是 null（見 itinerary.ts，有快取）
+    loadItinerary(tripId),
   ])
   // 旅程可能已被後台刪除（見 docs/DB_MAINTENANCE.md）。
   // 以前這裡直接讀 trip.name，整個 event 丟出例外 → 500 → LINE 會重送同一則訊息（M5）。
@@ -151,11 +175,13 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
     return
   }
 
-  // 不阻塞主流程，但交給 waitUntil 保證回應送出後仍寫得完
-  runInBackground(supabase.from('line_chat_history').insert({
+  // 不阻塞主流程，但交給 waitUntil 保證回應送出後仍寫得完。
+  // 接話的訊息要等 AI 判斷完才寫：它決定不回的話，那句話只是群組裡的閒聊，不該進對話歷史。
+  const recordUserTurn = () => runInBackground(supabase.from('line_chat_history').insert({
     line_user_id: sourceId, role: 'user', content: cleanText,
     speaker_user_id: speakerUserId, speaker_name: speakerLabel,
   }))
+  if (!isFollowup) recordUserTurn()
 
   // 舊紀錄的清理已改由資料庫的 pg_cron 排程負責（每天一次，見
   // supabase/migrations/20260903_cron_purge_line_history.sql）。
@@ -163,12 +189,23 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
   const today = tripToday(trip)
   const contextPrecision = (trip.precision_config ?? {}) as Record<string, number>
 
-  // 全趟的精確彙總。AI 只看得到最近 10 筆，自由查詢（K8–K13）過去一律答錯（M6）。
-  // rates 與主幣別是用來排序「金額最大的幾筆」的：跨幣別不折算就比不出大小
-  const tripSummary = summarizeTripExpenses(
-    allForSummary ?? [], trip.members ?? [], contextPrecision,
-    { rates: trip.rates, baseCurrency: trip.base_currency },
-  )
+  // 全趟的精確彙總（get_trip_summary）。AI 只看得到最近 10 筆，自由查詢（K8–K13）過去一律答錯（M6）。
+  // 以前每則訊息都算好塞進 context，現在模型問了才算。
+  const getTripSummary = async () => {
+    // 刻意不設 limit：「這趟總共花多少」若只看得到一部分，答出來的數字是錯的，比不答更糟。
+    // 結清紀錄也要撈進來 —— summarizeTripExpenses 會自己決定哪些數字該含它。
+    const { data: all } = await supabase.from('expenses')
+      // description 是給「金額最大的幾筆」用的（K13）
+      .select('amount, currency, description, category, date, is_settlement, payer_data, split_data')
+      .eq('trip_id', tripId)
+      .is('deleted_at', null)
+    // rates 與主幣別是用來排序「金額最大的幾筆」的：跨幣別不折算就比不出大小
+    return {
+      summary: summarizeTripExpenses(all ?? [], trip.members ?? [], contextPrecision, {
+        rates: trip.rates, baseCurrency: trip.base_currency,
+      }),
+    }
+  }
 
   // 每一筆都列 ref（uuid 前 8 碼）。以前是 #1～#10 的序號 ——
   // 序號只在「這一次的清單」裡有意義，模型一旦先呼叫 list_expenses 拿到 ref，
@@ -204,11 +241,7 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
 - 幣別：使用者明講（currency_source: stated）> 記帳偏好（preference）> 都沒有就填 none，
   currency 一律用上面的「記帳預設」；系統會再驗一次，說謊沒有好處
 ${memberAliasHint(trip.members)}
-【全趟彙總】（伺服器用 Decimal 算好的精確數字）
-⚠️ 回答金額類問題（總共花多少、誰付最多、我還欠多少、某分類多少）時**一律引用這裡的數字**，
-   絕對不要自己去加總下面那 10 筆 —— 那只是最近的一部分，加起來一定是錯的。
-   這裡沒涵蓋到的角度就呼叫 list_expenses / get_balance / get_settlement_plan。
-${tripSummary}
+【行程表】${itinerary ? `${itineraryTodayLine(itinerary, today)}（細節用 search_itinerary／get_itinerary_day／get_itinerary_overview 查）` : '這趟旅程沒有行程表'}
 
 【近期支出（最近10筆，用來指稱「剛剛那筆」與查明細，不要拿來算總額）】
 每一列開頭的 ref 就是指稱這筆支出的編號，要修改、刪除或看收據時把它填進 expense_ref。
@@ -230,22 +263,31 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
 
   // 真正的多輪對話。以前是把歷史壓成 "U: ... / Y: ..." 塞進單一 prompt，
   // 模型較難分辨哪些是自己說過的話。
-  const rawConversation: GeminiContent[] = [
+  const rawConversation: AiMessage[] = [
     { role: 'user', parts: [{ text: tripContext }] },
     // ⚠️ 這句以前是一段假的 JSON（`{"type":"chat",...}`）。走 function calling 之後
     //    那只會誘導模型在文字裡寫 JSON 而不是呼叫函式，改成純文字。
-    { role: 'model', parts: [{ text: '了解，我已掌握這趟旅程的設定。' }] },
+    { role: 'assistant', parts: [{ text: '了解，我已掌握這趟旅程的設定。' }] },
     // 查詢是新到舊，這裡反轉回舊到新才符合對話順序
-    ...orderedHistory.map((h: ChatHistoryRow): GeminiContent => ({
-      role: h.role === 'user' ? 'user' : 'model',
+    ...orderedHistory.map((h: ChatHistoryRow): AiMessage => ({
+      role: h.role === 'user' ? 'user' : 'assistant',
       parts: [{ text: summarizeHistoryEntry(h.role, h.content, h.speaker_name) }],
     })),
-    { role: 'user', parts: [{ text: cleanText }] },
+    {
+      role: 'user',
+      parts: [{
+        text: isFollowup
+          ? `【這句話沒有叫你】是 ${memberName} 在你剛回覆完之後接著說的，可能是在跟群組裡的其他人聊天。`
+            + `如果明顯不是在跟你講話，或只是笑、附和、道謝（「哈哈」「好喔」「謝謝」）而沒有要你做什麼，呼叫 ${STAY_SILENT_TOOL}；`
+            + `有在問你、要你查或記東西，就照常回答。\n\n${cleanText}`
+          : cleanText,
+      }],
+    },
   ]
 
-  // Gemini 的 contents 預期 user / model 交替。歷史裡可能出現連續兩則 model
+  // 兩家都預期 user / assistant 交替。歷史裡可能出現連續兩則 assistant
   // （例如拍照產生的草稿沒有對應的使用者文字），先合併起來避免格式異常。
-  const conversation = rawConversation.reduce((acc: GeminiContent[], turn: GeminiContent) => {
+  const conversation = rawConversation.reduce((acc: AiMessage[], turn: AiMessage) => {
     const prev = acc[acc.length - 1]
     if (prev && prev.role === turn.role) {
       prev.parts.push(...turn.parts)
@@ -280,58 +322,82 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
     }
   }
 
-  const toolCtx: ToolContext = { db: supabase, trip, today, actorName: memberName }
+  const toolCtx: ToolContext = {
+    db: supabase, trip, today, actorName: memberName,
+    loadItinerary: () => loadItinerary(tripId),
+  }
   const scope: AiScope = {
     ctx, trip, tripId, today, cleanText,
     precision: contextPrecision,
     outstandingDrafts,
   }
 
+  // 上網搜尋時給個大概的位置（「附近的拉麵」）：今天行程所在的城市與旅程時區
+  const timezone = trip.timezone ?? itinerary?.timeZone ?? undefined
+  const searchLocation = {
+    city: itinerary?.days.find((d) => d.date === today)?.city,
+    country: timezone ? countryForTimezone(timezone) : undefined,
+    timezone,
+  }
+
   try {
-    const result = await runToolLoop({
-      client: geminiClient,
-      // 有附收據時改用視覺模型清單
-      models: attachedPhoto ? GEMINI_OCR_MODELS : GEMINI_FALLBACK_MODELS,
-      contents: conversation,
-      systemInstruction: YOSHI_SYSTEM_INSTRUCTION,
-      declarations: TEXT_TOOL_DECLARATIONS,
-      terminalNames: TERMINAL_TOOL_NAMES,
+    const result = await ai.runToolLoop({
+      // 有附收據時改用視覺模型
+      task: attachedPhoto ? 'vision' : 'text',
+      messages: conversation,
+      system: YOSHI_SYSTEM_INSTRUCTION,
+      declarations: isFollowup ? FOLLOWUP_TOOL_DECLARATIONS : TEXT_TOOL_DECLARATIONS,
+      terminalNames: isFollowup ? FOLLOWUP_TERMINAL_NAMES : TERMINAL_TOOL_NAMES,
       // ⚠️ 只讓模型執行唯讀工具。寫入類的 create／update／delete_expense 雖然
       //    在 registry 裡，但沒有公開給它，這裡再擋一次 —— 名字是模型給的字串。
       execute: (name: string, args: ToolArgs) => {
+        if (name === TRIP_SUMMARY_TOOL) return getTripSummary()
         if (!READ_TOOL_NAMES.includes(name)) {
           return Promise.resolve({ error: `Tool ${name} is not available here` })
         }
         return runTool(name, args, toolCtx)
       },
+      // 查行程、查帳、上網可能要好幾輪；時間不夠時 deadline 會強迫收尾
+      maxRounds: 4,
       // ⚠️ 以 LINE 送出事件的時間為準：排隊延遲也要算進去
       deadlineAt: ctx.eventTimestamp + AI_DEADLINE_MS,
-      generationConfig: { temperature: 0.4 },
+      temperature: 0.4,
+      // 只有 Claude 會用（Gemini 忽略）。接話的訊息不給：多半只是閒聊，不值得花搜尋的錢
+      webSearch: isFollowup ? undefined : { maxUses: WEB_SEARCH_MAX_USES, location: searchLocation },
+      onFallback: (reason) => { scope.notice = FALLBACK_NOTICES[reason] },
     })
 
     console.log(`[AI] ${result.model} → ${result.call.name}`)
     const { args, name } = result.call
+    if (name === STAY_SILENT_TOOL) {
+      console.log(`[AI] Follow-up was not addressed to the bot, staying silent: "${cleanText.substring(0, 80)}"`)
+      return
+    }
+    if (isFollowup) recordUserTurn()
     switch (name) {
       case 'propose_expenses':
         await proposeExpenses(scope, args, result.extraText)
-        return
+        break
       case 'propose_expense_update':
         await proposeExpenseUpdate(scope, args, result.extraText)
-        return
+        break
       case 'propose_expense_delete':
         await proposeExpenseDelete(scope, args, result.extraText)
-        return
+        break
       case 'analyze_receipt':
         await analyzeReceipt(scope, args)
-        return
+        break
       default:
         await plainReply(scope, args)
-        return
     }
+    // 回覆過了，同一個人接下來幾分鐘的話不必再 @（群組的提及模式才有作用）
+    extendFollowup(ctx)
   } catch (e) {
     console.error('[AI_ERROR]', e)
+    // 接話本來就可能不是在跟機器人講話，出錯就安靜，不要在群組裡冒出一句錯誤訊息
+    if (isFollowup) return
     const msg = aiUnavailableMessage(e) ?? '😵 AI 處理時發生錯誤，請稍後再試。'
-    await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
+    await reply(scope, [{ type: 'text', text: msg }])
   }
 }
 
@@ -371,9 +437,9 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
 
   const rawList = Array.isArray(args.expenses) ? args.expenses : []
   if (rawList.length === 0) {
-    await replyMessage(replyToken, [{
+    await reply(scope, [{
       type: 'text', text: '😅 我沒看懂要記什麼，可以再說一次嗎？例如「晚餐 300」。', quickReply: boundQR,
-    }], sourceId)
+    }])
     return
   }
 
@@ -392,11 +458,11 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
   const unknownMembers = [...new Set(prepared.flatMap(p => p.unresolvedMembers))]
   if (unknownMembers.length > 0) {
     console.warn(`[TEXT] Unknown members detected: ${unknownMembers.join(', ')}`)
-    await replyMessage(replyToken, [{
+    await reply(scope, [{
       type: 'text',
       text: `😅 我從您的描述中辨識到不存在的成員：${unknownMembers.join('、')}\n\n目前旅程成員只有：${trip.members.join('、')}\n\n可能是名字打錯或漏字了，請改用正確的成員名稱再說一次。`,
       quickReply: boundQR,
-    }], sourceId)
+    }])
     return
   }
 
@@ -404,18 +470,18 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
   // （文字路徑沒有照片要留，直接請使用者換一個幣別就好。）
   const rejected = prepared.find(p => p.reject)
   if (rejected?.reject) {
-    await replyMessage(replyToken, [{ type: 'text', text: rejected.reject, quickReply: boundQR }], sourceId)
+    await reply(scope, [{ type: 'text', text: rejected.reject, quickReply: boundQR }])
     return
   }
 
   // 金額是 0 或負數：多半是句子裡沒講多少錢（「晚餐」），出一張 0 元的卡片只會讓人困惑
   const noAmount = prepared.find(p => !(p.expense.amount > 0))
   if (noAmount) {
-    await replyMessage(replyToken, [{
+    await reply(scope, [{
       type: 'text',
       text: `😅「${noAmount.expense.description || '這筆'}」多少錢呢？請連金額一起說，例如「晚餐 300」。`,
       quickReply: boundQR,
-    }], sourceId)
+    }])
     return
   }
 
@@ -482,7 +548,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
   // storePendingExpense 與 replyMessage 並行執行，縮短回覆延遲
   await Promise.all([
     ...pendingWrites,
-    replyMessage(replyToken, [...leadText, ...cards].slice(0, MAX_REPLY_MESSAGES), sourceId),
+    reply(scope, [...leadText, ...cards].slice(0, MAX_REPLY_MESSAGES)),
   ])
 }
 
@@ -494,11 +560,11 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
  */
 async function proposeExpenseUpdate(scope: AiScope, args: ToolArgs, extraText?: string): Promise<void> {
   const { ctx, trip, tripId, today, cleanText, precision } = scope
-  const { boundQR, memberName, replyToken, sourceId } = ctx
+  const { boundQR, memberName, sourceId } = ctx
 
   const existing = await findByRef(args.expense_ref, tripId)
   if (!existing) {
-    await replyMessage(replyToken, [{ type: 'text', text: REF_NOT_FOUND_TEXT, quickReply: boundQR }], sourceId)
+    await reply(scope, [{ type: 'text', text: REF_NOT_FOUND_TEXT, quickReply: boundQR }])
     return
   }
 
@@ -506,30 +572,30 @@ async function proposeExpenseUpdate(scope: AiScope, args: ToolArgs, extraText?: 
     today, actorName: memberName, sourceText: cleanText,
   })
   if (result.unresolvedMembers.length > 0) {
-    await replyMessage(replyToken, [{
+    await reply(scope, [{
       type: 'text',
       text: `😅 我從您的描述中辨識到不存在的成員：${result.unresolvedMembers.join('、')}\n\n目前旅程成員只有：${trip.members.join('、')}\n\n請改用正確的成員名稱再說一次。`,
       quickReply: boundQR,
-    }], sourceId)
+    }])
     return
   }
   if (result.reject) {
-    await replyMessage(replyToken, [{ type: 'text', text: result.reject, quickReply: boundQR }], sourceId)
+    await reply(scope, [{ type: 'text', text: result.reject, quickReply: boundQR }])
     return
   }
   if (!(result.expense.amount > 0)) {
-    await replyMessage(replyToken, [{
+    await reply(scope, [{
       type: 'text', text: '😅 金額必須大於 0。要改成多少呢？例如「改成 500」。', quickReply: boundQR,
-    }], sourceId)
+    }])
     return
   }
   // 出一張「什麼都沒改」的卡片只會讓人困惑，直接說明
   if (result.changes.length === 0) {
-    await replyMessage(replyToken, [{
+    await reply(scope, [{
       type: 'text',
       text: `🤔 「${existing.description}」本來就是這樣了，沒有需要改的地方。\n\n要改什麼可以講具體一點，例如「改成 500」「日期改昨天」。`,
       quickReply: boundQR,
-    }], sourceId)
+    }])
     return
   }
 
@@ -556,7 +622,7 @@ async function proposeExpenseUpdate(scope: AiScope, args: ToolArgs, extraText?: 
       },
       tid: tripId,
     }),
-    replyMessage(replyToken, [...leadText, buildUpdatePreviewCard({
+    reply(scope, [...leadText, buildUpdatePreviewCard({
       existing: {
         id: existing.id,
         description: existing.description,
@@ -569,18 +635,18 @@ async function proposeExpenseUpdate(scope: AiScope, args: ToolArgs, extraText?: 
       nonce,
       // 開的是**原內容**：LiffEdit 每次都直接查 DB（T2），沒辦法預填這裡提議的值
       editUrl: buildEditLiffUrl(existing, tripId, sourceId),
-    })], sourceId),
+    })]),
   ])
 }
 
 /** 「🗑 確認刪除？」卡片。真正的軟刪除在 `act: 'del'`。 */
 async function proposeExpenseDelete(scope: AiScope, args: ToolArgs, extraText?: string): Promise<void> {
   const { ctx, tripId, precision } = scope
-  const { boundQR, replyToken, sourceId } = ctx
+  const { boundQR, sourceId } = ctx
 
   const existing = await findByRef(args.expense_ref, tripId)
   if (!existing) {
-    await replyMessage(replyToken, [{ type: 'text', text: REF_NOT_FOUND_TEXT, quickReply: boundQR }], sourceId)
+    await reply(scope, [{ type: 'text', text: REF_NOT_FOUND_TEXT, quickReply: boundQR }])
     return
   }
 
@@ -595,7 +661,7 @@ async function proposeExpenseDelete(scope: AiScope, args: ToolArgs, extraText?: 
 
   await Promise.all([
     storePendingExpense(sourceId, nonce, { kind: 'delete', eid: existing.id, tid: tripId }),
-    replyMessage(replyToken, [...leadText, buildDeleteConfirmCard({
+    reply(scope, [...leadText, buildDeleteConfirmCard({
       existing: {
         id: existing.id,
         description: existing.description,
@@ -605,7 +671,7 @@ async function proposeExpenseDelete(scope: AiScope, args: ToolArgs, extraText?: 
         category: existing.category,
       },
       nonce,
-    })], sourceId),
+    })]),
   ])
 }
 
@@ -624,7 +690,7 @@ function findByRef(ref: unknown, tripId: string): Promise<ExpenseRow | null> {
 /** 一般聊天／查詢的回覆 */
 async function plainReply(scope: AiScope, args: ToolArgs): Promise<void> {
   const { ctx } = scope
-  const { boundQR, replyToken, sourceId } = ctx
+  const { boundQR, sourceId } = ctx
   let safeContent = String(args.text ?? '')
 
   // 最後一道防線：模型現在**可以**提議修改與刪除，但那要使用者按了確認才生效。
@@ -639,7 +705,7 @@ async function plainReply(scope: AiScope, args: ToolArgs): Promise<void> {
   if (safeContent.length > 4900) safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
   if (!safeContent) safeContent = 'Yoshi! 🥚 有什麼需要幫忙的嗎？'
   runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent }))
-  await replyMessage(replyToken, [{ type: 'text', text: safeContent, quickReply: boundQR }], sourceId)
+  await reply(scope, [{ type: 'text', text: safeContent, quickReply: boundQR }])
 }
 
 /**
@@ -650,7 +716,7 @@ async function plainReply(scope: AiScope, args: ToolArgs): Promise<void> {
  */
 async function analyzeReceipt(scope: AiScope, args: ToolArgs): Promise<void> {
   const { ctx, tripId, cleanText, precision } = scope
-  const { boundQR, replyToken, sourceId } = ctx
+  const { boundQR, sourceId } = ctx
   const question = optionalString(args.question) ?? '請詳細描述此收據的所有品項與金額'
 
   const label = (e: RecentExpense) =>
@@ -675,7 +741,7 @@ async function analyzeReceipt(scope: AiScope, args: ToolArgs): Promise<void> {
   const refPick = byRef && (byRef.photo_urls?.length ?? 0) > 0 ? byRef as RecentExpense : null
 
   if (refPick) {
-    await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在重新分析收據照片，請稍候...' }], sourceId)
+    await reply(scope, [{ type: 'text', text: '🔍 正在重新分析收據照片，請稍候...' }])
     try {
       await analyzeChosen(refPick)
     } catch (photoErr) {
@@ -686,7 +752,7 @@ async function analyzeReceipt(scope: AiScope, args: ToolArgs): Promise<void> {
   }
 
   // ② ref 沒填或對不上 → 全庫找有照片的支出
-  await replyMessage(replyToken, [{ type: 'text', text: '🔍 正在查詢符合描述的支出紀錄...' }], sourceId)
+  await reply(scope, [{ type: 'text', text: '🔍 正在查詢符合描述的支出紀錄...' }])
   try {
     const { data: allExpenses } = await supabase.from('expenses')
       .select('id, description, amount, currency, category, date, photo_urls')
@@ -726,7 +792,11 @@ ${expenseList}
 若找不到 → {"found": false}
 使用者說「剛剛」「最新」又沒指名店名時，選日期最近的那一筆。`
 
-      const selectText = await askGemini([{ role: "user", parts: [{ text: selectPrompt }] }])
+      const selectText = await ai.generate({
+        task: 'text',
+        messages: [{ role: 'user', parts: [{ text: selectPrompt }] }],
+        json: true,
+      })
       const selectRes = JSON.parse(extractJSON(selectText)) as PhotoSelectResponse
       chosen = selectRes.found ? pickExpenseByRef(selectRes.ref, pool) : null
     }

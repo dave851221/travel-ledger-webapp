@@ -142,24 +142,59 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | `expenses.ts` | 上面那八支函式 |
 | `balance.ts` | `getBalance`／`getSettlementPlan`，包 `calculateMemberBalances`／`calculateSettlements` |
 | `trip.ts` | `getTrip`（不輸出 `access_code`） |
+| `itinerary.ts` | 行程表的格式化與搜尋：`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`。輸出精簡的純文字，**網址一律拿掉**（最佔 token）。行程從哪來由 `ctx.loadItinerary` 決定 |
+| `weather.ts` | `get_weather`：Open-Meteo（免費、免 key），沒給地點就用行程那一天的路線座標；早／午／晚各給一個降雨機率 |
 | `registry.ts` | `TOOLS`、`runTool`、`toGeminiFunctionDeclarations`。同一份定義同時給 Gemini function calling 與未來 MCP 的 `tools/list` 用（見 [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md)） |
 
 這一層**不碰 `Deno.env`、不建 Supabase client**（client 由呼叫端放進 context），
 所以 vitest 能直接測 —— `expenses.test.ts` 用假的 client 撐起 `from().select().eq()…` 這條鏈。
+`ToolContext` 另有兩個選填的注入點：`loadItinerary`（行程表）與 `fetch`（天氣，測試塞假的）。
 LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations 與 `runTool`；
 寫入類的 `create_expense` / `update_expense` / `delete_expense` **刻意不公開給模型**
 （那三支按下去就落地了，對話式管道一律要先出一張確認卡）。
 `registry.ts` 在 `check:functions` 裡仍是**獨立的進入點**，
 不然只有 MCP 會用到的那幾支工具永遠不會被型別檢查。
 
-### Gemini 的呼叫與 function calling 迴圈 `_shared/gemini.ts`
+### AI 供應商層 `_shared/ai/`（Gemini／Claude 可切換）
 
-`createGeminiClient({ apiKey, fetchImpl })` 是單一模型、單次呼叫的薄殼；
-`runToolLoop({ client, models, contents, declarations, terminalNames, execute, … })`
-是 LINE 文字路徑的骨幹（見下方「LINE Bot Edge Function」第 3 點）。
-這一層**不碰 `Deno.env`**（key 與 fetch 都由呼叫端注入），所以 `gemini.test.ts` 用假 client 就測得動。
+handlers 只認得 `AiProvider`（`_shared/ai/types.ts`）：一次性的 `generate({ task, messages, json, schema })`
+（OCR、轉錄、挑選）與 `runToolLoop({ task, messages, declarations, terminalNames, execute, … })`
+（LINE 文字路徑的骨幹，見下方「LINE Bot Edge Function」第 3 點）。訊息是與供應商無關的
+`AiMessage`（`role: user | assistant`，part 是 `{ text }` 或 `{ media: { mimeType, data } }`）。
 
-⚠️ **三條已查證的 API 限制，違反的症狀都很難看懂**：
+| 檔案 | 內容 |
+| :--- | :--- |
+| `types.ts` | 介面、訊息形狀、`RetryableError`／`FatalError`、錯誤前綴（`RATE_LIMIT:`／`AI_QUOTA:`／`AI_BUSY:`） |
+| `loop.ts` | 兩家迴圈共用的規則：每輪逾時（開著上網搜尋的那輪放寬到 25 秒）、何時強迫收尾、終結函式怎麼挑、工具結果截斷 |
+| `gemini.ts` | Gemini 的 client、`runGeminiToolLoop`、`createGeminiProvider`（模型清單由呼叫端給） |
+| `claude.ts` | `createClaudeProvider`（官方 SDK，`npm:@anthropic-ai/sdk`，預設 `claude-haiku-5-5`、effort `low`） |
+| `fallback.ts` | `withFallback(primary, backup)`：主要的失敗或做不到（語音）就交給備援。失敗時呼叫 request 的 `onFallback('quota' \| 'error')`；額度用完後 10 分鐘內直接用備援 |
+
+**切換**：`supabase secrets set AI_PROVIDER=claude`（或 `gemini`，預設），選擇邏輯在 `line-webhook/ai.ts`。
+選 claude 時 Gemini 是備援，**語音一律走 Gemini**（Claude 沒有音訊輸入）；設了 claude 卻沒有
+`ANTHROPIC_API_KEY` 時退回 Gemini 並在 log 留警告。共用的 schema 一律小寫，
+Gemini 的大寫 `type`（`toGeminiSchema`）與 Claude 的 `additionalProperties: false`（`toClaudeSchema`）各自在檔案裡轉。
+這一層**不碰 `Deno.env`**，client 由呼叫端注入，`gemini.test.ts`／`claude.test.ts`／`fallback.test.ts` 用假 client 測。
+
+**改由備援回答時要告訴使用者**：handlers 在 `onFallback` 裡記下 `FALLBACK_NOTICES`（`config.ts`），
+併進回覆的第一則文字（`ai-text.ts` 的 `withNotice`、`image.ts`）。
+replyToken 只能用一次，「先回一則請稍候、再補答案」要靠推播（免費方案每月 200 則），所以不這樣做。
+
+**上網搜尋**（`ToolLoopRequest.webSearch`）只有 Claude 支援：Anthropic 的 server tool
+`web_search_20250305`（Haiku 沒有 dynamic filtering 的新版），一次約 US$0.01 另計，
+一則訊息最多 2 次（`WEB_SEARCH_MAX_USES`，跨輪合計）。Gemini 直接忽略這個選項，所以 prompt 寫「如果有 web_search」。
+回應可能是 `stop_reason: pause_turn`（搜尋還沒跑完）—— 原樣再送一次，**不能補 user 訊息**。
+Console 沒開放 web search 時整個請求 400，`claude.ts` 偵測到就關掉搜尋重打，不讓每則訊息都掉到備援。
+system 自己帶 `cache_control`：每則訊息的旅程 context 都不同，跨訊息吃得到快取的只有 system + tools 這段。
+
+⚠️ **Claude 這側的限制**：Haiku 5.5 收到非預設的 `temperature` 會 400，所以一律不送；
+圖片的 `media_type` 必須與內容一致（PNG 截圖標成 jpeg 會 400），由 base64 開頭判斷（`sniffImageType`）；
+迴圈用 `tool_choice: any`（沒有 `allowedFunctionNames`，最後一輪改用一句話要求收尾）；
+SDK 的自動重試關掉（它連逾時也重試，等待直接翻倍），429／5xx 自己補打一次。
+SDK 版本在 `_shared/deps.ts`、`package.json`（devDependency，vitest 用）、`src/types/modules.d.ts` 三處，**升級時一起改**。
+每次呼叫都會留一行 `[AI] claude … ms in= cache_r= out=`，速度與 token 用量看這一行。
+
+⚠️ **Gemini 這側三條已查證的 API 限制，違反的症狀都很難看懂**：
 1. `generateContent` 不能同時帶 `tools` 與 `responseMimeType: application/json`
    （Gemini 3 以外直接 400）。走工具的路徑因此不用 JSON mode，改 `toolConfig.functionCallingConfig.mode = 'ANY'`。
 2. Gemini 3 的 `functionCall` part 帶 `thoughtSignature`，下一輪必須**原樣送回**，而且**簽章綁定模型** ——
@@ -178,6 +213,11 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 格式裝不下的內容寫成 `blocks/` 裡的小元件塞進 `extra`；registry 也接受 `{ component }` 整頁自訂，但應該很少用。
 `plan.test.ts` 會驗證每一份註冊的行程（日期順序、時間格式、住宿參照、連結寫法）。
 **Leaflet 不再由 `index.html` 載入**：使用者展開「每日路線地圖」時才由 `loadLeaflet.ts` 從 CDN 下載。
+**LINE Bot 讀同一份行程**：`vite build` 結束時 `vite.config.ts` 的 `itineraryJson` plugin 用 Vite SSR 載入
+`export.ts`，每趟輸出 `dist/itinerary/<tripId>.json`，跟著網頁部署到 GitHub Pages；
+Bot 從 `WEBAPP_URL` 讀（`line-webhook/itinerary.ts`，快取 10 分鐘）。**改行程只要 push 網頁，不必重新部署 Bot**。
+`extra` 客製區塊是 React 元件，輸出時丟掉 —— **寫在那裡的內容 Bot 看不到**。
+JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`），`export.test.ts` 會拿每一份真的行程去跑 Bot 的格式化，兩邊漂移會直接失敗。
 新增方式（也是給 AI 的規格書）見 [`docs/ITINERARY_AUTHORING.md`](docs/ITINERARY_AUTHORING.md)。
 
 ### 後端（Supabase）
@@ -213,21 +253,22 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 | `config.ts` | ~45 | env、`WEBAPP_URL`、`RECEIPTS_BUCKET`、TTL、所有路由關鍵字表 |
 | `db.ts` | ~12 | service-role 的 Supabase client 單例 |
 | `util.ts` | ~95 | `runInBackground`、時區推測、`requiresAccessCode`、`isPendingExpired` |
-| `line-api.ts` | ~100 | 驗簽、reply／push、成員名稱、`downloadLineContent` |
+| `line-api.ts` | ~130 | 驗簽、reply／push（群組裡送出的訊息 id 記進 `line_bot_messages`）、「輸入中」動畫、成員名稱、`downloadLineContent` |
+| `itinerary.ts` | ~45 | 從 GitHub Pages 讀這趟的行程 JSON，isolate 內快取 10 分鐘（含「沒有行程」） |
 | `drafts.ts` | ~185 | 草稿的存取與失效（`line_chat_history` + `line_processed_actions`）。只有 `kind` 為空或 `expense` 的列算草稿 |
 | `messages.ts` | ~470 | 快速回覆、Flex 卡片（記帳／✏️ 修改預覽／🗑 確認刪除）、LIFF 網址、自我介紹全文 |
-| `gemini.ts` | ~365 | 模型清單、OCR schema、system instruction、對模型公開的函式清單、OCR／轉錄 |
-| `context.ts` | ~155 | `EventContext` 與 `buildEventContext`（一則事件只查一次），含 `eventTimestamp` |
-| `types.ts` | ~350 | LINE 事件、postback、DB 列、Gemini 往來的型別 |
+| `ai.ts` | ~350 | 選用哪一家 AI（`ai`）、Gemini 模型清單、OCR schema、system instruction、對模型公開的函式清單、重讀收據／轉錄 |
+| `context.ts` | ~195 | `EventContext` 與 `buildEventContext`（一則事件只查一次），含 `eventTimestamp`；群組接話的 `extendFollowup`／`isInFollowupWindow`／`isQuotingBot` |
+| `types.ts` | ~350 | LINE 事件、postback、DB 列、AI 訊息的型別 |
 | `guards.ts` | ~430 | 與 LINE 有關的純函式（見下） |
 | `handlers/postback.ts` | ~505 | undo / cur / del / **upd** / save / cancel（寫入走 `_shared/tools/`） |
 | `handlers/image.ts` | ~275 | 收據 OCR（驗證走 `prepareExpense`） |
 | `handlers/audio.ts` | ~55 | 語音轉文字（回傳 transcript 給文字路徑） |
 | `handlers/commands.ts` | ~640 | 群組觸發判斷 + 所有明確指令與快捷查詢 |
-| `handlers/ai-text.ts` | ~735 | AI 核心：組 context → `runToolLoop` → 五個終結分支（驗證走 `prepareExpense`） |
+| `handlers/ai-text.ts` | ~735 | AI 核心：組 context → `ai.runToolLoop` → 五個終結分支（驗證走 `prepareExpense`） |
 
 **import 方向是單向的，不要繞回去**：
-`config → db → line-api → drafts / messages / gemini → context → handlers/* → index`。
+`config → db → line-api → drafts / messages / ai → context → handlers/* → index`。
 
 沒有副作用的純函式分成兩處：
 
@@ -241,8 +282,8 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
   它同時**原樣轉出** `validate.ts` 的全部內容，所以 `guards.test.ts` 一行都不必改。
 
 兩邊都由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
-`check:functions` 列了四個進入點（`line-webhook/index.ts`、`liff-notify/index.ts`、
-`_shared/tools/registry.ts`、`_shared/gemini.ts`），其餘模組透過 import 一起被檢查。
+`check:functions` 列了這幾個進入點：`line-webhook/index.ts`、`liff-notify/index.ts`、
+`_shared/tools/registry.ts`，以及 `_shared/ai/` 的 `gemini.ts`／`claude.ts`／`fallback.ts`，其餘模組透過 import 一起被檢查。
 `guards.ts` 只 import `_shared/finance.ts`、`_shared/deps.ts`（Decimal）與 `_shared/validate.ts` ——
 `vitest.config.ts` 的 alias 用 `/^(?:\.\.?\/)+(?:_shared\/)?deps\.ts$/` 涵蓋所有相對寫法
 （`./deps.ts`、`../deps.ts`、`../_shared/deps.ts`、`../../deps.ts`）。
@@ -257,17 +298,20 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
    切換旅程時原綁定會留著（`current_trip_id` 與 `pending_trip_id` 可同時有值），
    10 分鐘沒動作或輸入「取消綁定」就放棄；綁定／斷開成功都會 `supersedeAllDrafts()`
 3. **文字訊息**：先比對**精確**的快捷指令（直接查 DB），其餘全部交給
-   **Gemini function calling 迴圈**（`_shared/gemini.ts` 的 `runToolLoop`）。
-   模型可以先呼叫唯讀工具（`list_expenses`／`get_balance`／`get_settlement_plan`）把資料查清楚，
+   **AI 的 function calling 迴圈**（`ai.runToolLoop`，實作在 `_shared/ai/`）。
+   **context 只放必要的**：旅程設定、最近 10 筆、草稿、最近 8 輪對話，加上**一行**今天的行程（`itineraryTodayLine`）。
+   其餘讓模型用唯讀工具自己查：帳務（`list_expenses`／`get_balance`／`get_settlement_plan`／`get_trip_summary`）、
+   行程（`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`）、天氣（`get_weather`），
+   Claude 另外可以上網（`web_search`）。`get_trip_summary` 就是以前每則都附的【全趟彙總】，改成問了才算（`ai-text.ts` 本地執行）。
    最後一定要呼叫一支終結函式：`propose_expenses`（1–4 張記帳卡，所以一句話記得了多筆）、
    `propose_expense_update`（✏️ 修改預覽卡）、`propose_expense_delete`（🗑 確認刪除卡）、
-   `analyze_receipt`、`reply`。
+   `analyze_receipt`、`reply`；群組「接話」另有 `stay_silent`（不是在跟它講話就不回）。
    ⚠️ **模型不能直接改資料庫**：所有寫入都要使用者按下卡片按鈕（第 5 點）。
    `deadlineAt = event.timestamp + 45s`，以 **LINE 送出事件的時間**為準（排隊延遲要算進去）。
-   細節與踩過的限制見上面的 `_shared/gemini.ts` 段落與 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md) 第 14 章。
-4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → Gemini OCR → Flex Message 預覽卡片。
-   **OCR 路徑維持 JSON mode**（`askGemini` + `OCR_RESPONSE_SCHEMA`），不走工具迴圈
-4b. **語音訊息**：下載 m4a → Gemini 逐字轉錄 → **當成使用者打的字**走上面第 3 點的流程
+   細節與踩過的限制見上面的 `_shared/ai/` 段落與 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md) 第 14 章。
+4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → AI OCR → Flex Message 預覽卡片。
+   **OCR 路徑維持 JSON mode**（`ai.generate` + `OCR_RESPONSE_SCHEMA`），不走工具迴圈
+4b. **語音訊息**：下載 m4a → Gemini 免費版逐字轉錄（不管 `AI_PROVIDER` 是什麼；中文寫繁體，英日文照原文）→ **當成使用者打的字**走上面第 3 點的流程
    （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
 5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`。
    按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
@@ -278,6 +322,12 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
    否則使用者打「取消」會取消到一張修改卡，AI 也會拿它的 nonce 去填 `corrects_draft`。
    `upd` 不寫 `saved` 列（與 `liff-notify` 的 `mode === 'update'` 一致，見 J11）
 6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式。
+   提及模式下另有兩種不必 @ 的情況（`TextRoute.trigger`）：
+   - `quote`：對機器人的訊息按 LINE 的「回覆」。`line-api.ts` 把群組裡送出的訊息 id 記在 `line_bot_messages`，
+     對得上 `quotedMessageId` 就算（7 天後由 pg_cron 清掉）。
+   - `followup`：機器人剛回覆過的**同一個人**，3 分鐘內的下一句（`line_user_states.followup_*`，每次回覆往後延）。
+     可能只是在跟別人聊天，所以多給一支 `stay_silent`、不給上網搜尋、出錯也不回；
+     AI 決定不回時那句話不寫進對話歷史。
    群組成員共用同一份綁定與偏好（刻意的設計），但每次互動都會記錄實際發言者，
    對話歷史也以「發言者：內容」的形式餵進 prompt。
    `cleanText` 只移除「提及機器人自己」的那幾段（`stripSelfMentions`），`@其他人` 要留著。
@@ -291,7 +341,7 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 分類比對旅程的分類清單、日期檢查格式與合理範圍。
 金額類的查詢不靠 AI 算術：`summarizeTripExpenses` 在伺服器端用 Decimal 算好
 各幣別合計、每人已付／應付／淨額、各分類合計、逐日合計與金額最大的 3 筆，
-以【全趟彙總】放進 context。
+模型呼叫 `get_trip_summary` 時才算、才給。
 付款人與分攤為空時補上與前端 `quickAdd` 一致的預設值。
 任何被修正的欄位都會告知使用者，不會默默改掉。細節見 [`docs/LINE_BOT.md`](docs/LINE_BOT.md)，
 使用情境與回歸檢查表見 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md)。
@@ -300,6 +350,9 @@ LINE 的文字路徑會 import `registry.ts` 拿**唯讀**工具的 declarations
 
 **所需密鑰**：`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`GEMINI_API_KEY`、
 `WEBAPP_URL`（`SUPABASE_URL` 與 `SUPABASE_SERVICE_ROLE_KEY` 由平台自動注入）。
+改用 Claude 時再加 `ANTHROPIC_API_KEY` 與 `AI_PROVIDER=claude`（選填 `CLAUDE_MODEL`），
+**花費上限設在 Anthropic Console 的 Workspace**，程式裡沒有另外的用量管制。
+上網搜尋要在 Console 的組織設定裡開放 web search，沒開的話機器人照常運作、只是不會上網。
 
 ---
 

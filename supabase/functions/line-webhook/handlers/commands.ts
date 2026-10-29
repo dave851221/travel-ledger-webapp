@@ -25,7 +25,7 @@ import {
   UNDO_KEYWORDS,
   WEBAPP_URL,
 } from "../config.ts"
-import { type EventContext, tripToday } from "../context.ts"
+import { type EventContext, isInFollowupWindow, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { cancelDraft, supersedeAllDrafts } from "../drafts.ts"
 import { replyMessage } from "../line-api.ts"
@@ -78,6 +78,8 @@ export function routeTextMessage(
   ctx: EventContext,
   rawText: string,
   mentionees: Mentionee[] | undefined,
+  /** 群組裡對機器人的訊息按了「回覆」（index.ts 查好的，見 isQuotingBot） */
+  quotingBot = false,
 ): TextRoute | null {
   const { isBinding, isBound, isGroup, mentionRequired } = ctx
 
@@ -106,7 +108,10 @@ export function routeTextMessage(
   //   - 全回應模式（mention_required=false）→ 處理所有訊息
   //   - 快捷指令、設定指令 → 免觸發
   //   - AI 記帳/聊天 → 須 @提及 或名字開頭
+  //   - 對機器人的訊息按「回覆」→ 等同 @提及
+  //   - 機器人剛回覆過的人，幾分鐘內的下一句 → 接話（AI 判斷不是在跟它講話就不回）
   let shouldProcess = !isGroup
+  let trigger: TextRoute['trigger'] = 'direct'
   if (isGroup) {
     if (!mentionRequired) {
       // 全回應模式：群組所有訊息皆處理
@@ -120,6 +125,13 @@ export function routeTextMessage(
     } else if (isBound && (isIdCommand || isManagement)) {
       // 已綁定：管理指令（含切換觸發模式）免觸發
       shouldProcess = true
+    } else if (quotingBot) {
+      shouldProcess = true
+      trigger = 'quote'
+    } else if (!isBinding && isInFollowupWindow(ctx)) {
+      // ⚠️ 等密碼中不算接話：那段期間的閒聊會被當成密碼嘗試
+      shouldProcess = true
+      trigger = 'followup'
     }
   }
 
@@ -129,7 +141,8 @@ export function routeTextMessage(
   }
 
   const cleanText = withoutSelfMention.replace(/^耀西\s*/, '').trim()
-  return { rawText, cleanText, isMentioned: !!isMentioned, startsWithYoshi }
+  if (trigger !== 'direct') console.log(`[ROUTE] Group message accepted as ${trigger}`)
+  return { rawText, cleanText, isMentioned: !!isMentioned, startsWithYoshi, trigger }
 }
 
 /**

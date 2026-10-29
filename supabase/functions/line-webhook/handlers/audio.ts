@@ -11,7 +11,7 @@
 
 import { aiUnavailableMessage } from "../config.ts"
 import type { EventContext } from "../context.ts"
-import { transcribeAudio } from "../gemini.ts"
+import { transcribeAudio } from "../ai.ts"
 import { replyMessage } from "../line-api.ts"
 import type { AudioMessageEvent } from "../types.ts"
 

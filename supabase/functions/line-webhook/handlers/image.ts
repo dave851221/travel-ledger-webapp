@@ -1,7 +1,7 @@
 // ============================================================
 // handlers/image.ts —— 收據照片的 OCR 路徑
 //
-// 下載 → 上傳 Storage → Gemini OCR → 驗證（成員／幣別／分類／日期）→ 出卡片。
+// 下載 → 上傳 Storage → AI OCR（ai.ts 決定用哪一家）→ 驗證（成員／幣別／分類／日期）→ 出卡片。
 //
 // 照片分三種（OCR_RESPONSE_SCHEMA 的 type）：
 //   expense     收據、付款畫面 → 照常辨識金額
@@ -18,12 +18,12 @@
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { extractJSON } from "../guards.ts"
 import { prepareExpense } from "../../_shared/tools/expenses.ts"
-import { aiUnavailableMessage, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
+import { aiUnavailableMessage, FALLBACK_NOTICES, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { storePendingExpense } from "../drafts.ts"
-import { askGemini, GEMINI_OCR_MODELS, OCR_RESPONSE_SCHEMA } from "../gemini.ts"
-import { downloadLineContent, replyMessage } from "../line-api.ts"
+import { ai, OCR_RESPONSE_SCHEMA } from "../ai.ts"
+import { downloadLineContent, replyMessage, showLoading } from "../line-api.ts"
 import { buildDraftLiffUrl, buildExpenseCard } from "../messages.ts"
 import { runInBackground } from "../util.ts"
 import type { ExpenseInput } from "../../_shared/tools/types.ts"
@@ -39,6 +39,9 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
     await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程，再傳送收據照片喔！' }], sourceId)
     return
   }
+
+  // 一對一顯示「輸入中…」：下載、上傳、辨識加起來常常要好幾秒
+  runInBackground(showLoading(sourceId))
 
   const tripId = userState.current_trip_id
   const filePath = `expenses/${tripId}/${messageId}.jpg`
@@ -152,14 +155,21 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
 
     // 認不出來、格式壞掉、AI 沒回應都不丟照片，改出一張空白卡讓使用者自己填
     let busyNote: string | null = null
+    // 主要的 AI 失敗、改由備援辨識時要說一聲（FALLBACK_NOTICES）
+    let fallbackNotice: string | null = null
     let res: OcrResponse
     try {
-      const aiResponse = await askGemini([
-        { role: "user", parts: [
+      const aiResponse = await ai.generate({
+        task: 'vision',
+        messages: [{ role: 'user', parts: [
           { text: ocrPrompt },
-          { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-        ]}
-      ], { models: GEMINI_OCR_MODELS, responseSchema: OCR_RESPONSE_SCHEMA, temperature: 0.2 })
+          { media: { mimeType: 'image/jpeg', data: base64Image } },
+        ]}],
+        json: true,
+        schema: OCR_RESPONSE_SCHEMA,
+        temperature: 0.2,
+        onFallback: (reason) => { fallbackNotice = FALLBACK_NOTICES[reason] },
+      })
       try {
         res = JSON.parse(extractJSON(aiResponse))
       } catch {
@@ -233,7 +243,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         }))
         await replyMessage(replyToken, [{
           type: 'text',
-          text: `${prepared.reject}\n\n📷 收據已經先幫你留著了，選一個幣別就能直接存入（金額不會換算）。`,
+          text: `${fallbackNotice ? `${fallbackNotice}\n\n` : ''}${prepared.reject}\n\n📷 收據已經先幫你留著了，選一個幣別就能直接存入（金額不會換算）。`,
           quickReply: {
             items: [
               ...currencyItems,
@@ -271,7 +281,11 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
 
       // 幣別或日期被修正過就一併告知，不要默默改掉使用者看不到的東西
       // AI 全忙時多說一句為什麼卡片是空的
-      const notes = busyNote ? [`${busyNote}\n照片先幫你留著了，可以按卡片上的「✏️ 填寫內容」自己填。`, ...ocrWarnings] : ocrWarnings
+      const notes = [
+        ...(fallbackNotice ? [fallbackNotice] : []),
+        ...(busyNote ? [`${busyNote}\n照片先幫你留著了，可以按卡片上的「✏️ 填寫內容」自己填。`] : []),
+        ...ocrWarnings,
+      ]
       const ocrWarningMsg = notes.length > 0
         ? [{ type: 'text' as const, text: notes.join('\n') }]
         : []
