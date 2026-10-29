@@ -52,17 +52,18 @@ export function getQuickReply(
       ]
     }
   }
+  // 依使用頻率排：查 → 改 → 刪 → 總覽 → 設定 → 說明。
+  // 本月支出、結算拿掉了（2026-10-29，使用者要求）：一排太多顆要一直滑，
+  // 兩個指令打字照樣能用，問 AI「結算一下」也行。
   const items: QuickReply['items'] = [
     { type: "action", action: { type: "message", label: "📅 今日支出", text: "今日支出" } },
-    { type: "action", action: { type: "message", label: "📊 本月支出", text: "本月支出" } },
-    { type: "action", action: { type: "message", label: "💰 結算", text: "結算" } },
-    { type: "action", action: { type: "message", label: "🗺️ 旅程總覽", text: "旅程總覽" } },
-    { type: "action", action: { type: "message", label: "🗑 刪除支出", text: "刪除支出" } },
     { type: "action", action: { type: "message", label: "✏️ 編輯支出", text: "編輯支出" } },
-    { type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } },
+    { type: "action", action: { type: "message", label: "🗑 刪除支出", text: "刪除支出" } },
+    { type: "action", action: { type: "message", label: "🗺️ 旅程總覽", text: "旅程總覽" } },
   ]
   // 偏好是旅程層級的，沒有旅程就沒有東西可編輯
   if (tripId) items.push(preferenceQuickReplyItem(tripId))
+  items.push({ type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } })
   if (showGroupToggle) {
     items.push(mentionRequired
       ? { type: "action", action: { type: "message", label: "📣開啟全回應模式", text: "模式:全回應模式" } }
@@ -452,37 +453,24 @@ export function describeProcessedAction(actionType: string | null | undefined): 
   }
 }
 
-export const BOT_SELF_INTRODUCTION = `您好！我是您的旅遊記帳小幫手「耀西」
-您可以透過自然語言對我下指令，或是上傳收據照片，我會自動幫您處理記帳！
+export const BOT_SELF_INTRODUCTION = `Yoshi! 我是旅遊記帳小幫手「耀西」🥚
 
-📍 綁定旅程：
-1. 輸入「ID:您的旅程代碼」
-(可從網站設定頁面取得)
-2. 輸入「旅程密碼」
-(還沒輸入密碼前反悔，可以說「取消綁定」)
-3. 綁定後，我會列出目前的成員供您確認。
+🔗 先綁定旅程
+輸入「ID:旅程代碼」（代碼在網頁的旅程設定），有密碼的話再輸入密碼
 
-⚙️ AI 記帳偏好（整趟旅程共用）：
-• 按下方「⚙️ 記帳偏好」按鈕編輯，或輸入「設定:預設由我付款，所有人均分金額。」
-(這份偏好屬於整趟旅程，網頁的旅程設定頁看到的是同一份；輸入「設定?」可隨時查看)
+💰 記帳：用講的、拍照都可以
+・「晚餐 1200」「小明付計程車 300」
+・傳收據或商品照片，我幫你讀出來；也可以傳語音
+・卡片按「✅ 確認存入」才會存；講錯就說「剛剛那筆改 500」
+・存過的也能改或刪：「把昨天的拉麵改 300」
 
-💰 快速記帳相關功能：
-• 基礎：可直接說「晚餐 1200」
-• 收據分析：直接上傳照片
-• 指定付款：說「小明付了Uber 300」
-• 複雜分帳：說「拉麵 3000 日幣，小明先付，大家平分」
-• 修正記帳：卡片還沒確認前，說「剛剛那筆改 500」或「取消」
-• 撤銷記帳：輸入「取消上一筆」或「刪除上一筆」
-• 刪除任一筆：輸入「刪除支出」，會列出近期紀錄讓你點選
-• 修改任一筆：輸入「編輯支出」，點選後開啟編輯畫面
+🗺 問我旅程的事
+・「明天幾點出門？」「今晚住哪？」
+・「明天京都會下雨嗎？」「附近推薦吃什麼？」
+・「總共花多少？我還要給誰多少？」
 
-📊 快捷查詢（直接輸入或點選下方按鈕）：
-• 今日支出 / 本月支出 / 結算 / 旅程總覽
-
-💡 群組提醒：
-問我問題時，請"@提及"我，或是喊「耀西」喚醒我，不然我平常都躲在蛋裡睡覺唷！
-Yoshi! Yoshi!
-`
+👥 群組裡請 @耀西 或用「耀西」開頭叫我，對我的訊息按「回覆」也可以
+⚙️ 分帳習慣按下方「記帳偏好」設定；今日支出、旅程總覽也在下方按鈕（「本月支出」「結算」直接打字）`
 
 /**
  * 快捷查詢的「各幣別合計」字串。

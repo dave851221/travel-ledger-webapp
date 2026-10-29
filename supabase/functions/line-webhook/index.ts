@@ -16,7 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { buildEventContext, extendFollowup, isQuotingBot } from "./context.ts"
-import { replyMessage, verifySignature } from "./line-api.ts"
+import { replyMessage, setDefaultQuickReply, verifySignature } from "./line-api.ts"
 import { BOT_SELF_INTRODUCTION, getQuickReply } from "./messages.ts"
 import { handleAiText } from "./handlers/ai-text.ts"
 import { handleAudio } from "./handlers/audio.ts"
@@ -43,6 +43,8 @@ serve(async (req) => {
 
       const ctx = await buildEventContext(event)
       const { boundQR, isBound, replyToken, sourceId, sourceType } = ctx
+      // 回覆的最後一則沒帶按鈕時自動補上（記帳卡片之後按鈕才不會消失）
+      setDefaultQuickReply(replyToken, isBound ? boundQR : getQuickReply(false))
 
       // --- 被加進群組／聊天室（M19）---
       // 以前完全不處理 join，機器人進來之後一片安靜，

@@ -253,7 +253,8 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 | `config.ts` | ~45 | env、`WEBAPP_URL`、`RECEIPTS_BUCKET`、TTL、所有路由關鍵字表 |
 | `db.ts` | ~12 | service-role 的 Supabase client 單例 |
 | `util.ts` | ~95 | `runInBackground`、時區推測、`requiresAccessCode`、`isPendingExpired` |
-| `line-api.ts` | ~130 | 驗簽、reply／push（群組裡送出的訊息 id 記進 `line_bot_messages`）、「輸入中」動畫、成員名稱、`downloadLineContent` |
+| `line-api.ts` | ~160 | 驗簽、reply／push（**最後一則沒帶快速回覆就自動補上這則事件的預設按鈕**，`setDefaultQuickReply`，LINE 只看最後一則）（群組裡送出的訊息 id 記進 `line_bot_messages`）、「輸入中」動畫、成員名稱、`downloadLineContent` |
+| `summary-cards.ts` | ~170 | 快捷查詢（今日／近 7 天／本月支出、結算、旅程總覽）的 Flex 卡片：品名靠左、金額靠右、依日期分段 |
 | `itinerary.ts` | ~45 | 從 GitHub Pages 讀這趟的行程 JSON，isolate 內快取 10 分鐘（含「沒有行程」） |
 | `drafts.ts` | ~185 | 草稿的存取與失效（`line_chat_history` + `line_processed_actions`）。只有 `kind` 為空或 `expense` 的列算草稿 |
 | `messages.ts` | ~470 | 快速回覆、Flex 卡片（記帳／✏️ 修改預覽／🗑 確認刪除）、LIFF 網址、自我介紹全文 |

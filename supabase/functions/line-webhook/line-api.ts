@@ -68,8 +68,34 @@ export async function pushMessage(to: string, messages: OutgoingMessage[]) {
   else await recordSentMessages(res, to)
 }
 
-export async function replyMessage(replyToken: string, messages: OutgoingMessage[], to?: string) {
+/**
+ * 這則事件的預設快速回覆按鈕（index.ts 建完 context 就登記），以 replyToken 為 key。
+ *
+ * LINE 只顯示**最後一則**訊息帶的快速回覆。很多回覆的最後一則是 Flex 卡片（記帳卡、修改卡、
+ * 收據辨識），以前沒帶按鈕，輸入框上方那排按鈕就整個消失了。
+ * 現在最後一則沒帶的話自動補上這組；自己帶了（例如選幣別）就照它的。
+ */
+const defaultQuickReplies = new Map<string, unknown>()
+
+export function setDefaultQuickReply(replyToken: string, quickReply: unknown): void {
+  if (!replyToken) return
+  // 沒有回覆的事件（群組閒聊）不會來取，isolate 活得久時別讓它一直長
+  if (defaultQuickReplies.size > 100) defaultQuickReplies.clear()
+  defaultQuickReplies.set(replyToken, quickReply)
+}
+
+/** 最後一則沒有快速回覆時補上 fallback（純函式，測試用得到） */
+export function withQuickReplyOnLast(messages: OutgoingMessage[], fallback: unknown): OutgoingMessage[] {
+  const last = messages[messages.length - 1]
+  if (!fallback || !last || last.quickReply) return messages
+  return [...messages.slice(0, -1), { ...last, quickReply: fallback }]
+}
+
+export async function replyMessage(replyToken: string, rawMessages: OutgoingMessage[], to?: string) {
   console.log(`[LINE] Replying to ${replyToken}...`)
+  const messages = withQuickReplyOnLast(rawMessages, defaultQuickReplies.get(replyToken))
+  // replyToken 只能用一次，用過就清掉
+  defaultQuickReplies.delete(replyToken)
   const res = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },

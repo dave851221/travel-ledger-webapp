@@ -37,6 +37,7 @@ import {
   preferenceQuickReply,
   replyEditPicker,
 } from "../messages.ts"
+import { buildSummaryCard, expenseSections, formatMoney, shortDate, totalRows } from "../summary-cards.ts"
 import { getTodayString, getTripTimezone, requiresAccessCode } from "../util.ts"
 import type { ExpenseRow } from "../../_shared/types.ts"
 import type { Mentionee, OutgoingMessage, SavedExpenseEntry, TextRoute } from "../types.ts"
@@ -49,24 +50,24 @@ type DatedSummaryRow = SummaryRow & Pick<ExpenseRow, "date">
 /** 依日期分組列出的支出最多列幾筆。合計一律用全部的列算，這裡只限制「列出來」的部分。 */
 const MAX_LISTED_ROWS = 40
 
-/**
- * 依日期分組的清單文字。
- *
- * ⚠️ 以前是在 SQL 端 limit(30)／limit(50)，再拿被截斷的那批算「合計」——
- *    旅程稍微熱鬧一點，合計就默默少算，畫面上也看不出來。
- *    現在全部撈回來算合計，只有逐筆清單截斷，並講明省略了幾筆。
- */
-function listByDate(rows: DatedSummaryRow[], precisionConfig: Record<string, number>): string {
-  const byDate: Record<string, DatedSummaryRow[]> = {}
-  rows.slice(0, MAX_LISTED_ROWS).forEach((e) => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e) })
-  const lines: string[] = []
-  Object.entries(byDate).forEach(([date, exps]) => {
-    lines.push(`📌 ${date.substring(5)}`)
-    exps.forEach((e) => lines.push(`  • ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}`))
+/** 依日期分段的支出卡片（近 7 天、本月）。合計用全部的列算，清單只列前 MAX_LISTED_ROWS 筆 */
+function buildListCard(
+  title: string,
+  subtitle: string,
+  rows: DatedSummaryRow[],
+  precisionConfig: Record<string, number>,
+  tripId: string,
+): OutgoingMessage {
+  const { sections, omitted } = expenseSections(rows, precisionConfig, { groupByDate: true, showCategory: false, maxRows: MAX_LISTED_ROWS })
+  return buildSummaryCard({
+    title,
+    subtitle,
+    sections,
+    totals: totalRows(sumByCurrency(rows), rows.length, precisionConfig),
+    notes: omitted > 0 ? [`另有 ${omitted} 筆較早的沒列出（合計已包含），完整清單請到網頁看`] : [],
+    webUrl: `${WEBAPP_URL}/#/trip/${tripId}/dashboard`,
+    altText: `${title}：${rows.length} 筆，合計 ${formatTotals(rows, precisionConfig)}`,
   })
-  const omitted = rows.length - MAX_LISTED_ROWS
-  if (omitted > 0) lines.push(`…另有 ${omitted} 筆較早的未列出（合計已包含）`)
-  return lines.join('\n')
 }
 
 /**
@@ -544,9 +545,19 @@ if (isBinding) {
     if (!todayExp || todayExp.length === 0) {
       await replyMessage(replyToken, [{ type: 'text', text: `📅 今日（${today.substring(5)}）尚無支出記錄。`, quickReply: boundQR }], sourceId)
     } else {
-      const lines = todayExp.map((e: SummaryRow) => `• ${e.description}  ${formatAmount(e.amount, e.currency, precisionConfig)} ${e.currency}  [${e.category}]`)
-      const totalStr = formatTotals(todayExp, precisionConfig)
-      await replyMessage(replyToken, [{ type: 'text', text: `📅 今日支出（${today.substring(5)}）\n\n${lines.join('\n')}\n\n共 ${todayExp.length} 筆 · 合計 ${totalStr}`, quickReply: boundQR }], sourceId)
+      const { sections, omitted } = expenseSections(todayExp, precisionConfig, { groupByDate: false, showCategory: true, maxRows: MAX_LISTED_ROWS })
+      await replyMessage(replyToken, [{
+        ...buildSummaryCard({
+          title: '📅 今日支出',
+          subtitle: shortDate(today),
+          sections,
+          totals: totalRows(sumByCurrency(todayExp), todayExp.length, precisionConfig),
+          notes: omitted > 0 ? [`另有 ${omitted} 筆沒列出（合計已包含）`] : [],
+          webUrl: `${WEBAPP_URL}/#/trip/${tripId}/dashboard`,
+          altText: `今日支出：${todayExp.length} 筆，合計 ${formatTotals(todayExp, precisionConfig)}`,
+        }),
+        quickReply: boundQR,
+      }], sourceId)
     }
     return true
   }
@@ -568,7 +579,10 @@ if (isBinding) {
     if (!weekExp || weekExp.length === 0) {
       await replyMessage(replyToken, [{ type: 'text', text: '📊 近 7 天內尚無支出記錄。', quickReply: boundQR }], sourceId)
     } else {
-      await replyMessage(replyToken, [{ type: 'text', text: `📊 近 7 天支出\n\n${listByDate(weekExp, precisionConfig)}\n\n共 ${weekExp.length} 筆 · 合計 ${formatTotals(weekExp, precisionConfig)}`, quickReply: boundQR }], sourceId)
+      await replyMessage(replyToken, [{
+        ...buildListCard('📊 近 7 天支出', `${shortDate(fromDate)} 起`, weekExp, precisionConfig, tripId),
+        quickReply: boundQR,
+      }], sourceId)
     }
     return true
   }
@@ -591,10 +605,10 @@ if (isBinding) {
     if (!monthExp || monthExp.length === 0) {
       await replyMessage(replyToken, [{ type: 'text', text: `📊 本月（${monthStart.substring(0, 7)}）尚無支出記錄。`, quickReply: boundQR }], sourceId)
     } else {
-      const totalStr = formatTotals(monthExp, precisionConfig)
-      let text = `📊 本月支出（${monthStart.substring(0, 7)}）\n\n${listByDate(monthExp, precisionConfig)}\n\n共 ${monthExp.length} 筆 · 合計 ${totalStr}`
-      if (text.length > 4900) text = text.substring(0, 4900) + '\n...(過多省略)'
-      await replyMessage(replyToken, [{ type: 'text', text, quickReply: boundQR }], sourceId)
+      await replyMessage(replyToken, [{
+        ...buildListCard('📊 本月支出', monthStart.substring(0, 7), monthExp, precisionConfig, tripId),
+        quickReply: boundQR,
+      }], sourceId)
     }
     return true
   }
@@ -617,16 +631,26 @@ if (isBinding) {
     })
     // 有幣別被當成 1:1 換算時要講出來，否則結算金額默默失真
     const rateWarning = missingRateCurrencies.length > 0
-      ? `\n\n⚠️ ${missingRateCurrencies.join('、')} 沒有設定匯率，已當成 1:1 折算，結果會失真。`
-        + `\n請到網頁的「設定 → 匯率精度」補上。`
+      ? `⚠️ ${missingRateCurrencies.join('、')} 沒有設定匯率，已當成 1:1 折算，結果會失真。請到網頁的「設定 → 匯率精度」補上。`
       : ''
     if (settlements.length === 0) {
-      await replyMessage(replyToken, [{ type: 'text', text: `✅ 目前一切已結清，無需轉帳！${rateWarning}`, quickReply: boundQR }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: `✅ 目前一切已結清，無需轉帳！${rateWarning ? `\n\n${rateWarning}` : ''}`, quickReply: boundQR }], sourceId)
     } else {
       // Math.round 會把 12.50 USD 顯示成 13 —— 一律依旅程的 precision_config 格式化（H5）
       const settlePrecision = (trip.precision_config ?? {}) as Record<string, number>
-      const lines = settlements.map(s => `${s.from} → ${s.to}  ${formatAmount(s.amount, baseCurrency, settlePrecision)} ${baseCurrency}`)
-      await replyMessage(replyToken, [{ type: 'text', text: `💰 結算試算建議（折合 ${baseCurrency}）\n\n${lines.join('\n')}${rateWarning}\n\n🌐 詳細：${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
+      await replyMessage(replyToken, [{
+        ...buildSummaryCard({
+          title: '💰 結算建議',
+          subtitle: `最少轉帳次數，折合 ${baseCurrency}`,
+          sections: [{
+            rows: settlements.map(s => ({ label: `${s.from} → ${s.to}`, value: formatMoney(s.amount, baseCurrency, settlePrecision) })),
+          }],
+          notes: rateWarning ? [rateWarning] : [],
+          webUrl: `${WEBAPP_URL}/#/trip/${tripId}/dashboard`,
+          altText: `結算建議：${settlements.map(s => `${s.from}→${s.to} ${formatAmount(s.amount, baseCurrency, settlePrecision)} ${baseCurrency}`).join('、')}`,
+        }),
+        quickReply: boundQR,
+      }], sourceId)
     }
     return true
   }
@@ -642,12 +666,23 @@ if (isBinding) {
     const { data: allExp } = await supabase.from('expenses')
       .select('amount, currency').eq('trip_id', tripId)
       .is('deleted_at', null).not('is_settlement', 'is', true)
-    const totals = sumByCurrency(allExp ?? [])
-    const totalStr = Object.keys(totals).length > 0
-      ? Object.entries(totals).map(([c, a]) => `  ${formatAmount(a.toNumber(), c, precisionConfig)} ${c}`).join('\n')
-      : '  （尚無支出）'
     const status = trip.is_archived ? '已封存 🔒' : '進行中 ✈️'
-    await replyMessage(replyToken, [{ type: 'text', text: `🗺️ ${trip.name}（${status}）\n\n👥 成員：${trip.members.join('、')}\n📅 今日：${today}\n💵 主幣別：${trip.base_currency}\n\n📊 支出總計：\n${totalStr}\n\n🌐 ${WEBAPP_URL}/#/trip/${tripId}/dashboard`, quickReply: boundQR }], sourceId)
+    await replyMessage(replyToken, [{
+      ...buildSummaryCard({
+        title: `🗺️ ${trip.name}`,
+        subtitle: `${status}・今天 ${shortDate(today)}`,
+        sections: [{
+          rows: [
+            { label: '👥 成員', sub: (trip.members ?? []).join('、') || '（尚無成員）', value: `${(trip.members ?? []).length} 人` },
+            { label: '💵 主幣別', value: trip.base_currency },
+          ],
+        }],
+        totals: totalRows(sumByCurrency(allExp ?? []), (allExp ?? []).length, precisionConfig),
+        webUrl: `${WEBAPP_URL}/#/trip/${tripId}/dashboard`,
+        altText: `${trip.name}（${status}）`,
+      }),
+      quickReply: boundQR,
+    }], sourceId)
     return true
   }
 
