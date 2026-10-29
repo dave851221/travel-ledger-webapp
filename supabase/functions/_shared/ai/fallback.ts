@@ -48,7 +48,8 @@ export function withFallback(primary: AiProvider, backup?: AiProvider): AiProvid
   }
 
   return {
-    name: `${primary.name}→${backup.name}`,
+    // 只是說明有備援，不代表這次用了它（真的改用時會另外留 `falling back to` 那一行）
+    name: `${primary.name} (backup: ${backup.name})`,
     supports: (task) => primary.supports(task) || backup.supports(task),
     generate: (req) => attempt(req.task, req.onFallback, (p) => p.generate(req)),
     runToolLoop: (req) => attempt(req.task, req.onFallback, (p) => p.runToolLoop(req)),
