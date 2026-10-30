@@ -154,7 +154,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | `expenses.ts` | 上面那八支函式 |
 | `balance.ts` | `getBalance`／`getSettlementPlan`，包 `calculateMemberBalances`／`calculateSettlements` |
 | `trip.ts` | `getTrip`（不輸出 `access_code`） |
-| `itinerary.ts` | 行程表的格式化與搜尋：`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`。輸出精簡的純文字，地點／車票／住宿附的網址跟在名稱後面（模型回答時要附上連結），**超過 160 字的網址只留名稱**（舊的 google.com/maps/place 長網址只會燒 token）。行程從哪來由 `ctx.loadItinerary` 決定 |
+| `itinerary.ts` | 行程表的格式化與搜尋：`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`。輸出精簡的純文字，地點／車票／住宿附的網址跟在名稱後面（模型回答時要附上連結），**超過 160 字的網址只留名稱**（舊的 google.com/maps/place 長網址只會燒 token）；沒附網址的地點給 encode 過的地圖搜尋連結（`placeMapUrl`，規則同網頁的 `placeUrl`）。回覆送出前 `sanitizeMapLinks`（`guards.ts`）把模型寫的搜尋連結重新 encode（中文沒 encode，LINE 會在中文字前斷開網址），工具與對話裡沒出現過的短網址／place 網址直接拿掉。行程從哪來由 `ctx.loadItinerary` 決定 |
 | `weather.ts` | `get_weather`：Open-Meteo（免費、免 key），沒給地點就用行程那一天的路線座標；早／午／晚各給一個降雨機率 |
 | `registry.ts` | `TOOLS`、`runTool`、`toGeminiFunctionDeclarations`。同一份定義同時給 Gemini function calling 與未來 MCP 的 `tools/list` 用（見 [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md)） |
 

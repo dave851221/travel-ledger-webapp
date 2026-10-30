@@ -22,6 +22,7 @@
 import { Decimal } from "../_shared/deps.ts"
 import { formatAmount, getRate } from "../_shared/finance.ts"
 import { normalizeName } from "../_shared/validate.ts"
+import { mapsSearchUrl } from "../_shared/tools/itinerary.ts"
 import type { GroupMode } from "./types.ts"
 
 // 轉出 _shared/validate.ts 的驗證函式，讓既有的 import 路徑與 guards.test.ts 不受影響。
@@ -171,6 +172,63 @@ const FALSE_ACTION_CLAIM = new RegExp(
 
 export function claimsCompletedAction(text: string): boolean {
   return FALSE_ACTION_CLAIM.test(text)
+}
+
+/**
+ * 回覆裡的 Google 地圖連結，送出前逐一檢查。
+ *
+ * 模型自己附的地圖連結常常是壞的，兩種情況：
+ * - 搜尋連結把中文直接寫進網址（`query=第二市場`）—— LINE 判斷網址時遇到中文就斷開，
+ *   點下去是空白的搜尋。這種**重新 encode** 就好，搜尋字本身沒有錯。
+ * - 自己編的 maps.app.goo.gl 短網址或 /maps/place/ —— 看起來像真的，點下去是別的地方。
+ *   工具結果與對話裡出現過的（`knownText`）才留，其餘**拿掉**（名稱還在，使用者自己搜得到）。
+ */
+const MAP_URL = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s，。、；：！？「」『』（）【】〔〕<>"'()[\]]*/gi
+/** 只剩標籤、網址被拿掉的那一行（「📍 」「地圖：」）整行刪掉 */
+const EMPTY_MAP_LABEL = /^[ \t]*[-・·•]?[ \t]*(?:📍|🗺️?|地圖[:：]?|Google ?Maps?[:：]?)[ \t]*$/i
+
+/** 搜尋類的地圖網址 → 搜尋字；不是搜尋（place、短網址）就回 null */
+function mapSearchQuery(url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (!/google\./i.test(parsed.hostname)) return null
+  const query = parsed.searchParams.get('query') ?? parsed.searchParams.get('q')
+  if (query !== null) return query.trim() || null
+  const path = parsed.pathname.match(/^\/maps\/search\/([^/@]+)/)
+  if (!path) return null
+  try {
+    return decodeURIComponent(path[1].replace(/\+/g, ' ')).trim() || null
+  } catch {
+    return null
+  }
+}
+
+/** 一段文字（工具結果的 JSON、對話）裡出現過的所有網址。比對整個網址，前綴不算 */
+const ANY_URL = /https?:\/\/[^\s，。、；：！？「」『』（）【】〔〕<>"'()[\]\\]+/gi
+
+export function sanitizeMapLinks(text: string, knownText: string): { text: string; removed: string[] } {
+  const known = new Set((knownText.match(ANY_URL) ?? []).map((u) => u.replace(/[.,!?]+$/, '')))
+  const removed: string[] = []
+  const replaced = text.replace(MAP_URL, (raw) => {
+    // 句尾的英文標點不是網址的一部分
+    const url = raw.replace(/[.,!?]+$/, '')
+    const tail = raw.slice(url.length)
+    if (known.has(url)) return raw
+    const query = mapSearchQuery(url)
+    if (query) return mapsSearchUrl(query) + tail
+    removed.push(url)
+    return tail
+  })
+  if (removed.length === 0) return { text: replaced, removed }
+  const cleaned = replaced.split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    .filter((line) => !EMPTY_MAP_LABEL.test(line))
+    .join('\n')
+  return { text: cleaned, removed }
 }
 
 /**

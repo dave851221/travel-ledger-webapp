@@ -6,6 +6,7 @@ import {
   getItineraryDay,
   itineraryTodayLine,
   linkedText,
+  mapsSearchUrl,
   MAX_URL_CHARS,
   noteLines,
   plainText,
@@ -50,7 +51,7 @@ describe('行程的文字格式', () => {
     const text = formatDay(PLAN, '2026-04-05')!;
     expect(text).toContain('第 2/2 天｜犬山｜犬山祭');
     expect(text).toContain('09:00 [景點] 犬山城 https://maps.app.goo.gl/x 〔已付清〕');
-    expect(text).toContain('午餐 [餐飲] 五平餅 地點：本町通 （未定）');
+    expect(text).toContain(`午餐 [餐飲] 五平餅 地點：本町通 ${mapsSearchUrl('35.38,136.94')} （未定）`);
     expect(text).toContain('今晚住宿：下呂溫泉水明館');
     expect(text).toContain('⚠️ 最晚 19:00 入住');
     // 住宿沒有附地圖、也沒寫地址：用名稱組一個地圖搜尋連結
@@ -68,13 +69,20 @@ describe('行程的文字格式', () => {
         date: '2026-04-05', title: 'd', stay: 's',
         items: [{
           time: '16:02', kind: 'train', title: '小火車',
-          places: [{ name: 'トロッコ嵯峨', href: 'https://maps.app.goo.gl/s' }, { name: '嵐山', query: '嵐山' }],
+          places: [
+            { name: 'トロッコ嵯峨', href: 'https://maps.app.goo.gl/s' },
+            { name: '嵐山', query: '嵐山 京都' },
+            { name: '渡月橋', lat: 35.0129, lng: 135.6776 },
+          ],
           booking: { status: 'paid', href: 'https://linkt.to/t' },
         }],
       }],
     };
     const text = formatDay(plan, '2026-04-05')!;
-    expect(text).toContain('地點：トロッコ嵯峨 https://maps.app.goo.gl/s、嵐山');
+    // 沒附網址的地點也給連結（座標 > 搜尋字），中文一定要 encode，否則 LINE 在中文字前就斷開
+    expect(text).toContain('地點：トロッコ嵯峨 https://maps.app.goo.gl/s、'
+      + '嵐山 https://www.google.com/maps/search/?api=1&query=%E5%B5%90%E5%B1%B1%20%E4%BA%AC%E9%83%BD、'
+      + '渡月橋 https://www.google.com/maps/search/?api=1&query=35.0129%2C135.6776');
     expect(text).toContain('〔已付清 https://linkt.to/t〕');
     expect(text).toContain('地圖：https://maps.app.goo.gl/h');
   });

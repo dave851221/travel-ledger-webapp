@@ -32,6 +32,7 @@ import { runTool } from "../../_shared/tools/registry.ts"
 import { MAX_PROPOSED_EXPENSES } from "../../_shared/tools/schemas.ts"
 import {
   claimsCompletedAction,
+  sanitizeMapLinks,
   extractJSON,
   matchExpensesByQuestion,
   mentionsDraftField,
@@ -117,6 +118,8 @@ interface AiScope {
   outstandingDrafts: OutstandingDraft[]
   /** 改由備援回答時放在回覆最前面的一句話（FALLBACK_NOTICES） */
   notice?: string
+  /** 模型看過的文字（對話 + 工具結果），回覆裡的地圖網址要在這裡出現過才算數 */
+  seenText: string[]
 }
 
 /** 所有終結分支都從這裡回覆，備援通知才不會漏掉哪一支 */
@@ -350,6 +353,7 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
     ctx, trip, tripId, today, cleanText,
     precision: contextPrecision,
     outstandingDrafts,
+    seenText: conversation.flatMap((m) => m.parts.map((part) => ('text' in part ? part.text : ''))),
   }
 
   // 上網搜尋時給個大概的位置（「附近的拉麵」）：今天行程所在的城市與旅程時區
@@ -369,12 +373,14 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
     terminalNames: isFollowup ? FOLLOWUP_TERMINAL_NAMES : TERMINAL_TOOL_NAMES,
     // ⚠️ 只讓模型執行唯讀工具。寫入類的 create／update／delete_expense 雖然
     //    在 registry 裡，但沒有公開給它，這裡再擋一次 —— 名字是模型給的字串。
-    execute: (name: string, args: ToolArgs) => {
+    execute: async (name: string, args: ToolArgs) => {
       if (name === TRIP_SUMMARY_TOOL) return getTripSummary()
       if (!READ_TOOL_NAMES.includes(name)) {
-        return Promise.resolve({ error: `Tool ${name} is not available here` })
+        return { error: `Tool ${name} is not available here` }
       }
-      return runTool(name, args, toolCtx)
+      const output = await runTool(name, args, toolCtx)
+      scope.seenText.push(JSON.stringify(output))
+      return output
     },
     // 查行程、查帳、上網可能要好幾輪；時間不夠時 deadline 會強迫收尾
     maxRounds: 4,
@@ -744,6 +750,11 @@ async function plainReply(scope: AiScope, args: ToolArgs): Promise<void> {
     safeContent = '我可以幫你提議修改或刪除，但要你按了確認卡片才會真的生效 🙇\n\n'
       + '請告訴我是哪一筆（例如「把昨天的拉麵改成 300」），我會出一張確認卡給你。'
   }
+
+  // 模型自己拼的地圖連結：中文沒 encode 的搜尋連結重新 encode，編出來的短網址拿掉
+  const maps = sanitizeMapLinks(safeContent, scope.seenText.join('\n'))
+  if (maps.removed.length > 0) console.warn('[GUARD] Removed unverified map links:', maps.removed.join(' '))
+  safeContent = maps.text
 
   if (safeContent.length > 4900) safeContent = safeContent.substring(0, 4900) + "\n\n...(內容過長已截斷)"
   if (!safeContent) safeContent = 'Yoshi! 🥚 有什麼需要幫忙的嗎？'

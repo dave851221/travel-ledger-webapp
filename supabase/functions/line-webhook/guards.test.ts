@@ -3,6 +3,7 @@ import {
   applyParticipantDefaults,
   CANCEL_DRAFT_KEYWORDS,
   claimsCompletedAction,
+  sanitizeMapLinks,
   extractJSON,
   groupModeOf,
   normalizeCurrency,
@@ -169,6 +170,49 @@ describe('resolveCategory', () => {
 
   it('旅程沒設分類清單就不驗證', () => {
     expect(resolveCategory('美食', [])).toEqual({ category: '美食', warning: null });
+  });
+});
+
+describe('sanitizeMapLinks', () => {
+  const SEARCH = 'https://www.google.com/maps/search/?api=1&query=';
+
+  it('中文沒 encode 的搜尋連結重新 encode（LINE 遇到中文就把網址斷開）', () => {
+    const { text, removed } = sanitizeMapLinks(`📍 ${SEARCH}第二市場台中\n🥩 金錢豹 ${SEARCH}金錢豹牛排+台中`, '');
+    expect(text).toBe(`📍 ${SEARCH}%E7%AC%AC%E4%BA%8C%E5%B8%82%E5%A0%B4%E5%8F%B0%E4%B8%AD\n`
+      + `🥩 金錢豹 ${SEARCH}%E9%87%91%E9%8C%A2%E8%B1%B9%E7%89%9B%E6%8E%92%20%E5%8F%B0%E4%B8%AD`);
+    expect(removed).toEqual([]);
+  });
+
+  it('網址後面接的中文標點、英文句點不算進網址', () => {
+    const { text } = sanitizeMapLinks(`地圖：${SEARCH}宮原眼科，走路 5 分鐘。也可以看 ${SEARCH}%E6%9F%B3%E5%B7%9D.`, '');
+    expect(text).toBe(`地圖：${SEARCH}%E5%AE%AE%E5%8E%9F%E7%9C%BC%E7%A7%91，走路 5 分鐘。也可以看 ${SEARCH}%E6%9F%B3%E5%B7%9D.`);
+  });
+
+  it('q= 與 /maps/search/名稱 也當成搜尋', () => {
+    expect(sanitizeMapLinks('https://maps.google.com/?q=清水寺', '').text).toBe(`${SEARCH}%E6%B8%85%E6%B0%B4%E5%AF%BA`);
+    expect(sanitizeMapLinks('https://www.google.com/maps/search/清水寺+京都', '').text)
+      .toBe(`${SEARCH}%E6%B8%85%E6%B0%B4%E5%AF%BA%20%E4%BA%AC%E9%83%BD`);
+  });
+
+  it('工具給過的短網址原樣保留，自己編的拿掉、只剩標籤的那行一起刪', () => {
+    const known = JSON.stringify({ result: '起點：トロッコ嵯峨 https://maps.app.goo.gl/rNiH、終點 https://maps.app.goo.gl/UYSx' });
+    const { text, removed } = sanitizeMapLinks(
+      '- 起點 https://maps.app.goo.gl/rNiH\n- 終點 https://maps.app.goo.gl/UYSy\n📍 https://www.google.com/maps/place/Foo/@35,135\n好玩！',
+      known,
+    );
+    expect(text).toBe('- 起點 https://maps.app.goo.gl/rNiH\n- 終點\n好玩！');
+    expect(removed).toEqual(['https://maps.app.goo.gl/UYSy', 'https://www.google.com/maps/place/Foo/@35,135']);
+  });
+
+  it('已知網址只認完整的，前綴不算；空白的搜尋連結拿掉', () => {
+    const known = `${SEARCH}%E5%B5%90%E5%B1%B1`;
+    expect(sanitizeMapLinks(`${SEARCH}%E5%B5%90%E5%B1%B1`, known).removed).toEqual([]);
+    expect(sanitizeMapLinks(`嵐山 ${SEARCH}`, known)).toEqual({ text: '嵐山', removed: [SEARCH] });
+  });
+
+  it('不是地圖的網址不動', () => {
+    const text = '車票 https://linkt.to/h3hb 來源 https://journey.tw/go/';
+    expect(sanitizeMapLinks(text, '').text).toBe(text);
   });
 });
 

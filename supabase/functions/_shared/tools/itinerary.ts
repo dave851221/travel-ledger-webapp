@@ -18,6 +18,7 @@ import type {
   ItineraryDoc,
   ItineraryItemDoc,
   ItineraryNote,
+  ItineraryPlace,
   ToolContext,
 } from "./types.ts"
 
@@ -40,6 +41,24 @@ export const MAX_URL_CHARS = 160
 
 const usableUrl = (url: string | undefined): string | null =>
   url && /^https?:\/\//.test(url) && url.length <= MAX_URL_CHARS ? url : null
+
+/**
+ * Google 地圖的搜尋連結。查詢字串一定要 encode：
+ * LINE 判斷網址時遇到中文就斷開，`query=第二市場` 點下去只剩空白的搜尋。
+ */
+export const mapsSearchUrl = (query: string): string =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+
+/**
+ * 地點的地圖連結，與網頁的 `placeUrl()` 同一個規則：自己的網址 > 座標 > 搜尋字 > 名稱。
+ * 只寫了 query 的地點以前不給網址，模型就自己拼一個（常常是錯的）。
+ */
+export function placeMapUrl(place: ItineraryPlace): string {
+  const own = usableUrl(place.href)
+  if (own) return own
+  if (place.lat !== undefined && place.lng !== undefined) return mapsSearchUrl(`${place.lat},${place.lng}`)
+  return mapsSearchUrl(place.query ?? place.name)
+}
 
 /** `[名稱](網址)` → 名稱、`**粗體**` → 粗體 */
 export function plainText(rich: string): string {
@@ -77,11 +96,11 @@ function itemLine(item: ItineraryItemDoc): string[] {
   const kind = KIND_LABELS[item.kind] ?? item.kind
   const plain = plainText(item.title)
   const title = linkedText(item.title)
-  // 名稱已經出現在標題裡的地點不再列名字，但有網址還是要附上（模型回答時才拿得到連結）
+  // 名稱已經出現在標題裡的地點不再列名字，但網址還是要附上（模型回答時才拿得到連結）
   const places = (item.places ?? []).flatMap((p) => {
-    const url = usableUrl(p.href)
-    if (plain.includes(p.name)) return url && !title.includes(url) ? [`${p.name} ${url}`] : []
-    return [url ? `${p.name} ${url}` : p.name]
+    const url = placeMapUrl(p)
+    if (plain.includes(p.name)) return title.includes(url) ? [] : [`${p.name} ${url}`]
+    return [`${p.name} ${url}`]
   })
   // 備註裡已經有同一個網址（「車票連結」）就不重複
   const bookingUrl = usableUrl(item.booking?.href)
@@ -110,7 +129,7 @@ export function stayMapLine(stay: { name: string; address?: string; href?: strin
   const url = usableUrl(stay.href)
   if (url) return [`  · 地圖：${url}`]
   if (stay.address) return []
-  return [`  · 地圖：https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stay.name)}`]
+  return [`  · 地圖：${mapsSearchUrl(stay.name)}`]
 }
 
 /** 某一天的完整內容 */
