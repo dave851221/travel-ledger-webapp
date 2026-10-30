@@ -186,7 +186,9 @@ describe('createClaudeProvider().runToolLoop', () => {
     expect(result.model).toBe('claude-haiku-5-5');
 
     const first = client.calls[0];
-    expect(first.tool_choice).toEqual({ type: 'any' });
+    // 強制呼叫時 Haiku 5.5 會跳過思考，effort 等於沒設
+    expect(first.tool_choice).toEqual({ type: 'auto' });
+    expect(first.output_config?.effort).toBe('medium');
     // system 自己一個快取斷點：跨訊息只有 system + tools 是相同的
     expect(first.system).toEqual([{ type: 'text', text: '你是耀西', cache_control: { type: 'ephemeral' } }]);
     expect(first.tools?.map((t) => (t as Anthropic.Tool).name)).toEqual(['list_expenses', 'reply', 'propose_expenses']);
@@ -222,6 +224,8 @@ describe('createClaudeProvider().runToolLoop', () => {
     expect(blocks[0].type).toBe('tool_result');
     expect(blocks[1]).toMatchObject({ type: 'text' });
     expect((blocks[1] as Anthropic.TextBlockParam).text).toContain('收尾');
+    // 收尾那一輪才強制呼叫：不思考、最快結束
+    expect(client.calls[1].tool_choice).toEqual({ type: 'any' });
   });
 
   it('沒有呼叫函式但有文字時當成 reply', async () => {

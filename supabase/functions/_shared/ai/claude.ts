@@ -8,9 +8,10 @@
 //   1. **沒有音訊輸入**。`supports('audio')` 回 false，fallback.ts 會把語音直接交給 Gemini。
 //   2. Haiku 5.5 **不接受**非預設的 temperature／top_p／top_k（400），一律不送。
 //   3. 圖片的 media_type 必須與實際內容一致，否則 400 —— 從 base64 開頭判斷，不信呼叫端給的。
-//   4. 迴圈用 `tool_choice: any` 強迫每一輪都呼叫函式（對應 Gemini 的 mode: ANY），
-//      模型這時會跳過思考直接呼叫，速度也比較快。Claude 沒有 allowedFunctionNames，
-//      最後一輪改用一句話要求它直接收尾，沒照做就當失敗。
+//   4. 迴圈用 `tool_choice: auto`：強制呼叫（`any`）時 Haiku 5.5 會**完全跳過思考**，
+//      effort 調再高也沒用，回覆品質就是 low 的樣子。模型沒呼叫函式、只回文字時當成 reply。
+//      最後一輪或時間用完才用 `any`（對應 Gemini 的 mode: ANY）：那時要的就是不思考、快收尾。
+//      Claude 沒有 allowedFunctionNames，所以再補一句話要求收尾，沒照做就當失敗。
 //   5. 模型回的 content 要原樣當成 assistant turn 送回去（可能夾著 thinking block）。
 //   6. system 自己帶 cache_control：跨訊息能重複利用的只有 system + tools 這一段。
 //   7. 上網搜尋（web_search）要在 Console 開放，沒開的話整個請求 400 ——
@@ -151,10 +152,12 @@ const isTimeout = (err: Error) => /timed? ?out|abort/i.test(err.message)
 export function createClaudeProvider(opts: {
   client: ClaudeClient
   model?: string
-  /** 思考強度。記帳不需要深思，low 換速度 */
+  /** 一次性呼叫（收據 OCR、挑選、重讀收據）的思考強度。照格式抄資料不需要深思，low 換速度 */
   effort?: Effort
+  /** 對話迴圈的思考強度。要判斷語意、算時間，比 OCR 高一級 */
+  loopEffort?: Effort
 }): AiProvider {
-  const { client, model = DEFAULT_CLAUDE_MODEL, effort = 'low' } = opts
+  const { client, model = DEFAULT_CLAUDE_MODEL, effort = 'low', loopEffort = 'medium' } = opts
 
   /**
    * 送出一次請求。429／5xx 這種瞬間的錯誤自己補打一次（SDK 的自動重試關掉了 ——
@@ -266,9 +269,9 @@ export function createClaudeProvider(opts: {
               ...(system ? { system } : {}),
               messages: [...messages],
               tools: roundTools,
-              // 限制 4：每一輪都必須呼叫函式，最終回覆也是一支函式（reply）
-              tool_choice: { type: 'any' },
-              output_config: { effort },
+              // 限制 4：平常讓模型先思考；收尾那一輪才強制呼叫
+              tool_choice: { type: forceFinish ? 'any' : 'auto' },
+              output_config: { effort: loopEffort },
               // 同一則訊息的第二輪會帶著第一輪整段 prefix，打到快取只收 1 成的價錢
               cache_control: { type: 'ephemeral' },
             }, timeoutMs, `r${round + 1}`)
