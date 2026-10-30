@@ -81,3 +81,15 @@ export async function executeSafely(
     return { error: err instanceof Error ? err.message : String(err) }
   }
 }
+
+/**
+ * 同一輪的讀取工具**同時**執行，結果照呼叫順序排好。
+ * 推薦三間店就是三次 search_places，一個等一個要多好幾秒（群組沒有「輸入中」動畫，乾等很久）。
+ * 這幾支都是唯讀的，彼此沒有先後關係。
+ */
+export function executeAll(
+  execute: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+  calls: ToolCall[],
+): Promise<unknown[]> {
+  return Promise.all(calls.map((call) => executeSafely(execute, call)))
+}

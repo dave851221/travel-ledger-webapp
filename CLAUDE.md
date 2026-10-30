@@ -178,7 +178,7 @@ handlers 只認得 `AiProvider`（`_shared/ai/types.ts`）：一次性的 `gener
 | 檔案 | 內容 |
 | :--- | :--- |
 | `types.ts` | 介面、訊息形狀、`RetryableError`／`FatalError`、錯誤前綴（`RATE_LIMIT:`／`AI_QUOTA:`／`AI_BUSY:`） |
-| `loop.ts` | 兩家迴圈共用的規則：每輪逾時（開著上網搜尋的那輪放寬到 25 秒）、何時強迫收尾、終結函式怎麼挑、工具結果截斷 |
+| `loop.ts` | 兩家迴圈共用的規則：每輪逾時（開著上網搜尋的那輪放寬到 25 秒）、何時強迫收尾、終結函式怎麼挑、工具結果截斷；同一輪的讀取工具**同時**執行（`executeAll`） |
 | `gemini.ts` | Gemini 的 client、`runGeminiToolLoop`、`createGeminiProvider`（模型清單由呼叫端給） |
 | `claude.ts` | `createClaudeProvider`（官方 SDK，`npm:@anthropic-ai/sdk`，預設 `claude-haiku-5-5`、effort `low`） |
 | `fallback.ts` | `withFallback(primary, backup)`：主要的失敗或做不到（語音）就交給備援。失敗時呼叫 request 的 `onFallback('quota' \| 'error')`；額度用完後 10 分鐘內直接用備援 |

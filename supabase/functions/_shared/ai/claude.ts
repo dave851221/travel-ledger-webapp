@@ -19,7 +19,7 @@
 
 import { Anthropic } from "../deps.ts"
 import {
-  executeSafely,
+  executeAll,
   pickTerminal,
   planRound,
   toFunctionResponseObject,
@@ -309,16 +309,16 @@ export function createClaudeProvider(opts: {
           if (terminal) return terminal
 
           // 只有讀取工具：每一個 tool_use 都要有對應的 tool_result，放在同一個 user turn
-          const results: Anthropic.ToolResultBlockParam[] = []
-          for (const [i, call] of calls.entries()) {
+          // 同時執行（executeAll），結果照 tool_use 的順序排
+          for (const call of calls) {
             console.log(`[AI] ${model} r${round + 1} → ${call.name} ${JSON.stringify(call.args).substring(0, 200)}`)
-            const result = await executeSafely(execute, call)
-            results.push({
-              type: 'tool_result',
-              tool_use_id: uses[i].id,
-              content: JSON.stringify(toFunctionResponseObject(result)),
-            })
           }
+          const outputs = await executeAll(execute, calls)
+          const results: Anthropic.ToolResultBlockParam[] = calls.map((_call, i) => ({
+            type: 'tool_result',
+            tool_use_id: uses[i].id,
+            content: JSON.stringify(toFunctionResponseObject(outputs[i])),
+          }))
           messages.push({ role: 'user', content: results })
         }
         throw new RetryableError(`no terminal call within ${maxRounds} rounds`)

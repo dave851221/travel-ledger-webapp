@@ -18,7 +18,7 @@
 // 那是 proto3 JSON 的正式名稱，新程式碼不要再混用 snake_case。
 // ============================================================
 
-import { executeSafely, pickTerminal, planRound, toFunctionResponseObject } from "./loop.ts"
+import { executeAll, pickTerminal, planRound, toFunctionResponseObject } from "./loop.ts"
 import {
   type AiMessage,
   type AiProvider,
@@ -280,17 +280,16 @@ export async function runGeminiToolLoop(params: GeminiToolLoopParams): Promise<T
         const terminal = pickTerminal(calls, terminalNames, replyName, model)
         if (terminal) return terminal
 
-        // 只有讀取工具：依**同順序**執行，組成一個 user turn 的多個 functionResponse
-        const responses: GeminiPart[] = []
+        // 只有讀取工具：同時執行，依**同順序**組成一個 user turn 的多個 functionResponse
         for (const call of calls) {
           // 查詢工具也留一行：出問題時光看日誌就知道模型查了什麼、查到第幾輪。
           // 終結函式在呼叫端記，這裡只補上中間這幾步。
           console.log(`[AI] ${model} r${round + 1} → ${call.name} ${JSON.stringify(call.args ?? {}).substring(0, 200)}`)
-          const result = await executeSafely(execute, call)
-          responses.push({
-            functionResponse: { name: call.name, response: toFunctionResponseObject(result) },
-          })
         }
+        const results = await executeAll(execute, calls)
+        const responses: GeminiPart[] = calls.map((call, i) => ({
+          functionResponse: { name: call.name, response: toFunctionResponseObject(results[i]) },
+        }))
         working.push({ role: 'user', parts: responses })
       }
       // 強迫收尾那一輪還是沒叫終結函式（模型無視 allowedFunctionNames）。換一個試。
