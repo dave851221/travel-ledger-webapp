@@ -70,6 +70,24 @@ export function mentionsEditingExisting(text: string): boolean {
   return EDIT_VERB.test(text) || CORRECTION_HINT.test(text)
 }
 
+// 付款人／分攤／日期的說法。「是小明付的」「我墊的」「她沒吃」「其實是昨天」都不帶「改」字。
+const DRAFT_FIELD_HINT = /(付|墊|出錢|買單|請客|分攤|平分|均分|AA|沒吃|沒有吃|沒喝|沒去|沒參加|不用分|不算|也算|也有|算我|算他|算她|昨天|前天|[0-9０-９]{1,2}\s*[/月號日])/
+// 問句：「艷櫻付了多少？」「誰還沒付？」是在查詢，不是在補草稿
+const QUESTION_HINT = /([？?]|嗎|多少|幾|誰|哪)/
+
+/**
+ * 「這句話聽起來是在補充或修正一張還沒確認的草稿」—— 使用者常常不講「改」。
+ *
+ * 防線：草稿還在，模型卻只用 reply 回「付款人：艷櫻（依你說的）」，
+ * 卡片根本沒換，使用者按「確認存入」寫進去的還是舊的付款人。
+ * 這時 ai-text.ts 會帶著提醒再問模型一次。只在**有草稿**時才用得到，
+ * 誤判的代價是多一次模型呼叫（模型仍可以選擇 reply）。
+ */
+export function mentionsDraftField(text: string): boolean {
+  if (!text) return false
+  return DRAFT_FIELD_HINT.test(text) && !QUESTION_HINT.test(text)
+}
+
 /** LINE 的 mention 條目，只列這裡真正會用到的欄位 */
 export interface Mentionee {
   index?: number

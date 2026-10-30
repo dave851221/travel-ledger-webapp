@@ -8,6 +8,7 @@ import {
   normalizeDate,
   hasCurrencyHint,
   matchExpensesByQuestion,
+  mentionsDraftField,
   mentionsEditingExisting,
   normalizeExpenseAmountMaps,
   pickExpenseByRef,
@@ -62,6 +63,25 @@ describe('mentionsEditingExisting', () => {
     expect(mentionsEditingExisting('今天好累')).toBe(false);
     expect(mentionsEditingExisting('剛剛那個改天再說')).toBe(false);
     expect(mentionsEditingExisting('')).toBe(false);
+  });
+});
+
+describe('mentionsDraftField', () => {
+  it('沒說「改」的付款人／分攤／日期補充也算', () => {
+    expect(mentionsDraftField('是艷櫻先付的')).toBe(true);
+    expect(mentionsDraftField('我墊的')).toBe(true);
+    expect(mentionsDraftField('小明沒吃')).toBe(true);
+    expect(mentionsDraftField('其實是昨天')).toBe(true);
+    expect(mentionsDraftField('是 10/30 的')).toBe(true);
+    expect(mentionsDraftField('大家平分')).toBe(true);
+  });
+
+  it('問句與閒聊不算', () => {
+    expect(mentionsDraftField('艷櫻付了多少？')).toBe(false);
+    expect(mentionsDraftField('誰還沒付')).toBe(false);
+    expect(mentionsDraftField('今天好累')).toBe(false);
+    expect(mentionsDraftField('晚餐 300')).toBe(false);
+    expect(mentionsDraftField('')).toBe(false);
   });
 });
 

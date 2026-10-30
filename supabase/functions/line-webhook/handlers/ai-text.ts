@@ -34,6 +34,7 @@ import {
   claimsCompletedAction,
   extractJSON,
   matchExpensesByQuestion,
+  mentionsDraftField,
   mentionsEditingExisting,
   pickExpenseByRef,
   summarizeHistoryEntry,
@@ -97,6 +98,9 @@ type RecentExpense = Pick<
  * replyToken 大約一分鐘後失效，留 15 秒給送出訊息與資料庫寫入。
  */
 const AI_DEADLINE_MS = 45_000
+
+/** 補問一次「這句是不是在改草稿」至少要剩這麼多時間，不夠就照第一次的回答送出 */
+const DRAFT_RETRY_MIN_MS = 15_000
 
 /** LINE 一次 reply 最多送 5 則訊息。卡片前面那一則文字也算在內。 */
 const MAX_REPLY_MESSAGES = 5
@@ -307,12 +311,16 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
     if (part) {
       const d = photoDraft.exp ?? {}
       const lastTurn = conversation[conversation.length - 1]
+      // ⚠️ 以前這段只寫「調整金額或分攤」，「是艷櫻先付的」這種講付款人的話
+      //    模型就判定「不需要重新分配」而只用 reply 回一段文字，卡片沒換。
+      //    任何欄位都要列出來，也要講明「沒說改也算」。
       lastTurn.parts.unshift({
-        text: `【尚未確認的收據草稿 nonce=${photoDraft.nonce}】${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''}\n`
-          + `目前分攤：${JSON.stringify(d.s ?? {})}\n`
-          + `下面附上那張收據。若使用者這句話是在調整這筆的金額或分攤，`
-          + `請重新閱讀收據上的各品項，依照他說的分配方式重算 payer_data 與 split_details，`
-          + `呼叫 propose_expenses 回傳**一筆**（description、amount、currency、date 沿用上面的草稿，除非使用者另有指示），`
+        text: `【尚未確認的收據草稿 nonce=${photoDraft.nonce}】${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''} ${d.dt ?? ''} [${d.cat ?? ''}]\n`
+          + `目前付款：${JSON.stringify(d.p ?? {})}｜目前分攤：${JSON.stringify(d.s ?? {})}\n`
+          + `下面附上那張收據。若使用者這句話在補充或修正這筆的**任何**內容 ——`
+          + `付款人（「是小明付的」）、分攤（「我沒吃」「只有我們三個」）、金額、品名、日期、分類 ——`
+          + `就算他沒說「改」也一樣，呼叫 propose_expenses 回傳**一筆**修正後的內容`
+          + `（沒提到的欄位沿用上面的草稿；分攤要依品項重算時請重新閱讀收據），`
           + `並把 corrects_draft 填成 ${photoDraft.nonce}。\n`
           + `⚠️ 若他講的是**另一筆與這張收據無關的支出**（例如「計程車 200」），`
           + `corrects_draft 請留空 —— 系統會據此決定新卡片要不要沿用這張收據。\n`
@@ -341,32 +349,55 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
     timezone,
   }
 
+  const runLoop = (messages: AiMessage[], webSearch: boolean) => ai.runToolLoop({
+    // 有附收據時改用視覺模型
+    task: attachedPhoto ? 'vision' : 'text',
+    messages,
+    system: YOSHI_SYSTEM_INSTRUCTION,
+    declarations: isFollowup ? FOLLOWUP_TOOL_DECLARATIONS : TEXT_TOOL_DECLARATIONS,
+    terminalNames: isFollowup ? FOLLOWUP_TERMINAL_NAMES : TERMINAL_TOOL_NAMES,
+    // ⚠️ 只讓模型執行唯讀工具。寫入類的 create／update／delete_expense 雖然
+    //    在 registry 裡，但沒有公開給它，這裡再擋一次 —— 名字是模型給的字串。
+    execute: (name: string, args: ToolArgs) => {
+      if (name === TRIP_SUMMARY_TOOL) return getTripSummary()
+      if (!READ_TOOL_NAMES.includes(name)) {
+        return Promise.resolve({ error: `Tool ${name} is not available here` })
+      }
+      return runTool(name, args, toolCtx)
+    },
+    // 查行程、查帳、上網可能要好幾輪；時間不夠時 deadline 會強迫收尾
+    maxRounds: 4,
+    // ⚠️ 以 LINE 送出事件的時間為準：排隊延遲也要算進去
+    deadlineAt: ctx.eventTimestamp + AI_DEADLINE_MS,
+    temperature: 0.4,
+    // 只有 Claude 會用（Gemini 忽略）。接話的訊息不給：多半只是閒聊，不值得花搜尋的錢
+    webSearch: webSearch ? { maxUses: WEB_SEARCH_MAX_USES, location: searchLocation } : undefined,
+    onFallback: (reason) => { scope.notice = FALLBACK_NOTICES[reason] },
+  })
+
   try {
-    const result = await ai.runToolLoop({
-      // 有附收據時改用視覺模型
-      task: attachedPhoto ? 'vision' : 'text',
-      messages: conversation,
-      system: YOSHI_SYSTEM_INSTRUCTION,
-      declarations: isFollowup ? FOLLOWUP_TOOL_DECLARATIONS : TEXT_TOOL_DECLARATIONS,
-      terminalNames: isFollowup ? FOLLOWUP_TERMINAL_NAMES : TERMINAL_TOOL_NAMES,
-      // ⚠️ 只讓模型執行唯讀工具。寫入類的 create／update／delete_expense 雖然
-      //    在 registry 裡，但沒有公開給它，這裡再擋一次 —— 名字是模型給的字串。
-      execute: (name: string, args: ToolArgs) => {
-        if (name === TRIP_SUMMARY_TOOL) return getTripSummary()
-        if (!READ_TOOL_NAMES.includes(name)) {
-          return Promise.resolve({ error: `Tool ${name} is not available here` })
+    let result = await runLoop(conversation, !isFollowup)
+
+    // 防線：草稿還在、這句話聽起來是在補付款人／分攤／日期，模型卻只用 reply 回文字 ——
+    // 卡片沒換，按「確認存入」寫進去的仍是舊內容。帶著提醒再問一次（時間夠的話）。
+    // 模型仍然可以選 reply（例如那其實是一句閒聊），這裡不強迫。
+    if (result.call.name === 'reply' && outstandingDrafts.length > 0 && mentionsDraftField(cleanText)
+      && ctx.eventTimestamp + AI_DEADLINE_MS - Date.now() > DRAFT_RETRY_MIN_MS) {
+      console.log(`[GUARD] Reply while a draft is outstanding, asking again: "${cleanText.substring(0, 80)}"`)
+      const nonces = outstandingDrafts.map(d => d.nonce).join('、')
+      const retryConversation = conversation.map((m, i) => i === conversation.length - 1
+        ? {
+          ...m,
+          parts: [...m.parts, {
+            text: `\n\n【系統提醒】這句話看起來是在補充或修正尚未確認的草稿（nonce：${nonces}），`
+              + `沒說「改」也一樣。若是如此，請呼叫 propose_expenses 回傳修正後的完整一筆並填 corrects_draft；`
+              + `用 reply 描述草稿的新內容不會改到卡片。只有這句話其實與草稿無關時才用 reply。`,
+          }],
         }
-        return runTool(name, args, toolCtx)
-      },
-      // 查行程、查帳、上網可能要好幾輪；時間不夠時 deadline 會強迫收尾
-      maxRounds: 4,
-      // ⚠️ 以 LINE 送出事件的時間為準：排隊延遲也要算進去
-      deadlineAt: ctx.eventTimestamp + AI_DEADLINE_MS,
-      temperature: 0.4,
-      // 只有 Claude 會用（Gemini 忽略）。接話的訊息不給：多半只是閒聊，不值得花搜尋的錢
-      webSearch: isFollowup ? undefined : { maxUses: WEB_SEARCH_MAX_USES, location: searchLocation },
-      onFallback: (reason) => { scope.notice = FALLBACK_NOTICES[reason] },
-    })
+        : m)
+      const retried = await runLoop(retryConversation, false)
+      if (retried.call.name === 'propose_expenses') result = retried
+    }
 
     console.log(`[AI] ${result.model} → ${result.call.name}`)
     const { args, name } = result.call
