@@ -47,7 +47,9 @@ export default defineConfig({
     react(),
     itineraryJson(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // prompt：新版本裝好後先等著，由 App.tsx 的橫幅讓使用者自己按「立即更新」。
+      // autoUpdate 會直接重新整理頁面，剛打開 App、正在填支出表單時內容會被清掉。
+      registerType: 'prompt',
       injectRegister: 'auto',
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
@@ -91,18 +93,16 @@ export default defineConfig({
     // 解決分包過大問題，使用函式格式確保在所有 Vite 版本中相容
     rollupOptions: {
       output: {
+        // 比對套件目錄而不是子字串：以前 `id.includes('react')` 會把 lucide-react 與
+        // 圖表套件的 react-redux 一起塞進首頁必載的 vendor-react。
+        // 圖表相關的不指定，讓它跟著延遲載入的統計分頁走。
         manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'vendor-react';
-            }
-            if (id.includes('decimal.js') || id.includes('papaparse') || id.includes('lucide-react')) {
-              return 'vendor-utils';
-            }
-            if (id.includes('recharts')) {
-              return 'vendor-charts';
-            }
-          }
+          // Vite 會把模組 id 正規化成正斜線（Windows 也一樣）
+          const pkg = id.match(/node_modules\/((?:@[^/]+\/)?[^/]+)/)?.[1];
+          if (!pkg) return;
+          if (['react', 'react-dom', 'react-router', 'react-router-dom', 'scheduler'].includes(pkg)) return 'vendor-react';
+          if (['decimal.js', 'lucide-react'].includes(pkg)) return 'vendor-utils';
+          if (pkg === '@supabase/supabase-js' || pkg.startsWith('@supabase/')) return 'vendor-supabase';
         },
       },
     },

@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Zap, Plus, Loader2, Settings2 } from 'lucide-react';
-import { supabase } from '../api/supabase';
 import type { Trip } from '../types';
 import { buildQuickAddDraft, parseQuickAddInput } from '../utils/quickAdd';
 import { formatMoney } from '../utils/money';
 import { isSubmitEnter } from '../utils/keyboard';
+import { insertExpenseOrQueue } from '../utils/offlineQueue';
 
 interface QuickAddBarProps {
   trip: Trip;
@@ -46,14 +46,9 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
       showToast('請輸入金額，例如「拉麵 3000」', 'error');
       return;
     }
-    if (!supabase) {
-      showToast('尚未連線到資料庫，請稍後再試', 'error');
-      return;
-    }
-
     try {
       setSaving(true);
-      const { error } = await supabase.from('expenses').insert([{
+      const { queued } = await insertExpenseOrQueue({
         trip_id: trip.id,
         date: draft.date,
         category: draft.category,
@@ -65,11 +60,11 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
         adjustment_member: draft.adjustment_member,
         photo_urls: [],
         is_settlement: false,
-      }]);
-      if (error) throw error;
+      });
 
       setInput('');
-      showToast(`已記一筆：${draft.description} ${formatMoney(draft.amount, draft.currency, trip.precision_config)}`);
+      const label = `${draft.description} ${formatMoney(draft.amount, draft.currency, trip.precision_config)}`;
+      showToast(queued ? `目前離線，已先存在手機：${label}，恢復連線後會自動上傳` : `已記一筆：${label}`);
       onSaved();
     } catch (err) {
       showToast('記帳失敗：' + (err instanceof Error ? err.message : String(err)), 'error');

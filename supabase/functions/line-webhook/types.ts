@@ -100,7 +100,13 @@ export interface IgnoredEvent {
   timestamp?: number
 }
 
-export type WebhookEvent = MessageEvent | PostbackEvent | JoinEvent | IgnoredEvent
+/** 每個事件都有的欄位。webhookEventId 是去重用的唯一 id（LINE 重送時不變）。 */
+export interface WebhookEventMeta {
+  webhookEventId?: string
+  deliveryContext?: { isRedelivery: boolean }
+}
+
+export type WebhookEvent = (MessageEvent | PostbackEvent | JoinEvent | IgnoredEvent) & WebhookEventMeta
 
 /** message 事件的窄化捷徑，讓 handler 的簽名寫得出來 */
 export type TextMessageEvent = MessageEvent & { message: TextMessage }

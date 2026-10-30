@@ -13,7 +13,8 @@ import {
   Copy,
   Check,
   MessageCircle,
-  Bot
+  Bot,
+  RefreshCw
 } from 'lucide-react';
 import Modal from './Modal';
 import { ui } from './ui';
@@ -21,6 +22,7 @@ import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
 import { isSubmitEnter } from '../utils/keyboard';
+import { EXCHANGE_RATE_SOURCE_URL, fetchLatestRates } from '../utils/exchangeRates';
 import Decimal from 'decimal.js';
 
 /**
@@ -97,6 +99,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [newMember, setNewMember] = useState('');
   const [newCategory, setNewCategory] = useState('');
   const [newCurrency, setNewCurrency] = useState('');
+  const [ratesLoading, setRatesLoading] = useState(false);
+  const [ratesNote, setRatesNote] = useState<string | null>(null);
 
   // 只在「關閉 → 開啟」的瞬間灌入表單初始值。trips 現在有 realtime 訂閱，
   // 若隨著 trip 物件變動就重設，別人存檔時會把使用者正在編輯的內容清掉。
@@ -121,6 +125,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setDefaultPayer(trip.default_payer || []);
       setDefaultSplitMembers(trip.default_split_members || []);
       setMemberOrigins([...trip.members]);
+      setRatesNote(null);
 
       const rStr: Record<string, string> = {};
       Object.keys(trip.rates).forEach(k => rStr[k] = trip.rates[k].toString());
@@ -379,6 +384,32 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     setBaseCurrency(next);
   };
 
+  // 只填進表單，按「儲存設定」才寫入 —— 與手動改匯率的行為一致，也還有機會看過再存
+  const updateRatesFromSource = async (codes: string[]) => {
+    setError(null);
+    setRatesNote(null);
+    setRatesLoading(true);
+    try {
+      const { rates, missing, updatedAt } = await fetchLatestRates(baseCurrency, codes);
+      // 查詢途中被刪掉的幣別不要再加回來
+      setRatesStr(prev => {
+        const next = { ...prev };
+        Object.entries(rates).forEach(([code, rate]) => { if (code in next) next[code] = rate; });
+        return next;
+      });
+      const updated = Object.keys(rates);
+      const when = updatedAt ? `（資料時間 ${updatedAt.getMonth() + 1}/${updatedAt.getDate()}）` : '';
+      setRatesNote([
+        updated.length > 0 ? `已填入 ${updated.join('、')} 的今日匯率${when}，按「儲存設定」才會生效。` : '',
+        missing.length > 0 ? `${missing.join('、')} 查不到匯率，請手動填寫。` : '',
+      ].filter(Boolean).join(''));
+    } catch (err) {
+      setError('更新匯率失敗：' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setRatesLoading(false);
+    }
+  };
+
   const addCategory = () => {
     const cat = newCategory.trim();
     if (cat && !categories.includes(cat)) {
@@ -399,6 +430,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     }
     if (!ratesStr[code]) {
       setRatesStr({ ...ratesStr, [code]: '1' });
+      // 1:1 只是佔位，順手查今日匯率填進去（查不到就留著讓使用者自己改）
+      void updateRatesFromSource([code]);
       // 以前只有 TWD 給 0 位，加 JPY／KRW 會變成 2 位小數，分帳拆出 333.33 日圓
       setPrecisionStr({ ...precisionStr, [code]: String(getCurrencyPrecision(code)) });
       setNewCurrency('');
@@ -597,7 +630,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     <p className="text-sm font-bold">匯出 CSV</p>
                     <p className="text-xs text-muted mt-0.5">下載所有支出紀錄，可以用試算表開啟</p>
                   </div>
-                  <button onClick={() => exportExpensesToCSV(expenses, trip.name)} className={`${ui.btnSecondary} py-2 shrink-0`}>下載</button>
+                  <button onClick={() => { void exportExpensesToCSV(expenses, trip.name); }} className={`${ui.btnSecondary} py-2 shrink-0`}>下載</button>
                 </div>
               </section>
             </div>
@@ -681,9 +714,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 </div>
               )}
               <div>
-                <div className="flex items-baseline justify-between mb-1.5">
-                  <p className="text-sm font-bold">幣別與匯率</p>
-                  <span className="text-xs text-muted">1 單位 = ? {baseCurrency}</span>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <p className="text-sm font-bold">幣別與匯率 <span className="text-xs font-normal text-muted">· 1 單位 = ? {baseCurrency}</span></p>
+                  <button
+                    onClick={() => updateRatesFromSource(Object.keys(ratesStr))}
+                    disabled={ratesLoading || Object.keys(ratesStr).length <= 1}
+                    className={`${ui.btnSecondary} py-1.5 px-3 text-xs shrink-0`}
+                  >
+                    <RefreshCw size={13} className={ratesLoading ? 'animate-spin' : ''} />今日匯率
+                  </button>
                 </div>
                 <div className="grid grid-cols-[64px_minmax(0,1fr)_76px_36px] gap-2 px-1 pb-1 text-[11px] text-muted">
                   <span>幣別</span><span>匯率</span><span>小數位數</span><span />
@@ -700,6 +739,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     </li>
                   ))}
                 </ul>
+                {ratesNote && <p className={`${ui.hint} mt-2`}>{ratesNote}</p>}
+                <p className="text-[11px] text-muted mt-1.5">
+                  今日匯率來自 <a href={EXCHANGE_RATE_SOURCE_URL} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a>，是市場中間價，和換匯店的牌價會有一點差距。
+                </p>
               </div>
               <div className="flex gap-2">
                 <input type="text" aria-label="新幣別代碼" placeholder="新增幣別，例如 KRW" className={`${ui.input} uppercase placeholder:normal-case`} value={newCurrency} onChange={e => setNewCurrency(e.target.value)} />

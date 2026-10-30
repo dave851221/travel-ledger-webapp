@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronDown, RotateCcw, Search, X } from 'lucide-react';
+import { ChevronDown, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import QuickAddBar from '../../components/QuickAddBar';
 import { ui } from '../../components/ui';
 import { formatMoney } from '../../utils/money';
+import { sumByCurrency } from '../../utils/finance';
 import ExpenseRow from './ExpenseRow';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -31,6 +32,11 @@ const LedgerTab: React.FC<Props> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  // 進階篩選：某位成員有參與（有付錢或有分攤）、日期範圍
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [memberFilter, setMemberFilter] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [collapsedDates, setCollapsedDates] = useState<Record<string, boolean>>({});
   const readOnly = trip.is_archived;
 
@@ -45,9 +51,14 @@ const LedgerTab: React.FC<Props> = ({
         Object.keys(e.payer_data).some(p => p.toLowerCase().includes(q))
       );
       const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(e.category);
-      return matchesSearch && matchesCategory;
+      const matchesMember = !memberFilter
+        || (Number(e.payer_data[memberFilter]) || 0) !== 0
+        || (Number(e.split_data[memberFilter]) || 0) !== 0;
+      // 日期都是 YYYY-MM-DD，直接比字串
+      const matchesDate = (!dateFrom || e.date >= dateFrom) && (!dateTo || e.date <= dateTo);
+      return matchesSearch && matchesCategory && matchesMember && matchesDate;
     });
-  }, [expenses, searchQuery, selectedCategories]);
+  }, [expenses, searchQuery, selectedCategories, memberFilter, dateFrom, dateTo]);
 
   const groupedExpenses = useMemo(() => {
     const groups: Record<string, { expenses: Expense[]; totals: Record<string, number> }> = {};
@@ -67,7 +78,11 @@ const LedgerTab: React.FC<Props> = ({
   const toggleCategory = (cat: string) =>
     setSelectedCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
 
-  const filtering = searchQuery.trim() !== '' || selectedCategories.length > 0;
+  const advancedCount = (memberFilter ? 1 : 0) + (dateFrom || dateTo ? 1 : 0);
+  const filtering = searchQuery.trim() !== '' || selectedCategories.length > 0 || advancedCount > 0;
+  const clearAdvanced = () => { setMemberFilter(null); setDateFrom(''); setDateTo(''); };
+  // 篩選後的合計，讓「某人在某幾天花了多少」一眼看得到
+  const filteredTotals = useMemo(() => sumByCurrency(filteredExpenses), [filteredExpenses]);
   const hasAny = expenses.some(e => !e.is_settlement);
 
   return (
@@ -102,6 +117,17 @@ const LedgerTab: React.FC<Props> = ({
             );
           })}
         </div>
+        <button
+          onClick={() => setFilterOpen(v => !v)}
+          aria-label="依成員或日期篩選"
+          aria-expanded={filterOpen}
+          className={`relative shrink-0 ${ui.iconBtn} ${filterOpen || advancedCount > 0 ? 'bg-surface border border-line text-ink' : ''}`}
+        >
+          <SlidersHorizontal size={18} />
+          {advancedCount > 0 && (
+            <span className="absolute -top-1 -right-1 num min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold flex items-center justify-center">{advancedCount}</span>
+          )}
+        </button>
         <button
           onClick={() => setSearchOpen(v => !v)}
           aria-label="搜尋"
@@ -141,6 +167,42 @@ const LedgerTab: React.FC<Props> = ({
             </button>
           )}
         </div>
+      )}
+
+      {filterOpen && (
+        <div className="bg-surface border border-line rounded-2xl p-3.5 space-y-3 anim-fade">
+          <div>
+            <p className="text-xs text-muted mb-1.5">誰有參與（付錢或分攤）</p>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="依成員篩選">
+              <button onClick={() => setMemberFilter(null)} aria-pressed={!memberFilter} className={`${ui.chip} ${!memberFilter ? ui.chipOn : ui.chipOff}`}>全部</button>
+              {trip.members.map(m => (
+                <button key={m} onClick={() => setMemberFilter(memberFilter === m ? null : m)} aria-pressed={memberFilter === m} className={`${ui.chip} ${memberFilter === m ? ui.chipOn : ui.chipOff}`}>
+                  {m}{m === currentUser ? '（我）' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted mb-1.5">日期</p>
+            <div className="flex items-center gap-2">
+              <input type="date" aria-label="開始日期" className={`${ui.input} num py-2 flex-1 min-w-0`} value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} />
+              <span className="text-muted text-sm">–</span>
+              <input type="date" aria-label="結束日期" className={`${ui.input} num py-2 flex-1 min-w-0`} value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} />
+            </div>
+          </div>
+          {advancedCount > 0 && (
+            <button onClick={clearAdvanced} className="text-xs text-ink-2 hover:text-ink underline">清除成員與日期篩選</button>
+          )}
+        </div>
+      )}
+
+      {filtering && filteredExpenses.length > 0 && (
+        <p className="text-xs text-muted px-1">
+          符合 <span className="num">{filteredExpenses.length}</span> 筆，合計{' '}
+          <span className="num font-bold text-ink-2">
+            {Object.entries(filteredTotals).map(([cur, amt]) => formatMoney(amt.toNumber(), cur, trip.precision_config)).join(' · ')}
+          </span>
+        </p>
       )}
 
       <div className="hidden lg:grid grid-cols-[30px_minmax(0,1fr)_88px_92px_112px_100px] gap-x-3 px-4 pt-1 text-[11.5px] text-muted">

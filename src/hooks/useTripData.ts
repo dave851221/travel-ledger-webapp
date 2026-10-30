@@ -12,10 +12,32 @@ export interface UseTripDataResult {
   loading: boolean;
   /** 首次載入完成後回傳 localStorage 中記住的身分，沒有則為 null */
   savedUser: string | null;
-  refetchTrip: () => Promise<void>;
-  refetchExpenses: () => Promise<void>;
+  refetchTrip: () => Promise<boolean>;
+  refetchExpenses: () => Promise<boolean>;
   refetchDeleted: () => Promise<void>;
 }
+
+/**
+ * 上次成功載入的旅程與帳目，存在這支手機上。
+ * 離線時直接打開 App 也看得到帳、也能記帳（記的會排進 offlineQueue）。
+ */
+const cacheKey = (id: string) => `trip_cache_${id}`;
+
+const readCache = (id: string): { trip?: Trip; expenses?: Expense[] } => {
+  try {
+    return JSON.parse(localStorage.getItem(cacheKey(id)) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const writeCache = (id: string, patch: { trip?: Trip; expenses?: Expense[] }) => {
+  try {
+    localStorage.setItem(cacheKey(id), JSON.stringify({ ...readCache(id), ...patch }));
+  } catch {
+    // 隱私模式或空間不足：只是少了離線備份，不影響線上使用
+  }
+};
 
 /**
  * 旅程主資料的載入與即時同步。
@@ -68,24 +90,27 @@ export const useTripData = (
     [],
   );
 
-  const refetchTrip = useCallback(async () => {
-    if (!supabase || !id) return;
+  const refetchTrip = useCallback(async (): Promise<boolean> => {
+    if (!supabase || !id) return false;
     try {
       // 已經通過通行碼關卡，`*` 含 access_code（設定頁要顯示）。其他地方一律用 TRIP_COLUMNS
       const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
       if (error) throw error;
       setTrip(data);
+      writeCache(id, { trip: data });
       fetchSiblingTrips(data?.category, id);
+      return true;
     } catch (err) {
       console.error(err);
       // 只有真的查無此旅程才導回首頁；網路暫時不通時保留畫面上的舊資料，
       // 等下一次 realtime 事件或回到前景再重抓
       if (isNotFoundError(err)) onMissingRef.current();
+      return false;
     }
   }, [id, fetchSiblingTrips]);
 
-  const refetchExpenses = useCallback(async () => {
-    if (!supabase || !id) return;
+  const refetchExpenses = useCallback(async (): Promise<boolean> => {
+    if (!supabase || !id) return false;
     try {
       const { data, error } = await supabase
         .from('expenses')
@@ -96,8 +121,11 @@ export const useTripData = (
         .order('created_at', { ascending: false });
       if (error) throw error;
       setExpenses(data || []);
+      writeCache(id, { expenses: data || [] });
+      return true;
     } catch (err) {
       console.error(err);
+      return false;
     }
   }, [id]);
 
@@ -115,11 +143,12 @@ export const useTripData = (
       const { data: expired, error: expiredError } = await supabase
         .rpc('list_expired_trash', { p_trip_id: id });
       if (expiredError) throw expiredError;
+      // 查過一次就好：之後每個 realtime 事件都會呼叫這裡，沒必要每次都多打一支 RPC
+      purgeDoneRef.current = true;
 
       const expiredRows = (expired || []) as { id: string; photo_urls: string[] | null }[];
       if (expiredRows.length === 0) return;
 
-      purgeDoneRef.current = true;
       const expiredPhotoUrls = expiredRows
         .flatMap((row) => row.photo_urls || [])
         .filter((url) => !!url);
@@ -145,8 +174,14 @@ export const useTripData = (
 
     const init = async () => {
       setLoading(true);
-      await Promise.all([refetchTrip(), refetchExpenses(), refetchDeleted()]);
+      const [tripOk, expensesOk] = await Promise.all([refetchTrip(), refetchExpenses(), refetchDeleted()]);
       if (cancelled) return;
+      // 連不上就拿上次存在手機上的那份（離線也能看、也能記）
+      if (!tripOk || !expensesOk) {
+        const cached = readCache(id);
+        if (!tripOk && cached.trip) setTrip(cached.trip);
+        if (!expensesOk && cached.expenses) setExpenses(cached.expenses);
+      }
       setSavedUser(localStorage.getItem(`me_${id}`));
       setLoading(false);
     };

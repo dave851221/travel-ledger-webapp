@@ -1,10 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2, AlertTriangle, ArrowDown, ArrowRight, Check, HandCoins, Trash2 } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Expense } from '../types';
 import { hasItinerary } from '../features/itinerary/registry';
-import TripItinerary from '../features/itinerary/TripItinerary';
 import ExpenseModal from '../components/ExpenseModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import SettingsModal from '../components/SettingsModal';
@@ -20,18 +19,27 @@ import { useTripData } from '../hooks/useTripData';
 import { useTripStats } from '../hooks/useTripStats';
 import { useTrash } from '../hooks/useTrash';
 import { useTripAuthGuard } from '../hooks/useTripAuthGuard';
+import { useOfflineQueue } from '../hooks/useOfflineQueue';
+import { insertExpenseOrQueue, withPending } from '../utils/offlineQueue';
 import { primaryTabs, type TabType } from '../features/dashboard/tabs';
 import BottomNav from '../features/dashboard/BottomNav';
 import { DesktopHeader, MobileTopBar, SideNav } from '../features/dashboard/TripChrome';
 import BalanceTicket from '../features/dashboard/BalanceTicket';
 import SummaryPanel from '../features/dashboard/SummaryPanel';
 import LedgerTab from '../features/dashboard/LedgerTab';
-import StatsTab from '../features/dashboard/StatsTab';
 import SettlementTab, { type SettleRequest } from '../features/dashboard/SettlementTab';
 import TrashTab from '../features/dashboard/TrashTab';
 import SiblingsTab from '../features/dashboard/SiblingsTab';
 import AlbumTab from '../features/dashboard/AlbumTab';
 import MemberAvatar from '../features/dashboard/MemberAvatar';
+
+// 統計分頁帶著圖表套件（recharts，壓縮前 300 KB），行程分頁帶著版面元件，都等點到才下載
+const StatsTab = lazy(() => import('../features/dashboard/StatsTab'));
+const TripItinerary = lazy(() => import('../features/itinerary/TripItinerary'));
+
+const TabLoading = () => (
+  <div className="flex justify-center py-20 text-muted"><Loader2 className="animate-spin" size={24} /></div>
+);
 
 const APP_NAME = '旅遊小本本';
 
@@ -43,15 +51,28 @@ const Dashboard: React.FC = () => {
   const authed = useTripAuthGuard(id);
 
   const {
-    trip, expenses, deletedExpenses, siblingTrips, loading, savedUser,
+    trip, expenses, deletedExpenses, siblingTrips, loading,
     refetchTrip, refetchExpenses, refetchDeleted,
   } = useTripData(authed ? id : undefined, useCallback(() => navigate('/'), [navigate]));
   const [activeTab, setActiveTab] = useState<TabType>(() => hasItinerary(id || '') ? 'itinerary' : 'ledger');
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
-  const [isWelcomeSelectorOpen, setIsWelcomeSelectorOpen] = useState(false);
+
+  // 「我是誰」由資料推導，不另外存一份會過期的 state。
+  // localStorage 的 me_{id} 是來源（設定頁改名時會跟著改它），但只認還在成員清單裡的名字 ——
+  // 被移除的人留著的話，新增支出會把不存在的人預設成付款人，那筆錢就從結算裡消失。
+  const [pickedUser, setPickedUser] = useState<string | null>(null);
+  const storedUser = id ? localStorage.getItem(`me_${id}`) : null;
+  const currentUser = !loading && trip
+    ? [pickedUser, storedUser].find((m): m is string => !!m && trip.members.includes(m)) ?? null
+    : null;
+
+  // 還沒選身分就請使用者先選一次；關掉之後不再自己跳出來（頭像選單隨時可以改）
+  const [welcomeRequested, setWelcomeRequested] = useState(false);
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
+  const isWelcomeSelectorOpen = welcomeRequested || (!loading && !!trip && !currentUser && !welcomeDismissed);
+  const closeWelcome = () => { setWelcomeRequested(false); setWelcomeDismissed(true); };
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
   const { toast, showToast } = useToast();
@@ -71,27 +92,12 @@ const Dashboard: React.FC = () => {
   // Settlement Confirmation State
   const [settleConfirm, setSettleConfirm] = useState<SettleRequest | null>(null);
 
-  // 首次載入完成後套用記住的身分；沒有記錄就請使用者先選一次
+  // 記住的身分已經不是成員了（被移除）就清掉，下次不會再讀到
   useEffect(() => {
-    if (loading) return;
-    if (savedUser) setCurrentUser(savedUser);
-    else setIsWelcomeSelectorOpen(true);
-  }, [loading, savedUser]);
-
-  // 記住的身分可能已經不是成員了（在設定頁被改名或移除）。
-  // 留著舊名字的話，新增支出會把一個不存在的人預設成付款人，那筆錢就從結算裡消失。
-  // 改名時 SettingsModal 已經更新了 localStorage，重讀一次就能跟上新名字。
-  useEffect(() => {
-    if (!trip || !currentUser || trip.members.includes(currentUser)) return;
-    const stored = localStorage.getItem(`me_${id}`);
-    if (stored && trip.members.includes(stored)) {
-      setCurrentUser(stored);
-    } else {
+    if (!loading && trip && storedUser && !trip.members.includes(storedUser)) {
       localStorage.removeItem(`me_${id}`);
-      setCurrentUser(null);
-      setIsWelcomeSelectorOpen(true);
     }
-  }, [trip, currentUser, id]);
+  }, [loading, trip, storedUser, id]);
 
   useEffect(() => {
     if (trip?.name) document.title = `${trip.name} · ${APP_NAME}`;
@@ -169,13 +175,22 @@ const Dashboard: React.FC = () => {
     setIsExpenseModalOpen(true);
   };
 
+  // 離線記的那幾筆還不在資料庫裡，改或刪都要等上傳之後
+  const blockPending = (exp: Expense) => {
+    if (!exp.pending_sync) return false;
+    showToast('這筆還沒上傳，恢復連線後才能修改或刪除', 'error');
+    return true;
+  };
+
   const handleEditExpense = (exp: Expense) => {
+    if (blockPending(exp)) return;
     setDetailExpense(null);
     setEditingExpense(exp);
     setIsExpenseModalOpen(true);
   };
 
   const requestDelete = (exp: Expense) => {
+    if (blockPending(exp)) return;
     setDetailExpense(null);
     setDeleteConfirmId(exp.id);
   };
@@ -191,9 +206,9 @@ const Dashboard: React.FC = () => {
   };
 
   const handleSetCurrentUser = (name: string) => {
-    setCurrentUser(name);
     localStorage.setItem(`me_${id}`, name);
-    setIsWelcomeSelectorOpen(false);
+    setPickedUser(name);
+    closeWelcome();
   };
 
   const handleOpenManualSettle = () => {
@@ -225,21 +240,34 @@ const Dashboard: React.FC = () => {
     setIsManualSettleOpen(false);
   };
 
-  const stats = useTripStats(expenses, trip, currentUser);
+  // 離線時記的支出先併進來，帳目、餘額、統計都會先算進去
+  const { queue: offlineQueue } = useOfflineQueue(!loading && !!trip, async (count) => {
+    await refetchExpenses();
+    showToast(`已上傳 ${count} 筆離線時記的支出`);
+  });
+  const allExpenses = useMemo(
+    () => (trip ? withPending(expenses, offlineQueue, trip.id) : expenses),
+    [expenses, offlineQueue, trip],
+  );
+
+  const stats = useTripStats(allExpenses, trip, currentUser);
+
+  // 明細面板跟著最新資料走：開著的時候別人改了金額要看得到，被刪掉了就關起來
+  const liveDetail = detailExpense ? allExpenses.find(e => e.id === detailExpense.id) ?? null : null;
 
   const confirmSettleUp = async () => {
     if (!supabase || !trip || !settleConfirm) return;
     const { from, to, amount, cur } = settleConfirm;
     const actualCur = cur === 'GRAND_TOTAL' ? trip.base_currency : cur;
     try {
-      const { error } = await supabase.from('expenses').insert([{
+      const { queued } = await insertExpenseOrQueue({
         trip_id: trip.id, date: getLocalDateString(), category: '結清',
         description: `結清：${from} ➡️ ${to}`, amount: amount, currency: actualCur,
-        payer_data: { [from]: amount }, split_data: { [to]: amount }, is_settlement: true
-      }]);
-      if (error) throw error;
+        payer_data: { [from]: amount }, split_data: { [to]: amount }, is_settlement: true,
+        adjustment_member: null, photo_urls: [],
+      });
       setSettleConfirm(null); refetchExpenses();
-      showToast('已記錄結清');
+      showToast(queued ? '目前離線，結清已先存在手機，恢復連線後會自動上傳' : '已記錄結清');
     } catch (err) { showToast('結清失敗：' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
 
@@ -287,7 +315,7 @@ const Dashboard: React.FC = () => {
       stats={stats}
       currentUser={currentUser}
       onSettle={() => changeTab('settlement')}
-      onPickUser={() => setIsWelcomeSelectorOpen(true)}
+      onPickUser={() => setWelcomeRequested(true)}
       notchBg={notchBg}
     />
   );
@@ -321,7 +349,7 @@ const Dashboard: React.FC = () => {
           {activeTab === 'ledger' && (
             <LedgerTab
               trip={trip}
-              expenses={expenses}
+              expenses={allExpenses}
               currentUser={currentUser}
               trashCount={deletedExpenses.length}
               onOpenExpense={setDetailExpense}
@@ -335,12 +363,16 @@ const Dashboard: React.FC = () => {
             />
           )}
 
-          {activeTab === 'stats' && <StatsTab trip={trip} expenses={expenses} stats={stats} currentUser={currentUser} />}
+          {activeTab === 'stats' && (
+            <Suspense fallback={<TabLoading />}>
+              <StatsTab trip={trip} expenses={allExpenses} stats={stats} currentUser={currentUser} />
+            </Suspense>
+          )}
 
           {activeTab === 'settlement' && (
             <SettlementTab
               trip={trip}
-              expenses={expenses}
+              expenses={allExpenses}
               stats={stats}
               currentUser={currentUser}
               onRecord={setSettleConfirm}
@@ -360,9 +392,13 @@ const Dashboard: React.FC = () => {
             />
           )}
 
-          {activeTab === 'itinerary' && id && <TripItinerary tripId={id} />}
+          {activeTab === 'itinerary' && id && (
+            <Suspense fallback={<TabLoading />}>
+              <TripItinerary tripId={id} />
+            </Suspense>
+          )}
 
-          {activeTab === 'album' && <AlbumTab trip={trip} expenses={expenses} onOpenExpense={setDetailExpense} />}
+          {activeTab === 'album' && <AlbumTab trip={trip} expenses={allExpenses} onOpenExpense={setDetailExpense} />}
 
           {activeTab === 'siblings' && (
             <SiblingsTab
@@ -389,9 +425,9 @@ const Dashboard: React.FC = () => {
 
       <BottomNav tabs={tabs} active={activeTab} onChange={changeTab} onAdd={readOnly ? undefined : openNewExpense} />
 
-      {detailExpense && (
+      {liveDetail && (
         <ExpenseDetailModal
-          expense={detailExpense}
+          expense={liveDetail}
           trip={trip}
           currentUser={currentUser}
           onClose={() => setDetailExpense(null)}
@@ -495,7 +531,7 @@ const Dashboard: React.FC = () => {
       )}
 
       {/* Welcome Identity Selector Modal */}
-      <Modal isOpen={isWelcomeSelectorOpen} onClose={() => setIsWelcomeSelectorOpen(false)} title="你是哪一位？">
+      <Modal isOpen={isWelcomeSelectorOpen} onClose={closeWelcome} title="你是哪一位？">
         <div className="space-y-4">
           <p className="text-sm text-ink-2">選好之後，帳目會標出你的份額，最上面也會顯示你還要付或可以收回多少。之後可以從右上角的頭像更改。</p>
           <div className="grid grid-cols-2 gap-2.5">

@@ -166,6 +166,13 @@ CREATE TABLE IF NOT EXISTS public.line_bot_messages (
 
 CREATE INDEX IF NOT EXISTS idx_line_bot_messages_created_at ON public.line_bot_messages (created_at);
 
+-- webhook 事件去重：LINE 重送同一個事件（webhookEventId 相同）時只處理第一份。
+-- 由 pg_cron 每天清掉 2 天前的。
+CREATE TABLE IF NOT EXISTS public.line_webhook_events (
+    event_id   TEXT PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 動作鎖：以 PK 衝突當作鎖，防止使用者連點 Flex 按鈕造成重複記帳
 CREATE TABLE IF NOT EXISTS public.line_processed_actions (
     nonce        TEXT PRIMARY KEY,
@@ -431,6 +438,7 @@ ALTER TABLE public.line_chat_history      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_processed_actions ENABLE ROW LEVEL SECURITY;
 -- 刻意**沒有任何政策**：只有 Edge Function（service role，繞過 RLS）讀寫，前端用不到
 ALTER TABLE public.line_bot_messages      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.line_webhook_events    ENABLE ROW LEVEL SECURITY;
 
 -- 政策名稱與既有資料庫保持一致，重複執行不會產生重複政策
 DROP POLICY IF EXISTS "Allow public read/write on trips"    ON public.trips;

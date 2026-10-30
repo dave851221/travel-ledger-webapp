@@ -121,6 +121,8 @@ Supabase Dashboard → Settings → API Keys 重簽 → 更新本機 `.env` 與 
 - LINE Bot 尚未支援：**多品項收據拆帳**（一張收據拆成好幾筆，或指定某幾個品項給某個人；
   現在只能靠「收據草稿 + 文字重新分帳」逐項講）。
   LINE 的 `imageSet`（相簿多選被視為同一組）也還沒處理，多頁收據會變成多筆（G4）。
+- LINE 重送同一個事件（`webhookEventId` 相同）已經會略過（`line_webhook_events`，2026-10-30），
+  不會再出兩張卡。但處理本身仍然是同步的：
 - Webhook 目前整條同步處理到底，OCR 與**語音**路徑有超過 LINE replyToken 時效的風險
   （語音會先呼叫一次 Gemini 轉錄，再呼叫一次解析，是目前最慢的一條路）。
   文字路徑的 AI 迴圈已經有 `deadlineAt`（事件時間 + 45 秒）會強迫收尾，

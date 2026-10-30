@@ -47,4 +47,6 @@ export interface Expense {
   is_settlement: boolean;
   deleted_at: string | null;
   created_at: string;
+  /** 只存在前端：離線時記的、還在這支手機上等著上傳（utils/offlineQueue.ts） */
+  pending_sync?: boolean;
 }

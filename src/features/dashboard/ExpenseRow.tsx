@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, Pencil, Trash2 } from 'lucide-react';
+import { Camera, CloudOff, Pencil, Trash2 } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import { getCategoryVisual } from '../../utils/category';
 import { formatMoney } from '../../utils/money';
@@ -58,6 +58,11 @@ const ExpenseRow: React.FC<Props> = ({ exp, trip, currentUser, onOpen, onEdit, o
         <p className="text-sm font-medium text-ink truncate flex items-center gap-1.5">
           <span className="truncate">{exp.description}</span>
           {hasPhotos && <Camera size={13} className="shrink-0 text-muted" aria-label="有照片" />}
+          {exp.pending_sync && (
+            <span className="shrink-0 inline-flex items-center gap-0.5 text-[10.5px] font-medium text-warn" title="離線時記的，恢復連線後會自動上傳">
+              <CloudOff size={12} />待上傳
+            </span>
+          )}
         </p>
         <p className="text-[11.5px] text-muted truncate lg:hidden">{payer} 付 · {split}</p>
         <p className="text-[11.5px] text-muted truncate hidden lg:block">{exp.category}</p>

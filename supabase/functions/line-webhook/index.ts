@@ -1,7 +1,7 @@
 // ============================================================
 // line-webhook —— LINE Bot 的進入點
 //
-// 這支檔案只做四件事：驗簽章、解析事件、建 EventContext、分派給 handler。
+// 這支檔案只做五件事：驗簽章、解析事件、略過 LINE 重送的事件、建 EventContext、分派給 handler。
 // 真正的邏輯都在 handlers/ 底下，共用的東西在同目錄的葉節點模組。
 //
 // 模組相依是單向的，不要繞回去：
@@ -16,6 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { buildEventContext, extendFollowup, isQuotingBot } from "./context.ts"
+import { claimWebhookEvent } from "./db.ts"
 import { replyMessage, setDefaultQuickReply, verifySignature } from "./line-api.ts"
 import { BOT_SELF_INTRODUCTION, getQuickReply } from "./messages.ts"
 import { handleAiText } from "./handlers/ai-text.ts"
@@ -40,6 +41,12 @@ serve(async (req) => {
     const { events } = JSON.parse(bodyText) as { events?: WebhookEvent[] }
     for (const event of events ?? []) {
       console.log(`[EVENT_RAW] Received event type: ${event.type}`)
+
+      // LINE 重送的同一個事件只處理一次
+      if (!(await claimWebhookEvent(event.webhookEventId))) {
+        console.log(`[EVENT_DEDUP] Skipping redelivered event ${event.webhookEventId}`)
+        continue
+      }
 
       const ctx = await buildEventContext(event)
       const { boundQR, isBound, replyToken, sourceId, sourceType } = ctx

@@ -16,6 +16,7 @@ ALTER TABLE public.line_chat_history      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_processed_actions ENABLE ROW LEVEL SECURITY;
 -- 刻意**沒有任何政策**：只有 Edge Function（service role，繞過 RLS）讀寫，前端用不到
 ALTER TABLE public.line_bot_messages      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.line_webhook_events    ENABLE ROW LEVEL SECURITY;
 
 -- 政策名稱與既有資料庫保持一致，重複執行不會產生重複政策
 DROP POLICY IF EXISTS "Allow public read/write on trips"    ON public.trips;

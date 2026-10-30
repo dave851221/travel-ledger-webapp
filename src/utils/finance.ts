@@ -1,5 +1,4 @@
 import Decimal from 'decimal.js';
-import Papa from 'papaparse';
 import type { Expense } from '../types';
 import { getLocalDateString } from './date';
 
@@ -222,9 +221,11 @@ export const calculateDistribution = (
 };
 
 /**
- * Exports expense data to CSV format
+ * Exports expense data to CSV format.
+ * papaparse is loaded on demand: this module is also imported by the home page.
  */
-export const exportExpensesToCSV = (expenses: Expense[], tripName: string) => {
+export const exportExpensesToCSV = async (expenses: Expense[], tripName: string) => {
+  const { default: Papa } = await import('papaparse');
   const csvData = expenses.map(e => ({
     '日期': e.date,
     '類別': e.category,

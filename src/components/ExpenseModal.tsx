@@ -24,6 +24,7 @@ import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
 import { getDefaultCategory, getDefaultCurrency } from '../utils/tripDefaults';
 import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
+import { insertExpenseOrQueue } from '../utils/offlineQueue';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
 
@@ -359,7 +360,20 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     const finalDescription = description.trim() || category;
 
     const liffMeta = editData as (Expense & { nonce?: string; line_user_id?: string }) | null;
+    // 離線時只能新增（排進 offlineQueue）。照片要上傳、修改要對照資料庫，都得等連線
+    if (!navigator.onLine) {
+      if (editData?.id || liffMeta?.nonce) {
+        setError('目前離線，無法修改既有的支出，恢復連線後再試一次');
+        return;
+      }
+      if (photoList.some(p => p.kind === 'new')) {
+        setError('目前離線，無法上傳照片。可以先拿掉照片存起來，連線後再編輯補上');
+        return;
+      }
+    }
     let nonceLocked = false;
+    // 這次存檔上傳的照片。存檔失敗時要刪掉，不然會變成 Storage 裡沒人用的檔案
+    const uploadedPaths: string[] = [];
     try {
       setLoading(true);
       setError(null);
@@ -388,6 +402,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           const filePath = `expenses/${trip.id}/${crypto.randomUUID()}.${ext}`;
           const { error: uErr } = await supabase.storage.from(RECEIPTS_BUCKET).upload(filePath, item.file);
           if (uErr) throw uErr;
+          uploadedPaths.push(filePath);
           newPhotoPathMap.set(item.key, filePath);
         }
       }
@@ -435,11 +450,17 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         }
         showToast('已更新支出紀錄！');
       } else {
-        // --- Insert ---
-        const { data: saved, error: iErr } = await supabase.from('expenses').insert([record]).select('id').single();
-        if (iErr) throw iErr;
-        savedExpenseId = saved?.id ?? null;
-        showToast('已新增支出紀錄！');
+        // --- Insert --- 連不上時排進離線佇列（LIFF 草稿除外：它要通知機器人，得真的寫進去）
+        if (liffMeta?.line_user_id) {
+          const { data: saved, error: iErr } = await supabase.from('expenses').insert([record]).select('id').single();
+          if (iErr) throw iErr;
+          savedExpenseId = saved?.id ?? null;
+          showToast('已新增支出紀錄！');
+        } else {
+          const { id: savedId, queued } = await insertExpenseOrQueue(record);
+          savedExpenseId = savedId;
+          showToast(queued ? '目前離線，已先存在手機，恢復連線後會自動上傳' : '已新增支出紀錄！');
+        }
       }
 
       // --- LIFF 通知：透過 Edge Function 讓機器人推送確認訊息 ---
@@ -463,6 +484,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       onSuccess();
       onClose();
     } catch (err) {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from(RECEIPTS_BUCKET).remove(uploadedPaths).catch(() => {});
+      }
       // 上傳或寫入失敗時把 nonce 鎖放掉，否則那張 LINE 卡片之後再也存不進去
       if (nonceLocked && liffMeta?.nonce) {
         await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);

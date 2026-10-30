@@ -83,6 +83,16 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   手機的底部面板都能往下拉收起（`components/useSheetDrag.ts`）：明細從內容區捲到頂再拉也行，
   `Modal`（多半是表單）只認把手與標題列，避免半填好的表單被拉掉。
   觸控裝置上整頁關掉長按選字（`index.css`，iPhone 會跳放大鏡與拷貝選單），輸入框例外。
+  **載入**：`Dashboard`、兩個 LIFF 頁、統計分頁（recharts）、行程分頁都是 `React.lazy`，首頁不必先下載它們。
+  `vite.config.ts` 的 `manualChunks` 比對**套件目錄**，不要改回 `id.includes('react')`（會把 lucide-react、react-redux 拉進首頁）。
+  **「我是誰」**（`currentUser`）由 `localStorage` 的 `me_{id}` 推導、只認還在成員清單裡的名字，不另外存 state。
+- **離線記帳**（`utils/offlineQueue.ts` + `hooks/useOfflineQueue.ts`）：連不上時，新增的支出與結清排進 localStorage，
+  帳目標「待上傳」並先算進餘額；恢復連線、回到前景、打開 Dashboard 時上傳。每筆排隊時就配好 id、
+  上傳用 upsert + `ignoreDuplicates`，重送不會變兩筆。**新增支出的寫入一律走 `insertExpenseOrQueue()`**
+  （LIFF 草稿例外，它要通知機器人）。修改、刪除、照片需要連線。
+  `useTripData` 會把上次成功載入的旅程與帳目存在 `trip_cache_{id}`，離線冷開也看得到。
+- **PWA 更新**是 `registerType: 'prompt'`：新版本裝好後由 `App.tsx` 的橫幅讓使用者按「立即更新」
+  （autoUpdate 會直接重新整理，正在填的表單會被清掉）。回到前景與每小時主動檢查一次。
 - **`ExpenseModal.tsx`**：支出新增與編輯。付款人/分攤的鎖定機制、多幣別、
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
   ⚠️ 表單只在「開啟的那一刻」或 `editData` 換了才灌初始值（`initializedFor` ref）——
@@ -249,7 +259,9 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 ### LINE Bot Edge Function
 
 `supabase/functions/line-webhook/` 是一組模組，不再是單一檔案（原本 index.ts 有 2778 行）。
-**`index.ts` 只剩約 110 行**：驗簽、解析事件、建 `EventContext`、分派。
+**`index.ts` 只剩約 110 行**：驗簽、解析事件、略過 LINE 重送的事件、建 `EventContext`、分派。
+重送的判斷是 `db.ts` 的 `claimWebhookEvent()`：把 `webhookEventId` 寫進 `line_webhook_events`，PK 衝突就略過
+（寫入失敗時照常處理，寧可偶爾重複也不漏訊息；pg_cron 每天清掉 2 天前的）。
 
 | 檔案 | 行數 | 內容 |
 | :--- | ---: | :--- |
