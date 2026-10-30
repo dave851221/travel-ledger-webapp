@@ -53,6 +53,16 @@ describe('calculateSettlements', () => {
     expect(r).toEqual([{ from: 'A', to: 'B', amount: 60 }]);
   });
 
+  it('依精度四捨五入後是 0 的尾差視為已結清（台幣手動記整數結清後剩的零頭）', () => {
+    expect(calculateSettlements({ A: -0.33, B: 0.33 }, 0)).toEqual([]);
+    expect(calculateSettlements({ A: -0.33, B: 0.33 })).toEqual([{ from: 'A', to: 'B', amount: 0.33 }]);
+  });
+
+  it('指定精度時，配對後剩下的零頭不再產生一筆 0 元轉帳', () => {
+    const r = calculateSettlements({ A: -100.4, B: 100, C: 0.4 }, 0);
+    expect(r).toEqual([{ from: 'A', to: 'B', amount: 100 }]);
+  });
+
   it('不使用浮點數累加，避免 0.1+0.2 類誤差', () => {
     const r = calculateSettlements({ A: -0.3, B: 0.1, C: 0.2 });
     expect(r.reduce((s, x) => s + x.amount, 0)).toBeCloseTo(0.3, 10);

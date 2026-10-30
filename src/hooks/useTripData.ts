@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from '../api/supabase';
+import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { RECEIPTS_BUCKET } from '../utils/storage';
 import { isNotFoundError } from '../utils/supabaseErrors';
@@ -54,7 +54,7 @@ export const useTripData = (
       try {
         const { data, error } = await supabase
           .from('trips')
-          .select('*')
+          .select(TRIP_COLUMNS)
           .eq('category', trimmed)
           .neq('id', currentId)
           .order('created_at', { ascending: false });
@@ -71,6 +71,7 @@ export const useTripData = (
   const refetchTrip = useCallback(async () => {
     if (!supabase || !id) return;
     try {
+      // 已經通過通行碼關卡，`*` 含 access_code（設定頁要顯示）。其他地方一律用 TRIP_COLUMNS
       const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
       if (error) throw error;
       setTrip(data);

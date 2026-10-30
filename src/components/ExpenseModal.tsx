@@ -106,12 +106,14 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const payerSignature = `${numAmount}|${[...payerActive].sort().join(',')}`;
   const splitSignature = `${numAmount}|${[...splitActive].sort().join(',')}|${adjustmentMember ?? ''}`;
 
-  // Auto-recalculate Payers (only if not manually locked everything)
+  // Auto-recalculate Payers (only if not manually locked everything).
+  // The locked amounts are read from `prev` inside the updater: listing payerData as a
+  // dependency would re-run this effect on every write it makes.
   useEffect(() => {
     if (payerBaselineRef.current === payerSignature) return;
     if (payerLocked.size === payerActive.size && payerLocked.size > 0) return;
-    const newData = runDistribution(numAmount, payerActive, payerLocked, payerData, null);
     setPayerData(prev => {
+      const newData = runDistribution(numAmount, payerActive, payerLocked, prev, null);
       const next = { ...prev };
       Object.keys(newData).forEach(m => {
         if (!payerLocked.has(m)) next[m] = newData[m];
@@ -124,8 +126,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   useEffect(() => {
     if (splitBaselineRef.current === splitSignature) return;
     if (splitLocked.size === splitActive.size && splitLocked.size > 0) return;
-    const newData = runDistribution(numAmount, splitActive, splitLocked, splitData, adjustmentMember);
     setSplitData(prev => {
+      const newData = runDistribution(numAmount, splitActive, splitLocked, prev, adjustmentMember);
       const next = { ...prev };
       Object.keys(newData).forEach(m => {
         if (!splitLocked.has(m)) next[m] = newData[m];
@@ -342,6 +344,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     }
     if (!numAmount) {
       setError('請輸入金額');
+      return;
+    }
+    // 日期欄可以被清空，送出去只會得到資料庫看不懂的英文錯誤
+    if (!date) {
+      setError('請選擇日期');
       return;
     }
     if (!isPayerValid || !isSplitValid) {

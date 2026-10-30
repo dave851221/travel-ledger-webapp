@@ -19,7 +19,7 @@ import Modal from './Modal';
 import { ui } from './ui';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
-import { exportExpensesToCSV } from '../utils/finance';
+import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
 import { isSubmitEnter } from '../utils/keyboard';
 import Decimal from 'decimal.js';
 
@@ -130,14 +130,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       Object.keys(trip.precision_config).forEach(k => pStr[k] = trip.precision_config[k].toString());
       setPrecisionStr(pStr);
 
-      // Fetch LineBot ID
+      // Fetch LineBot ID. Clear the old one first so another trip's ID never flashes up.
+      // maybeSingle: a trip without a mapping returns null instead of a 406 in the console.
+      setLineBotId('');
       const fetchLineBotId = async () => {
         if (!supabase) return;
         const { data, error: fetchErr } = await supabase
           .from('line_trip_id_mapping')
           .select('linebot_id')
           .eq('trip_id', trip.id)
-          .single();
+          .maybeSingle();
 
         if (!fetchErr && data) {
           setLineBotId(data.linebot_id);
@@ -397,7 +399,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     }
     if (!ratesStr[code]) {
       setRatesStr({ ...ratesStr, [code]: '1' });
-      setPrecisionStr({ ...precisionStr, [code]: code === 'TWD' ? '0' : '2' });
+      // 以前只有 TWD 給 0 位，加 JPY／KRW 會變成 2 位小數，分帳拆出 333.33 日圓
+      setPrecisionStr({ ...precisionStr, [code]: String(getCurrencyPrecision(code)) });
       setNewCurrency('');
     }
   };

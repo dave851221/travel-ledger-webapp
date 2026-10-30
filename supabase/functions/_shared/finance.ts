@@ -10,7 +10,8 @@
 
 import { Decimal } from './deps.ts';
 
-export const DEFAULT_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 };
+// ⚠️ 與 src/utils/finance.ts 的 DEFAULT_CURRENCY_PRECISION 是同一份清單，要一起改。
+export const DEFAULT_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0, VND: 0, IDR: 0 };
 
 /** 依幣別精度格式化金額。務必用這個而不是直接 toFixed()。 */
 export function formatAmount(
@@ -227,19 +228,23 @@ export interface Settlement {
 
 /**
  * 由每人的淨結餘算出「最少轉帳次數」的結清路徑。
- * 正數代表該成員應收，負數代表應付。差距小於 EPSILON 者視為已結清。
+ * 正數代表該成員應收，負數代表應付。
+ * 差距小於 EPSILON，或依 `precision`（結算幣別的小數位數）四捨五入後是 0 的，視為已結清。
  */
 export function calculateSettlements(
   memberBalances: Record<string, number>,
+  precision = 2,
 ): Settlement[] {
   const EPSILON = new Decimal('0.01');
+  const roundsToZero = (amt: InstanceType<typeof Decimal>) => amt.toDecimalPlaces(precision).isZero();
   const debtors: { name: string; amt: InstanceType<typeof Decimal> }[] = [];
   const creditors: { name: string; amt: InstanceType<typeof Decimal> }[] = [];
 
   Object.entries(memberBalances).forEach(([name, bal]) => {
     const d = new Decimal(bal);
-    if (d.lt(EPSILON.negated())) debtors.push({ name, amt: d.negated() });
-    else if (d.gt(EPSILON)) creditors.push({ name, amt: d });
+    if (d.abs().lte(EPSILON) || roundsToZero(d.abs())) return;
+    if (d.isNegative()) debtors.push({ name, amt: d.negated() });
+    else creditors.push({ name, amt: d });
   });
 
   debtors.sort((a, b) => b.amt.comparedTo(a.amt));
@@ -253,8 +258,8 @@ export function calculateSettlements(
     result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt.toNumber() });
     debtors[i].amt = debtors[i].amt.minus(minAmt);
     creditors[j].amt = creditors[j].amt.minus(minAmt);
-    if (debtors[i].amt.lt(EPSILON)) i++;
-    if (creditors[j].amt.lt(EPSILON)) j++;
+    if (debtors[i].amt.lt(EPSILON) || roundsToZero(debtors[i].amt)) i++;
+    if (creditors[j].amt.lt(EPSILON) || roundsToZero(creditors[j].amt)) j++;
   }
   return result;
 }

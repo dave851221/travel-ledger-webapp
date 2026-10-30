@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../api/supabase';
+import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import { ui } from '../components/ui';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import type { Trip } from '../types';
@@ -80,7 +80,7 @@ const LiffPreference: React.FC = () => {
 
         if (!supabase) throw new Error('資料庫連線尚未設定');
         const { data: tripData, error: tripErr } = await supabase
-          .from('trips').select('*').eq('id', tripId).single();
+          .from('trips').select(TRIP_COLUMNS).eq('id', tripId).single();
         if (tripErr) throw tripErr;
 
         setTrip(tripData);

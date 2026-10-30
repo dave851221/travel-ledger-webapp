@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Plane } from 'lucide-react';
-import { supabase } from '../api/supabase';
+import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
 import BrandMark from '../components/BrandMark';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { getCurrencyPrecision } from '../utils/finance';
 
 const UNCATEGORIZED = '未分類';
 const TRIPS_PER_GROUP = 3;
@@ -98,7 +99,7 @@ const Home: React.FC = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from('trips')
-        .select('*')
+        .select(TRIP_COLUMNS)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -192,9 +193,10 @@ const Home: React.FC = () => {
           category: newTrip.category.trim() || null,
           categories: ['餐飲', '交通', '住宿', '購物', '景點', '其他'],
           rates: { [newTrip.base_currency]: 1 },
-          precision_config: { [newTrip.base_currency]: newTrip.base_currency === 'TWD' ? 0 : 2 }
+          // 以前只有 TWD 給 0 位，JPY 主幣的旅程會顯示成 ¥1,000.00、分帳拆出 333.33
+          precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) }
         }])
-        .select();
+        .select(TRIP_COLUMNS);
 
       if (error) throw error;
 
@@ -372,6 +374,7 @@ const Home: React.FC = () => {
                 <input
                   id="trip-code"
                   type="password"
+                  autoComplete="new-password"
                   maxLength={6}
                   placeholder="留空即免密碼"
                   className={`${ui.input} pl-9`}

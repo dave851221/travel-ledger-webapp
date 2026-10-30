@@ -18,19 +18,25 @@ export interface Settlement {
  *
  * 正數代表該成員應收，負數代表應付。
  * 貪婪法：金額最大的債務人優先對上金額最大的債權人。
- * 差距小於 EPSILON（0.01）者視為已結清，不產生轉帳。
+ * 差距小於 EPSILON（0.01），或依 `precision` 四捨五入後是 0 的，視為已結清，不產生轉帳。
+ *
+ * `precision` 是結算幣別的小數位數。台幣是 0 位時，手動記了整數的結清後
+ * 常剩下 0.3 元的尾差，不傳的話畫面會列出一筆「NT$0」的建議轉帳。
  */
 export const calculateSettlements = (
-  memberBalances: Record<string, number>
+  memberBalances: Record<string, number>,
+  precision = 2,
 ): Settlement[] => {
   const EPSILON = new Decimal('0.01');
+  const roundsToZero = (amt: Decimal) => amt.toDecimalPlaces(precision).isZero();
   const debtors: { name: string; amt: Decimal }[] = [];
   const creditors: { name: string; amt: Decimal }[] = [];
 
   Object.entries(memberBalances).forEach(([name, bal]) => {
     const d = new Decimal(bal);
-    if (d.lt(EPSILON.negated())) debtors.push({ name, amt: d.negated() });
-    else if (d.gt(EPSILON)) creditors.push({ name, amt: d });
+    if (d.abs().lte(EPSILON) || roundsToZero(d.abs())) return;
+    if (d.isNegative()) debtors.push({ name, amt: d.negated() });
+    else creditors.push({ name, amt: d });
   });
 
   debtors.sort((a, b) => b.amt.comparedTo(a.amt));
@@ -44,8 +50,8 @@ export const calculateSettlements = (
     result.push({ from: debtors[i].name, to: creditors[j].name, amount: minAmt.toNumber() });
     debtors[i].amt = debtors[i].amt.minus(minAmt);
     creditors[j].amt = creditors[j].amt.minus(minAmt);
-    if (debtors[i].amt.lt(EPSILON)) i++;
-    if (creditors[j].amt.lt(EPSILON)) j++;
+    if (debtors[i].amt.lt(EPSILON) || roundsToZero(debtors[i].amt)) i++;
+    if (creditors[j].amt.lt(EPSILON) || roundsToZero(creditors[j].amt)) j++;
   }
   return result;
 };

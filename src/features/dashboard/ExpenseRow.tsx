@@ -57,7 +57,7 @@ const ExpenseRow: React.FC<Props> = ({ exp, trip, currentUser, onOpen, onEdit, o
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink truncate flex items-center gap-1.5">
           <span className="truncate">{exp.description}</span>
-          {hasPhotos && <Camera size={13} className="shrink-0 text-muted" aria-label="有收據照片" />}
+          {hasPhotos && <Camera size={13} className="shrink-0 text-muted" aria-label="有照片" />}
         </p>
         <p className="text-[11.5px] text-muted truncate lg:hidden">{payer} 付 · {split}</p>
         <p className="text-[11.5px] text-muted truncate hidden lg:block">{exp.category}</p>

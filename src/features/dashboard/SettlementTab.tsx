@@ -5,6 +5,7 @@ import type { TripStats } from '../../hooks/useTripStats';
 import { ui } from '../../components/ui';
 import { calculateSettlements } from '../../utils/settlement';
 import { formatMoney } from '../../utils/money';
+import { getCurrencyPrecision } from '../../utils/finance';
 import MemberAvatar from './MemberAvatar';
 
 export interface SettleRequest {
@@ -30,13 +31,13 @@ const names = (data: Record<string, number>) => Object.entries(data).filter(([, 
 const SettlementTab: React.FC<Props> = ({ trip, expenses, stats, currentUser, onRecord, onManual, onEdit, onDelete }) => {
   const readOnly = trip.is_archived;
   const prec = trip.precision_config;
-  const grand = calculateSettlements(stats.balances.GRAND_TOTAL ?? {});
+  const grand = calculateSettlements(stats.balances.GRAND_TOTAL ?? {}, getCurrencyPrecision(trip.base_currency, prec));
   const currencyKeys = Object.keys(stats.balances).filter(k => k !== 'GRAND_TOTAL');
 
   // 只用一種幣別時，總結算就等於該幣別的結算，不重複列出。
   // 總結算已經結清時，各幣別的差額在折算後互相抵銷（例如欠 5000 JPY 但被欠等值 TWD），也不用處理。
   const perCurrency = currencyKeys.length > 1 && grand.length > 0
-    ? currencyKeys.map(cur => ({ cur, list: calculateSettlements(stats.balances[cur]) })).filter(x => x.list.length > 0)
+    ? currencyKeys.map(cur => ({ cur, list: calculateSettlements(stats.balances[cur], getCurrencyPrecision(cur, prec)) })).filter(x => x.list.length > 0)
     : [];
 
   const history = expenses

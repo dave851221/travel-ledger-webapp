@@ -21,6 +21,10 @@ import {
   toAmountMap,
 } from './guards';
 import { calculateDistribution } from '../_shared/finance';
+import type { MutableExpense } from '../_shared/validate';
+
+/** applyParticipantDefaults 填進去的形狀（成員 → 金額） */
+type DraftMaps = { payer_data: Record<string, number>; split_details: Record<string, number> };
 
 /**
  * 這些函式是 LINE Bot 的防線：AI 回傳的內容全部先經過它們才會落地，
@@ -223,7 +227,7 @@ describe('applyParticipantDefaults', () => {
   });
 
   it('沒有旅程預設時用傳訊者對應的成員', () => {
-    const expense: any = { payer_data: {}, split_details: {} };
+    const expense: DraftMaps = { payer_data: {}, split_details: {} };
     applyParticipantDefaults(expense, trip, '小明');
     expect(Object.keys(expense.payer_data)).toEqual(['王小明']);
     // 分攤沒設定就是全員
@@ -231,13 +235,13 @@ describe('applyParticipantDefaults', () => {
   });
 
   it('傳訊者也對不上時退回成員第一位', () => {
-    const expense: any = { payer_data: {}, split_details: {} };
+    const expense: DraftMaps = { payer_data: {}, split_details: {} };
     applyParticipantDefaults(expense, trip, '路人甲');
     expect(Object.keys(expense.payer_data)).toEqual(['代杰']);
   });
 
   it('旅程預設含已被移除的成員時會先過濾掉', () => {
-    const expense: any = { payer_data: {}, split_details: {} };
+    const expense: DraftMaps = { payer_data: {}, split_details: {} };
     applyParticipantDefaults(expense, {
       ...trip,
       default_payer: ['已離開的人'],
@@ -250,7 +254,7 @@ describe('applyParticipantDefaults', () => {
   it('補上的預設值是 0 佔位：分配時必須改傳 {} 當 lockedData', () => {
     // 這是 index.ts 兩個呼叫端的契約。曾經直接把佔位 map 交給 calculateDistribution，
     // 0 被當成鎖定金額，三人均分的 900 變成 900/0/0。
-    const expense: any = { payer_data: {}, split_details: {} };
+    const expense: DraftMaps = { payer_data: {}, split_details: {} };
     const { filledSplit } = applyParticipantDefaults(expense, trip);
     const members = Object.keys(expense.split_details);
     expect(members).toEqual(trip.members);
@@ -264,7 +268,7 @@ describe('applyParticipantDefaults', () => {
   });
 
   it('AI 已經給了內容就完全不動它', () => {
-    const expense: any = { payer_data: { Amy: 300 }, split_details: { 代杰: 300 } };
+    const expense: DraftMaps = { payer_data: { Amy: 300 }, split_details: { 代杰: 300 } };
     const filled = applyParticipantDefaults(expense, trip, '代杰');
     expect(filled).toEqual({ filledPayer: false, filledSplit: false });
     expect(expense.payer_data).toEqual({ Amy: 300 });
@@ -655,7 +659,7 @@ describe('toAmountMap', () => {
   });
 
   it('normalizeExpenseAmountMaps 會把 split_data 併成 split_details', () => {
-    const expense: any = { payer_data: [{ member: 'A', amount: 1 }], split_data: { A: 1 } };
+    const expense: MutableExpense = { payer_data: [{ member: 'A', amount: 1 }], split_data: { A: 1 } };
     normalizeExpenseAmountMaps(expense);
     expect(expense.payer_data).toEqual({ A: 1 });
     expect(expense.split_details).toEqual({ A: 1 });

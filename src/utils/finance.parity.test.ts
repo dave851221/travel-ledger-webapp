@@ -109,12 +109,14 @@ describe('calculateSettlements：前端與 Edge Function 必須完全一致', ()
         balances[m] = Math.round((rng() * 20000 - 10000) * 100) / 100;
       });
 
-      const web = webSettlements(balances);
-      const bot = botSettlements(balances);
+      // 一半用預設精度、一半隨機 0～2 位（台幣 0 位時尾差的判斷不同）
+      const precision = n % 2 === 0 ? undefined : Math.floor(rng() * 3);
+      const web = webSettlements(balances, precision);
+      const bot = botSettlements(balances, precision);
 
       if (JSON.stringify(web) !== JSON.stringify(bot)) {
         mismatches.push(
-          `case #${n}: ${JSON.stringify(balances)}\n` +
+          `case #${n} (precision=${precision}): ${JSON.stringify(balances)}\n` +
           `  web=${JSON.stringify(web)}\n  bot=${JSON.stringify(bot)}`,
         );
         if (mismatches.length >= 3) break;

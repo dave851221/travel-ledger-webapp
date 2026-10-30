@@ -12,7 +12,9 @@ export const toDecimal = (val: number | string) => new Decimal(val || 0);
 /**
  * Formats a number based on currency precision
  */
-const DEFAULT_CURRENCY_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0 };
+// 實務上不用小數的幣別。新增幣別時的預設小數位數也從這裡來（Home、SettingsModal）。
+// ⚠️ Edge Function 的 _shared/finance.ts 有同一份 DEFAULT_PRECISION，要一起改。
+const DEFAULT_CURRENCY_PRECISION: Record<string, number> = { TWD: 0, JPY: 0, KRW: 0, VND: 0, IDR: 0 };
 
 /**
  * 某個幣別要用幾位小數。

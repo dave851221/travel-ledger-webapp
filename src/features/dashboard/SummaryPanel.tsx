@@ -3,6 +3,7 @@ import type { Trip } from '../../types';
 import type { TripStats } from '../../hooks/useTripStats';
 import { calculateSettlements } from '../../utils/settlement';
 import { formatMoney } from '../../utils/money';
+import { getCurrencyPrecision } from '../../utils/finance';
 import MemberAvatar from './MemberAvatar';
 
 interface BalancesProps {
@@ -50,7 +51,10 @@ interface PanelProps extends BalancesProps {
 
 /** 電腦寬螢幕的右側欄：票根、成員餘額、建議結清（可直接記錄）。 */
 const SummaryPanel: React.FC<PanelProps> = ({ trip, stats, currentUser, ticket, onRecordSettlement, onOpenSettlement }) => {
-  const settlements = calculateSettlements(stats.balances.GRAND_TOTAL ?? {});
+  const settlements = calculateSettlements(
+    stats.balances.GRAND_TOTAL ?? {},
+    getCurrencyPrecision(trip.base_currency, trip.precision_config),
+  );
   return (
     <aside className="hidden xl:flex flex-col gap-5 w-[320px] shrink-0 border-l border-line bg-sunk px-5 py-6 sticky top-0 h-dvh overflow-y-auto">
       {ticket}

@@ -105,7 +105,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 `src/utils/finance.ts` 全面使用 **Decimal.js**。`calculateDistribution()` 處理餘數分配：
 金額除不盡時，餘數指定給 `adjustment_member`，確保 `Σ(分攤) === 總額`。
 
-結清演算法在 `src/utils/settlement.ts`（`calculateSettlements`）。
+結清演算法在 `src/utils/settlement.ts`（`calculateSettlements`）。第二個參數是結算幣別的小數位數，
+**呼叫端一律要傳**：四捨五入後是 0 的尾差視為已結清，不傳的話台幣旅程會列出「NT$0」的建議轉帳。
 
 **匯率換算與餘額彙總**在 `getRate()` / `convertToBase()` / `calculateMemberBalances()`。
 ⚠️ **主幣別對自己的匯率一律是 1**，不管 `rates` 裡寫什麼 —— 這是網頁的 `useTripStats`
@@ -233,7 +234,10 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 - **儲存空間**：`travel-images` bucket，路徑 `expenses/{tripId}/{檔名}`。
   這個前綴慣例被 `supabase/scripts/delete_trip.sql` 依賴，勿隨意更動。
 - **驗證機制**：未使用 Supabase Auth。通行碼驗證透過 RPC `verify_trip_code(p_trip_id, p_code)`
-  在伺服器端完成，`access_code` 不會傳到瀏覽器。結果以 `auth_{tripId}` 存在 localStorage。
+  在伺服器端完成，結果以 `auth_{tripId}` 存在 localStorage。
+  **查 `trips` 一律用 `TRIP_COLUMNS`（`src/api/supabase.ts`）而不是 `select('*')`** ——
+  `*` 會把每一趟的 `access_code` 送到瀏覽器（首頁曾經這樣把所有旅程的密碼都傳出去）。
+  唯一的例外是 Dashboard 抓自己這一趟（`useTripData.refetchTrip`），設定頁要顯示與修改密碼。
   **RLS 目前全面開放（`FOR ALL USING (true)`），實際上沒有保護作用** —— 見 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 - **旅程密碼為選填**：`access_code` 為 `NULL` 或全空白即代表免密碼旅程。
   判斷一律用 trim 後是否為空字串，寫入時空值統一存成 `NULL`
@@ -360,6 +364,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 ## 重要慣例
 
 - **幣別精確度**：每個旅程存 `precision_config`，格式 `{ "TWD": 0, "JPY": 0, "USD": 2 }`。
+  新增幣別的預設位數走 `getCurrencyPrecision()`（不用小數的幣別清單在 `finance.ts` 與 `_shared/finance.ts` 各一份，要一起改）。
   捨入一律走 `finance.ts` 的 `formatAmount()`，不要直接呼叫 `.toFixed()`。
   **畫面上顯示金額用 `src/utils/money.ts` 的 `formatMoney()`**（加千分位與幣別符號，例如 `NT$12,670`、`¥4,560`），
   它在 `formatAmount` 的字串上處理，不碰浮點數。

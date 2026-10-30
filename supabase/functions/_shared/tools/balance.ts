@@ -7,7 +7,7 @@
 // 這一層唯一的責任是「把該撈的列撈齊」。
 // ============================================================
 
-import { calculateMemberBalances, calculateSettlements } from "../finance.ts"
+import { calculateMemberBalances, calculateSettlements, DEFAULT_PRECISION } from "../finance.ts"
 import type { BalanceResult, SettlementPlanResult, ToolContext } from "./types.ts"
 
 /**
@@ -60,9 +60,11 @@ export async function getSettlementPlan(ctx: ToolContext): Promise<SettlementPla
   const { grandTotal, missingRateCurrencies } = calculateMemberBalances(
     rows, trip.members ?? [], trip.rates, trip.base_currency,
   )
+  // 依主幣別的小數位數判斷「已結清」，否則台幣旅程會出現「NT$0」的建議轉帳
+  const precision = (trip.precision_config ?? {})[trip.base_currency] ?? DEFAULT_PRECISION[trip.base_currency] ?? 2
   return {
     baseCurrency: trip.base_currency,
-    settlements: calculateSettlements(grandTotal),
+    settlements: calculateSettlements(grandTotal, precision),
     balances: grandTotal,
     missingRateCurrencies,
   }

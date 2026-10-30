@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../api/supabase';
+import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
@@ -98,7 +98,7 @@ const LiffEdit: React.FC = () => {
         if (!expenseId && !nonce && !dataStr) throw new Error('缺少必要參數');
 
         // 3. 獲取旅程
-        const { data: tripData, error: tripErr } = await supabase.from('trips').select('*').eq('id', tripId).single();
+        const { data: tripData, error: tripErr } = await supabase.from('trips').select(TRIP_COLUMNS).eq('id', tripId).single();
         if (tripErr) throw tripErr;
         if (!tripData.precision_config) tripData.precision_config = {};
         setTrip(tripData);

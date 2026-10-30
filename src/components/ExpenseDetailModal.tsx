@@ -95,7 +95,7 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null
               </button>
             </>
           )}
-          <img key={photoIdx} src={photos[photoIdx]} className="max-w-full max-h-[88vh] object-contain rounded-xl" alt={`收據 ${photoIdx + 1}`} onClick={e => e.stopPropagation()} />
+          <img key={photoIdx} src={photos[photoIdx]} className="max-w-full max-h-[88vh] object-contain rounded-xl" alt={`照片 ${photoIdx + 1}`} onClick={e => e.stopPropagation()} />
           {photos.length > 1 && (
             <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] flex gap-1.5">
               {photos.map((_, i) => <span key={i} className={`w-1.5 h-1.5 rounded-full ${i === photoIdx ? 'bg-white' : 'bg-white/40'}`} />)}
@@ -198,12 +198,12 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null
 
             {photos.length > 0 && (
               <section>
-                <h3 className="text-xs text-muted mb-1.5">收據照片</h3>
+                <h3 className="text-xs text-muted mb-1.5">照片</h3>
                 <div className={`grid gap-2 ${photos.length === 1 ? 'grid-cols-1' : photos.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
                   {photos.map((url, i) => (
                     <button
                       key={i}
-                      aria-label={`放大收據 ${i + 1}`}
+                      aria-label={`放大照片 ${i + 1}`}
                       className="relative aspect-square rounded-xl overflow-hidden bg-sunk border border-line"
                       onClick={() => { setPhotoIdx(i); setLightboxOpen(true); }}
                     >

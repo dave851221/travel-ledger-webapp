@@ -13,6 +13,9 @@ const TripPortal: React.FC = () => {
   const [tripName, setTripName] = useState('');
   // 進入畫面前需先確認此旅程是否設有密碼，確認完成前不顯示密碼表單
   const [checking, setChecking] = useState(true);
+  // 旅程被刪除或連結打錯時，trip_requires_code 會回 TRUE（fail closed），
+  // 不另外判斷的話使用者會看到一個永遠輸入不對的密碼欄
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,9 +34,16 @@ const TripPortal: React.FC = () => {
 
       if (!supabase || !id) { setChecking(false); return; }
 
-      const { data } = await supabase.from('trips').select('name').eq('id', id).single();
+      // maybeSingle：查無資料時回 null 而不是 406 錯誤
+      const { data, error: tripError } = await supabase.from('trips').select('name').eq('id', id).maybeSingle();
       if (cancelled) return;
       if (data) setTripName(data.name);
+      // 只有「確定查無此旅程」才擋下；網路錯誤時照舊顯示密碼欄讓使用者重試
+      if (!data && !tripError) {
+        setNotFound(true);
+        setChecking(false);
+        return;
+      }
 
       // 2. 免密碼旅程直接放行；RPC 失敗時保守地要求輸入密碼
       const { data: needsCode, error: rpcError } = await supabase
@@ -85,6 +95,19 @@ const TripPortal: React.FC = () => {
     );
   }
 
+  if (notFound) {
+    return (
+      <div className="min-h-screen bg-canvas text-ink flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <span className="inline-flex w-12 h-12 rounded-2xl bg-sunk text-muted items-center justify-center"><AlertCircle size={24} /></span>
+        <div>
+          <p className="text-base font-bold">找不到這趟旅程</p>
+          <p className="text-sm text-ink-2 mt-1">連結可能打錯了，或這趟旅程已經被刪除。</p>
+        </div>
+        <button onClick={() => navigate('/')} className={ui.btnPrimary}>回到所有旅程</button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-canvas text-ink flex items-center justify-center px-4 py-10">
       <div className="max-w-sm w-full">
@@ -111,6 +134,7 @@ const TripPortal: React.FC = () => {
               <input
                 id="portal-code"
                 type="password"
+                autoComplete="current-password"
                 maxLength={6}
                 placeholder="請輸入密碼"
                 className={`${ui.input} text-center text-xl tracking-[0.4em] placeholder:tracking-normal placeholder:text-sm py-3.5`}

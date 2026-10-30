@@ -1,8 +1,11 @@
 export interface Trip {
   id: string;
   name: string;
-  /** NULL 或空白代表該旅程免密碼 */
-  access_code: string | null;
+  /**
+   * NULL 或空白代表該旅程免密碼。
+   * 只有 Dashboard 抓自己這一趟時才會有這個欄位，其餘查詢用 TRIP_COLUMNS 不帶它。
+   */
+  access_code?: string | null;
   members: string[];
   categories: string[];
   category?: string | null;
