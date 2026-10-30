@@ -38,6 +38,20 @@ interface PlaceHit {
   userRatingCount?: number
 }
 
+/**
+ * googleMapsUri 後面帶一段很長的追蹤參數（`&g_mp=Cidnb29n…`，約 70 字），
+ * 在 LINE 上整串顯示出來很難看；拿掉只剩 `?cid=…` 一樣打得開同一個地點。
+ */
+export function shortMapsUrl(uri: string): string {
+  try {
+    const url = new URL(uri)
+    url.searchParams.delete('g_mp')
+    return url.toString()
+  } catch {
+    return uri
+  }
+}
+
 const CLOSED_STATUS: Record<string, string> = {
   CLOSED_TEMPORARILY: '暫停營業',
   CLOSED_PERMANENTLY: '已歇業',
@@ -91,7 +105,7 @@ export async function searchPlaces(
     .map((p) => ({
       name: p.displayName!.text!,
       address: p.formattedAddress ?? null,
-      maps_url: p.googleMapsUri!,
+      maps_url: shortMapsUrl(p.googleMapsUri!),
       rating: p.rating ?? null,
       rating_count: p.userRatingCount ?? null,
       ...(p.businessStatus && CLOSED_STATUS[p.businessStatus] ? { status: CLOSED_STATUS[p.businessStatus] } : {}),

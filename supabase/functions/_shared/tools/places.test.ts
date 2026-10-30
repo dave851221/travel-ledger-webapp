@@ -31,7 +31,7 @@ describe('searchPlaces', () => {
       status: 200,
       body: {
         places: [
-          { displayName: { text: '宮原眼科' }, formattedAddress: '台中市中區中山路20號', googleMapsUri: 'https://maps.google.com/?cid=1', rating: 4.3, userRatingCount: 51234, businessStatus: 'OPERATIONAL' },
+          { displayName: { text: '宮原眼科' }, formattedAddress: '台中市中區中山路20號', googleMapsUri: 'https://maps.google.com/?cid=1&g_mp=Cidnb29nbGUubWFwcy5wbGFjZXM', rating: 4.3, userRatingCount: 51234, businessStatus: 'OPERATIONAL' },
           { displayName: { text: '舊店' }, googleMapsUri: 'https://maps.google.com/?cid=2', businessStatus: 'CLOSED_PERMANENTLY' },
           { displayName: { text: '沒有連結' } },
         ],
