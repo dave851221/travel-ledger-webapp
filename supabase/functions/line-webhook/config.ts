@@ -22,6 +22,8 @@ export const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || ''
 export const AI_PROVIDER = (Deno.env.get('AI_PROVIDER') || 'gemini').trim().toLowerCase()
 /** 留空就用 `_shared/ai/claude.ts` 的預設（Haiku 5.5） */
 export const CLAUDE_MODEL = Deno.env.get('CLAUDE_MODEL') || ''
+/** Google Places API（search_places）。沒設就不給模型查地點，回覆也不附行程表以外的地圖連結 */
+export const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') || ''
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 

@@ -131,6 +131,15 @@ export const WEATHER_SCHEMA: JsonSchema = {
   required: [],
 }
 
+export const SEARCH_PLACES_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string', description: '店名或景點名稱加上地區，例如「宮原眼科 台中」「一蘭 新宿」' },
+    date: { type: 'string', description: 'YYYY-MM-DD，以行程表上那一天的位置為中心找。省略代表今天' },
+  },
+  required: ['query'],
+}
+
 // ============================================================
 // 「提議」類的 schema —— 給對話式管道（LINE）用
 //

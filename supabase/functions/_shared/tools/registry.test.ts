@@ -96,7 +96,7 @@ describe('toGeminiFunctionDeclarations', () => {
     expect(TOOLS.map(t => t.name).sort()).toEqual([
       'create_expense', 'delete_expense', 'get_balance', 'get_itinerary_day', 'get_itinerary_overview',
       'get_settlement_plan', 'get_trip', 'get_weather', 'list_expenses', 'restore_expense',
-      'search_itinerary', 'update_expense',
+      'search_itinerary', 'search_places', 'update_expense',
     ]);
   });
 });

@@ -12,7 +12,7 @@
 // ============================================================
 
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
-import { AI_PROVIDER, ANTHROPIC_API_KEY, CLAUDE_MODEL, GEMINI_API_KEY } from "./config.ts"
+import { AI_PROVIDER, ANTHROPIC_API_KEY, CLAUDE_MODEL, GEMINI_API_KEY, GOOGLE_MAPS_API_KEY } from "./config.ts"
 import { downloadLineContent } from "./line-api.ts"
 import { Anthropic } from "../_shared/deps.ts"
 import { createClaudeProvider } from "../_shared/ai/claude.ts"
@@ -175,13 +175,20 @@ export const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」
    回答挑使用者問的部分講，不要把整天的行程原封不動貼出來。
    回答提到的地點、店家、住宿或車票，工具結果裡有附網址（地圖、訂位、車票連結）就**把網址一起附上**，
    寫在那個名稱後面；工具沒給的網址不要自己編。
-   行程表以外的地點（推薦的店、景點）要附地圖時，只能寫搜尋連結
-   https://www.google.com/maps/search/?api=1&query=店名 地區（中文直接寫，系統會處理編碼）；
-   🚫 不要自己寫 maps.app.goo.gl 短網址或 /maps/place/ 網址 —— 那會指到錯的地方，系統會直接拿掉。
+9a. 推薦行程表以外的店家或景點：
+   - 有 search_places 時，每一個要推薦的地點都先用它查過（店名＋地區），
+     只推薦查得到、沒有歇業的，地圖連結**只能用它回傳的 maps_url**，名稱用它回傳的正式名稱。
+   - 沒有 search_places 時就不附地圖連結，推薦也只講名稱。
+   - 「公益路一帶」「一中街商圈」這種區域不是地點，要推薦就說具體的店。
+   🚫 不要自己寫任何地圖網址（短網址、搜尋網址、place 網址都不行）—— 系統會把沒查過的連結拿掉。
+   推薦幾個地點時一個地點一段，名稱和一句說明在第一行，連結單獨放下一行：
+   ・宮原眼科（4.3★）：冰淇淋和伴手禮
+   https://maps.google.com/?cid=…
 10. 天氣一律用 get_weather（免費），不要上網搜尋。
 11. 行程表與帳本都回答不了、需要即時或外部資訊（營業時間、票價、交通方式、附近推薦、當地活動）時，
    如果有 web_search 可以用就上網查，一則訊息最多 2 次；搜尋關鍵字不要放成員名字或金額。
-   用了搜尋的回答，最後附上 1 個來源網址。沒有 web_search 時老實說查不到即時資訊。`
+   用了搜尋的回答，最後附上 1 個來源網址。搜尋結果裡的 <cite> 標記不要抄進回答。
+   上網找到的店家要推薦之前，一樣先照 9a 用 search_places 查過。沒有 web_search 時老實說查不到即時資訊。`
 
 // Fallback order = free-tier daily quota first, then freshness.
 // The two flash-lite models have 500 RPD; every other one only has 20 RPD,
@@ -253,6 +260,8 @@ console.log(`[AI] provider: ${ai.name}`)
 export const READ_TOOL_NAMES = [
   'list_expenses', 'get_balance', 'get_settlement_plan',
   'get_itinerary_overview', 'get_itinerary_day', 'search_itinerary', 'get_weather',
+  // 要 Google Places 的 key（付費 API），沒設就不給，模型也就不會附行程表以外的地圖連結
+  ...(GOOGLE_MAPS_API_KEY ? ['search_places'] : []),
 ]
 
 /**

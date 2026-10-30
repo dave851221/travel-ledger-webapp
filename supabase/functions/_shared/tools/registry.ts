@@ -31,6 +31,7 @@ import { getBalance, getSettlementPlan } from "./balance.ts"
 import { getTrip } from "./trip.ts"
 import { getItineraryDay, getItineraryOverview, searchItineraryTool } from "./itinerary.ts"
 import { getWeather } from "./weather.ts"
+import { searchPlaces } from "./places.ts"
 import { optionalString, toExpenseInput, toExpensePatch, toListFilters } from "./args.ts"
 import {
   EXPENSE_INPUT_SCHEMA,
@@ -40,6 +41,7 @@ import {
   LIST_EXPENSES_SCHEMA,
   NO_ARGS_SCHEMA,
   SEARCH_ITINERARY_SCHEMA,
+  SEARCH_PLACES_SCHEMA,
   UPDATE_EXPENSE_SCHEMA,
   WEATHER_SCHEMA,
 } from "./schemas.ts"
@@ -102,6 +104,12 @@ export const TOOLS: ToolDefinition[] = [
     description: '天氣預報（今天起 16 天內）：天氣、高低溫、早上／下午／晚上的降雨機率。不給地點就用行程表上那一天所在的地方。問天氣一律用它，不要上網搜尋。',
     inputSchema: WEATHER_SCHEMA,
     execute: (args, ctx) => getWeather({ date: optionalString(args.date), place: optionalString(args.place) }, ctx),
+  },
+  {
+    name: 'search_places',
+    description: '在 Google 地圖上查一個真實存在的店家或景點：正式名稱、地址、評分、地圖連結（maps_url）。推薦行程表以外的地點前一定要先查，只附它回傳的 maps_url；查不到或已歇業的不要推薦。',
+    inputSchema: SEARCH_PLACES_SCHEMA,
+    execute: (args, ctx) => searchPlaces({ query: optionalString(args.query), date: optionalString(args.date) }, ctx),
   },
   {
     name: 'create_expense',

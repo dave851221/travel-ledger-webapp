@@ -36,8 +36,10 @@ export interface ToolContext {
    * （LINE 讀 GitHub Pages 上的 JSON，見 line-webhook/itinerary.ts），工具層只負責格式化與搜尋。
    */
   loadItinerary?: () => Promise<ItineraryDoc | null>
-  /** 對外的 HTTP（天氣）。不給就用全域的 fetch，測試塞假的。 */
+  /** 對外的 HTTP（天氣、地點）。不給就用全域的 fetch，測試塞假的。 */
   fetch?: typeof fetch
+  /** Google Places API 的 key（search_places）。沒有就不能查地點 */
+  placesApiKey?: string
 }
 
 /**

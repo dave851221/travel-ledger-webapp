@@ -154,7 +154,8 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | `expenses.ts` | 上面那八支函式 |
 | `balance.ts` | `getBalance`／`getSettlementPlan`，包 `calculateMemberBalances`／`calculateSettlements` |
 | `trip.ts` | `getTrip`（不輸出 `access_code`） |
-| `itinerary.ts` | 行程表的格式化與搜尋：`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`。輸出精簡的純文字，地點／車票／住宿附的網址跟在名稱後面（模型回答時要附上連結），**超過 160 字的網址只留名稱**（舊的 google.com/maps/place 長網址只會燒 token）；沒附網址的地點給 encode 過的地圖搜尋連結（`placeMapUrl`，規則同網頁的 `placeUrl`）。回覆送出前 `sanitizeMapLinks`（`guards.ts`）把模型寫的搜尋連結重新 encode（中文沒 encode，LINE 會在中文字前斷開網址），工具與對話裡沒出現過的短網址／place 網址直接拿掉。行程從哪來由 `ctx.loadItinerary` 決定 |
+| `itinerary.ts` | 行程表的格式化與搜尋：`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`。輸出精簡的純文字，地點／車票／住宿附的網址跟在名稱後面（模型回答時要附上連結），**超過 160 字的網址只留名稱**（舊的 google.com/maps/place 長網址只會燒 token）；沒附網址的地點給 encode 過的地圖搜尋連結（`placeMapUrl`，規則同網頁的 `placeUrl`）。回覆送出前 `sanitizeMapLinks`（`guards.ts`）只留工具結果與對話裡出現過的地圖網址，模型自己寫的（短網址、搜尋網址、place 網址）**一律拿掉、不改寫**，順便去掉上網搜尋抄進來的 `<cite>` 標記。行程從哪來由 `ctx.loadItinerary` 決定 |
+| `places.ts` | `search_places`：Google Places API (New) Text Search，回正式名稱、地址、評分與 `googleMapsUri`。推薦行程表以外的地點**一定先查**，只附它給的連結。要 `GOOGLE_MAPS_API_KEY`（付費，每月前 1,000 次免費），沒設時 LINE 不公開這支工具 |
 | `weather.ts` | `get_weather`：Open-Meteo（免費、免 key），沒給地點就用行程那一天的路線座標；早／午／晚各給一個降雨機率 |
 | `registry.ts` | `TOOLS`、`runTool`、`toGeminiFunctionDeclarations`。同一份定義同時給 Gemini function calling 與未來 MCP 的 `tools/list` 用（見 [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md)） |
 
@@ -371,7 +372,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 
 **所需密鑰**：`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET`、`GEMINI_API_KEY`、
 `WEBAPP_URL`（`SUPABASE_URL` 與 `SUPABASE_SERVICE_ROLE_KEY` 由平台自動注入）。
-改用 Claude 時再加 `ANTHROPIC_API_KEY` 與 `AI_PROVIDER=claude`（選填 `CLAUDE_MODEL`），
+改用 Claude 時再加 `ANTHROPIC_API_KEY` 與 `AI_PROVIDER=claude`（選填 `CLAUDE_MODEL`）；推薦地點要附地圖連結再加 `GOOGLE_MAPS_API_KEY`（Google Cloud 開 Places API (New)，配額上限設在 Console），
 **花費上限設在 Anthropic Console 的 Workspace**，程式裡沒有另外的用量管制。
 上網搜尋要在 Console 的組織設定裡開放 web search，沒開的話機器人照常運作、只是不會上網。
 

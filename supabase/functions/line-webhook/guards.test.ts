@@ -176,38 +176,45 @@ describe('resolveCategory', () => {
 describe('sanitizeMapLinks', () => {
   const SEARCH = 'https://www.google.com/maps/search/?api=1&query=';
 
-  it('中文沒 encode 的搜尋連結重新 encode（LINE 遇到中文就把網址斷開）', () => {
-    const { text, removed } = sanitizeMapLinks(`📍 ${SEARCH}第二市場台中\n🥩 金錢豹 ${SEARCH}金錢豹牛排+台中`, '');
-    expect(text).toBe(`📍 ${SEARCH}%E7%AC%AC%E4%BA%8C%E5%B8%82%E5%A0%B4%E5%8F%B0%E4%B8%AD\n`
-      + `🥩 金錢豹 ${SEARCH}%E9%87%91%E9%8C%A2%E8%B1%B9%E7%89%9B%E6%8E%92%20%E5%8F%B0%E4%B8%AD`);
-    expect(removed).toEqual([]);
-  });
-
-  it('網址後面接的中文標點、英文句點不算進網址', () => {
-    const { text } = sanitizeMapLinks(`地圖：${SEARCH}宮原眼科，走路 5 分鐘。也可以看 ${SEARCH}%E6%9F%B3%E5%B7%9D.`, '');
-    expect(text).toBe(`地圖：${SEARCH}%E5%AE%AE%E5%8E%9F%E7%9C%BC%E7%A7%91，走路 5 分鐘。也可以看 ${SEARCH}%E6%9F%B3%E5%B7%9D.`);
-  });
-
-  it('q= 與 /maps/search/名稱 也當成搜尋', () => {
-    expect(sanitizeMapLinks('https://maps.google.com/?q=清水寺', '').text).toBe(`${SEARCH}%E6%B8%85%E6%B0%B4%E5%AF%BA`);
-    expect(sanitizeMapLinks('https://www.google.com/maps/search/清水寺+京都', '').text)
-      .toBe(`${SEARCH}%E6%B8%85%E6%B0%B4%E5%AF%BA%20%E4%BA%AC%E9%83%BD`);
-  });
-
-  it('工具給過的短網址原樣保留，自己編的拿掉、只剩標籤的那行一起刪', () => {
-    const known = JSON.stringify({ result: '起點：トロッコ嵯峨 https://maps.app.goo.gl/rNiH、終點 https://maps.app.goo.gl/UYSx' });
+  it('沒查證過的搜尋連結整個拿掉，被空格截斷的搜尋字一起拿掉', () => {
     const { text, removed } = sanitizeMapLinks(
-      '- 起點 https://maps.app.goo.gl/rNiH\n- 終點 https://maps.app.goo.gl/UYSy\n📍 https://www.google.com/maps/place/Foo/@35,135\n好玩！',
+      `吃午餐：公益路一帶，可以先玩再吃 ${SEARCH}%E5%8F%B0%E4%B8%AD 公益路 美食\n`
+      + `一中街：傳統小吃多 ${SEARCH}台中 一中街商圈\n`
+      + `📍 ${SEARCH}第二市場`,
+      '',
+    );
+    expect(text).toBe('吃午餐：公益路一帶，可以先玩再吃\n一中街：傳統小吃多');
+    expect(removed).toEqual([`${SEARCH}%E5%8F%B0%E4%B8%AD`, `${SEARCH}台中`, `${SEARCH}第二市場`]);
+  });
+
+  it('search_places 回傳的 maps_url 與行程表的連結原樣保留', () => {
+    const known = JSON.stringify({
+      places: [{ name: '宮原眼科', maps_url: 'https://maps.google.com/?cid=123456' }],
+      result: '起點：トロッコ嵯峨 https://maps.app.goo.gl/rNiH、嵐山 https://www.google.com/maps/search/?api=1&query=%E5%B5%90%E5%B1%B1',
+    });
+    const text = '・宮原眼科（4.3★）：冰淇淋\nhttps://maps.google.com/?cid=123456\n'
+      + '起點 https://maps.app.goo.gl/rNiH。嵐山 https://www.google.com/maps/search/?api=1&query=%E5%B5%90%E5%B1%B1';
+    expect(sanitizeMapLinks(text, known)).toEqual({ text, removed: [] });
+  });
+
+  it('自己編的短網址、place 網址拿掉，網址後面的文字留著，只剩標籤的那行刪掉', () => {
+    const known = 'https://maps.app.goo.gl/rNiH';
+    const { text, removed } = sanitizeMapLinks(
+      '- 起點 https://maps.app.goo.gl/rNiH\n- 終點 https://maps.app.goo.gl/UYSy 走路 3 分\n📍 https://www.google.com/maps/place/Foo/@35,135\n好玩！',
       known,
     );
-    expect(text).toBe('- 起點 https://maps.app.goo.gl/rNiH\n- 終點\n好玩！');
+    expect(text).toBe('- 起點 https://maps.app.goo.gl/rNiH\n- 終點 走路 3 分\n好玩！');
     expect(removed).toEqual(['https://maps.app.goo.gl/UYSy', 'https://www.google.com/maps/place/Foo/@35,135']);
   });
 
-  it('已知網址只認完整的，前綴不算；空白的搜尋連結拿掉', () => {
-    const known = `${SEARCH}%E5%B5%90%E5%B1%B1`;
-    expect(sanitizeMapLinks(`${SEARCH}%E5%B5%90%E5%B1%B1`, known).removed).toEqual([]);
-    expect(sanitizeMapLinks(`嵐山 ${SEARCH}`, known)).toEqual({ text: '嵐山', removed: [SEARCH] });
+  it('已知網址只認完整的，前綴不算', () => {
+    const known = 'https://maps.google.com/?cid=123456';
+    expect(sanitizeMapLinks('https://maps.google.com/?cid=12345', known).removed).toEqual(['https://maps.google.com/?cid=12345']);
+  });
+
+  it('上網搜尋的 cite 標記拿掉', () => {
+    const { text } = sanitizeMapLinks('公益路<cite index="1-1">台中館在公益路</cite>，(cite index="2-3">很近</cite>', '');
+    expect(text).toBe('公益路台中館在公益路，很近');
   });
 
   it('不是地圖的網址不動', () => {

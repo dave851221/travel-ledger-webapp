@@ -45,6 +45,7 @@ import {
   aiUnavailableMessage,
   CHAT_HISTORY_TURNS,
   FALLBACK_NOTICES,
+  GOOGLE_MAPS_API_KEY,
   WEB_SEARCH_MAX_USES,
   WEBAPP_URL,
 } from "../config.ts"
@@ -348,6 +349,7 @@ ${draftSummary || '（沒有等待確認的草稿）'}`
   const toolCtx: ToolContext = {
     db: supabase, trip, today, actorName: memberName,
     loadItinerary: () => loadItinerary(tripId),
+    placesApiKey: GOOGLE_MAPS_API_KEY || undefined,
   }
   const scope: AiScope = {
     ctx, trip, tripId, today, cleanText,
