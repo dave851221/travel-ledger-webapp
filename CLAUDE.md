@@ -180,7 +180,7 @@ handlers 只認得 `AiProvider`（`_shared/ai/types.ts`）：一次性的 `gener
 | `types.ts` | 介面、訊息形狀、`RetryableError`／`FatalError`、錯誤前綴（`RATE_LIMIT:`／`AI_QUOTA:`／`AI_BUSY:`） |
 | `loop.ts` | 兩家迴圈共用的規則：每輪逾時（開著上網搜尋的那輪放寬到 25 秒）、何時強迫收尾、終結函式怎麼挑、工具結果截斷；同一輪的讀取工具**同時**執行（`executeAll`） |
 | `gemini.ts` | Gemini 的 client、`runGeminiToolLoop`、`createGeminiProvider`（模型清單由呼叫端給） |
-| `claude.ts` | `createClaudeProvider`（官方 SDK，`npm:@anthropic-ai/sdk`，預設 `claude-haiku-5-5`、effort `low`） |
+| `claude.ts` | `createClaudeProvider`（官方 SDK，`npm:@anthropic-ai/sdk`，預設 `claude-haiku-5-5`；effort：OCR 等一次性呼叫 `low`、對話迴圈 `medium`） |
 | `fallback.ts` | `withFallback(primary, backup)`：主要的失敗或做不到（語音）就交給備援。失敗時呼叫 request 的 `onFallback('quota' \| 'error')`；額度用完後 10 分鐘內直接用備援 |
 
 **切換**：`supabase secrets set AI_PROVIDER=claude`（或 `gemini`，預設），選擇邏輯在 `line-webhook/ai.ts`。
@@ -202,7 +202,7 @@ system 自己帶 `cache_control`：每則訊息的旅程 context 都不同，跨
 
 ⚠️ **Claude 這側的限制**：Haiku 5.5 收到非預設的 `temperature` 會 400，所以一律不送；
 圖片的 `media_type` 必須與內容一致（PNG 截圖標成 jpeg 會 400），由 base64 開頭判斷（`sniffImageType`）；
-迴圈用 `tool_choice: any`（沒有 `allowedFunctionNames`，最後一輪改用一句話要求收尾）；
+迴圈平常用 `tool_choice: auto`（**`any` 會讓 Haiku 5.5 完全跳過思考，effort 調再高都沒用**），只有收尾那一輪用 `any`，再補一句話要求收尾（沒有 `allowedFunctionNames`）；Sonnet／Opus 5.5 收到 `any` 一律 400，**不能只改 `CLAUDE_MODEL` 換模型**；
 SDK 的自動重試關掉（它連逾時也重試，等待直接翻倍），429／5xx 自己補打一次。
 SDK 版本在 `_shared/deps.ts`、`package.json`（devDependency，vitest 用）、`src/types/modules.d.ts` 三處，**升級時一起改**。
 每次呼叫都會留一行 `[AI] claude … ms in= cache_r= out=`，速度與 token 用量看這一行。
@@ -408,6 +408,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
   分組邏輯在 `src/utils/album.ts`）。機器人讀出金額的收據才算收據（LINE 草稿的 `rc` 旗標）；
   網頁上傳與 📷 照片記帳預設是商品，編輯表單的照片縮圖可以逐張切換。
   任何會改 `photo_urls` 的寫入都要一起維護它 —— 移掉的照片也要從這裡移掉。
+  相簿有「依日期分組」與「緊密格子」兩種排法，選擇記在這台裝置（`localStorage` 的 `album_layout`）。
 - **Postback 資料上限 300 bytes**：Edge Function 用單字母縮寫鍵（`d`、`a`、`c`、`p`、`s`、`n`），
   但真正的解法是 nonce 間接法 —— 完整內容存在 `line_chat_history`，postback 只帶 nonce。
 - **Tailwind CSS v4**：用 `@tailwindcss/postcss` plugin（非 v3 CLI）。

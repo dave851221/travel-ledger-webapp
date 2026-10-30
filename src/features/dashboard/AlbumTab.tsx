@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Images, Receipt, ShoppingBag, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Images, LayoutGrid, Receipt, ShoppingBag, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import { albumCounts, albumDays, type AlbumPhoto, type PhotoKind } from '../../utils/album';
 import { photoUrl } from '../../utils/storage';
@@ -29,13 +29,42 @@ const EMPTY: Record<PhotoKind, { title: string; hint: string }> = {
   },
 };
 
+type AlbumLayout = 'days' | 'grid';
+
+const LAYOUTS: { key: AlbumLayout; label: string; icon: typeof Receipt }[] = [
+  { key: 'days', label: '依日期分組', icon: CalendarDays },
+  { key: 'grid', label: '緊密格子', icon: LayoutGrid },
+];
+
+const LAYOUT_KEY = 'album_layout';
+
+// 這台裝置記得上次選的排法。localStorage 在無痕或被封鎖時會丟例外，讀不到就用預設
+const readLayout = (): AlbumLayout => {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === 'grid' ? 'grid' : 'days';
+  } catch {
+    return 'days';
+  }
+};
+
 /**
  * 相簿：把這趟旅程支出上的照片依日期排好。預設看商品照片，收據另外一區。
  * 哪張是收據由 `expenses.receipt_photo_urls` 決定，在編輯支出的照片縮圖上可以切換。
+ * 「緊密格子」拿掉日期分段與文字，一天只有一兩張時才不會空一大塊；日期在放大後看得到。
  */
 const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
   const [kind, setKind] = useState<PhotoKind>('item');
+  const [layout, setLayout] = useState<AlbumLayout>(readLayout);
   const [openAt, setOpenAt] = useState<number | null>(null);
+
+  const chooseLayout = (next: AlbumLayout) => {
+    setLayout(next);
+    try {
+      localStorage.setItem(LAYOUT_KEY, next);
+    } catch {
+      // Only this visit keeps the choice
+    }
+  };
 
   const days = useMemo(() => albumDays(expenses, kind), [expenses, kind]);
   const counts = useMemo(() => albumCounts(expenses), [expenses]);
@@ -56,21 +85,39 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
           <h2 className="text-xl font-bold">相簿</h2>
           <p className="text-xs text-muted mt-0.5">點照片放大，再點「明細」看是哪一筆</p>
         </div>
-        <div className="flex gap-1 p-1 rounded-xl bg-sunk border border-line w-full sm:w-auto" role="tablist" aria-label="照片種類">
-          {KINDS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={kind === key}
-              onClick={() => { setKind(key); setOpenAt(null); }}
-              className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] transition-colors ${
-                kind === key ? 'bg-surface text-ink font-bold shadow-sm' : 'text-ink-2 hover:text-ink'
-              }`}
-            >
-              <Icon size={15} />{label}
-              <span className="num text-[11px] text-muted font-medium">{counts[key]}</span>
-            </button>
-          ))}
+        <div className="flex gap-2 w-full sm:w-auto">
+          <div className="flex-1 sm:flex-none min-w-0 flex gap-1 p-1 rounded-xl bg-sunk border border-line" role="tablist" aria-label="照片種類">
+            {KINDS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={kind === key}
+                onClick={() => { setKind(key); setOpenAt(null); }}
+                className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1 px-2 sm:px-3.5 py-2 rounded-lg text-[13px] whitespace-nowrap transition-colors ${
+                  kind === key ? 'bg-surface text-ink font-bold shadow-sm' : 'text-ink-2 hover:text-ink'
+                }`}
+              >
+                <Icon size={15} className="shrink-0" />{label}
+                <span className="num text-[11px] text-muted font-medium">{counts[key]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="shrink-0 flex gap-1 p-1 rounded-xl bg-sunk border border-line" role="group" aria-label="排列方式">
+            {LAYOUTS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                aria-label={label}
+                aria-pressed={layout === key}
+                title={label}
+                onClick={() => chooseLayout(key)}
+                className={`inline-flex items-center justify-center w-9 rounded-lg transition-colors ${
+                  layout === key ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
+                }`}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -79,6 +126,12 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
           <Images size={28} className="mx-auto text-muted" />
           <p className="text-sm font-medium mt-3">{EMPTY[kind].title}</p>
           <p className="text-xs text-muted mt-1 max-w-xs mx-auto">{EMPTY[kind].hint}</p>
+        </div>
+      ) : layout === 'grid' ? (
+        <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-0.5 rounded-lg overflow-hidden">
+          {flat.map((p, i) => (
+            <AlbumThumb key={p.path} photo={p} compact onOpen={() => setOpenAt(i)} />
+          ))}
         </div>
       ) : (
         <div className="space-y-5">
@@ -92,23 +145,7 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
                 </h3>
                 <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-1.5">
                   {day.photos.map((p, pi) => (
-                    <button
-                      key={p.path}
-                      onClick={() => setOpenAt(offsets[di] + pi)}
-                      className="group relative aspect-square rounded-lg overflow-hidden bg-sunk border border-line"
-                      aria-label={`放大 ${p.expense.description} 的照片`}
-                    >
-                      <img
-                        src={photoUrl(p.path)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        className="w-full h-full object-cover transition-transform group-hover:scale-[1.03]"
-                      />
-                      <span className="absolute inset-x-0 bottom-0 px-1.5 pt-4 pb-1 text-left text-[11px] text-white truncate bg-gradient-to-t from-black/70 to-transparent">
-                        {p.expense.description}
-                      </span>
-                    </button>
+                    <AlbumThumb key={p.path} photo={p} onOpen={() => setOpenAt(offsets[di] + pi)} />
                   ))}
                 </div>
               </section>
@@ -130,6 +167,28 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
     </div>
   );
 };
+
+/** 一張縮圖。緊密格子（compact）小到放不下文字，只留照片。 */
+const AlbumThumb: React.FC<{ photo: AlbumPhoto; compact?: boolean; onOpen: () => void }> = ({ photo, compact, onOpen }) => (
+  <button
+    onClick={onOpen}
+    className={`group relative aspect-square overflow-hidden bg-sunk ${compact ? '' : 'rounded-lg border border-line'}`}
+    aria-label={`放大 ${photo.expense.description} 的照片`}
+  >
+    <img
+      src={photoUrl(photo.path)}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className="w-full h-full object-cover transition-transform group-hover:scale-[1.03]"
+    />
+    {!compact && (
+      <span className="absolute inset-x-0 bottom-0 px-1.5 pt-4 pb-1 text-left text-[11px] text-white truncate bg-gradient-to-t from-black/70 to-transparent">
+        {photo.expense.description}
+      </span>
+    )}
+  </button>
+);
 
 interface LightboxProps {
   trip: Trip;
