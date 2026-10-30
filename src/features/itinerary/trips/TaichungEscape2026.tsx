@@ -2,18 +2,19 @@ import { defineItinerary } from '../plan';
 import RailStops from '../blocks/RailStops';
 
 /**
- * 2026 台中密室逃脫（5/3 – 5/4 兩日遊，10/31 再加一場）。
+ * 八卦山莊 2026 年的每一場（4/24 起，5/3 – 5/4 是台中兩日遊）。
  *
- * 沒有航班與清單，所以沒有行前分頁；10/31 加進來之後滿三天，多了一覽。
+ * 5 月以外的幾場是照帳本補的，帳上只有日期與金額，沒有時間，所以用 slot 而不是 time；
+ * 「誰先付」也取自帳本。
  * 高鐵時刻用客製區塊（blocks/RailStops）畫成一條路線，示範格式裝不下的內容怎麼插進去。
  */
 
 const WASABI = { name: '哇沙謎江戶時代館', href: 'https://maps.app.goo.gl/3iQiAwoHwkJobXfZ8' };
 
 export default defineItinerary({
-  title: '2026 台中密室逃脫',
-  tagline: 'TAICHUNG · ESCAPE ROOMS',
-  tags: ['5 月兩天四場', '10/31 加一場'],
+  title: '2026 密室・劇本殺',
+  tagline: 'ESCAPE ROOMS · MURDER MYSTERY',
+  tags: ['共 8 場', '5 月台中兩天四場'],
   theme: 'mystery',
   timeZone: 'Asia/Taipei',
 
@@ -27,6 +28,19 @@ export default defineItinerary({
   ],
 
   days: [
+    {
+      date: '2026-04-24', title: '卦－愚人節限定版',
+      items: [
+        { slot: '活動', kind: 'activity', title: '《卦－愚人節限定版》', notes: ['費用 $13,090（艷櫻先付）'] },
+        { slot: '回程', kind: 'car', title: '搭計程車回林口', notes: ['$751（盈瑄先付）'] },
+      ],
+    },
+    {
+      date: '2026-04-25', title: '劇本殺《紅豆》',
+      items: [
+        { slot: '活動', kind: 'activity', title: '劇本殺《紅豆》', notes: ['費用 $9,300（橘子 $6,300、代杰 $2,000、艷櫻 $1,000 先付）'] },
+      ],
+    },
     {
       date: '2026-05-03', city: '台北 → 台中', title: '南下台中，兩場密室', stay: 'champs',
       items: [
@@ -66,6 +80,14 @@ export default defineItinerary({
             '訂金 $2,000，尾款 $6,000',
           ],
         },
+      ],
+    },
+    {
+      date: '2026-09-28', title: '《春日齒科》，再去唱歌',
+      items: [
+        { slot: '活動', kind: 'activity', title: '《春日齒科》', notes: ['費用 $8,280（代杰 $5,280、艷櫻 $3,000 先付）'] },
+        { slot: '續攤', kind: 'activity', title: '好樂迪 KTV', notes: ['$2,349（代杰先付）'] },
+        { slot: '回程', kind: 'car', title: '搭 Uber', notes: ['$239（代杰先付）'] },
       ],
     },
     {
