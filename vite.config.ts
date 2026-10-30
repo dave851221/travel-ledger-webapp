@@ -47,9 +47,10 @@ export default defineConfig({
     react(),
     itineraryJson(),
     VitePWA({
-      // prompt：新版本裝好後先等著，由 App.tsx 的橫幅讓使用者自己按「立即更新」。
-      // autoUpdate 會直接重新整理頁面，剛打開 App、正在填支出表單時內容會被清掉。
-      registerType: 'prompt',
+      // autoUpdate：新版本裝好就直接換上並重新整理（使用者要求，2026-10-30）。
+      // 正在填的表單會被清掉，這是接受的代價；離線佇列存在 localStorage，不受影響。
+      // 曾改成 prompt（按橫幅才換），結果大家都停在舊版。
+      registerType: 'autoUpdate',
       injectRegister: 'auto',
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],

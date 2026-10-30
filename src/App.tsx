@@ -2,7 +2,7 @@ import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { useState, useEffect, lazy, Suspense } from 'react';
 import Home from './pages/Home';
 import TripPortal from './pages/TripPortal';
-import { WifiOff, Wifi, RefreshCw, Loader2 } from 'lucide-react';
+import { WifiOff, Wifi, Loader2 } from 'lucide-react';
 
 // 首頁與通行碼頁以外都等用到才下載：Dashboard 帶著行程資料與表單，
 // LIFF 頁只有從 LINE 進來才會開。手機第一次打開首頁不必先載這些。
@@ -21,13 +21,10 @@ function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showOnlineToast, setShowOnlineToast] = useState(false);
 
-  // PWA 更新：新版本裝好後顯示橫幅，使用者按了才換（vite.config.ts 的 registerType: 'prompt'）。
+  // PWA 更新：新版本裝好就自動換上並重新整理（vite.config.ts 的 registerType: 'autoUpdate'）。
   // 從主畫面開啟的 PWA 可能好幾天都不重新載入，瀏覽器就不會去檢查新版本 ——
   // 回到前景與每小時各主動檢查一次。
-  const {
-    needRefresh: [needRefresh],
-    updateServiceWorker,
-  } = useRegisterSW({
+  useRegisterSW({
     onRegisteredSW(_url, registration) {
       if (!registration) return;
       const check = () => { if (navigator.onLine) registration.update().catch(() => {}); };
@@ -58,18 +55,6 @@ function App() {
   return (
     <Router>
       <div className="relative min-h-screen">
-        {/* PWA Update Notification */}
-        {needRefresh && (
-          <div className="fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[150] w-[calc(100vw-32px)] max-w-sm bg-navy text-navy-fg py-3 pl-4 pr-3 rounded-xl shadow-2xl flex items-center gap-3 anim-sheet">
-            <RefreshCw size={18} className="text-accent shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold">有新版本</p>
-              <p className="text-xs text-navy-sub">重新整理後就會換成最新版</p>
-            </div>
-            <button onClick={() => updateServiceWorker(true)} className="shrink-0 bg-accent text-on-accent px-3 py-1.5 rounded-lg text-xs font-bold">立即更新</button>
-          </div>
-        )}
-
         {/* Offline Notification Bar */}
         {isOffline && (
           <div className="fixed top-0 left-0 right-0 z-[100] bg-navy text-navy-fg pt-[max(8px,env(safe-area-inset-top))] pb-2 px-4 flex items-center justify-center gap-2 text-xs">

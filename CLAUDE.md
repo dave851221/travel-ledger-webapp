@@ -91,8 +91,9 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   上傳用 upsert + `ignoreDuplicates`，重送不會變兩筆。**新增支出的寫入一律走 `insertExpenseOrQueue()`**
   （LIFF 草稿例外，它要通知機器人）。修改、刪除、照片需要連線。
   `useTripData` 會把上次成功載入的旅程與帳目存在 `trip_cache_{id}`，離線冷開也看得到。
-- **PWA 更新**是 `registerType: 'prompt'`：新版本裝好後由 `App.tsx` 的橫幅讓使用者按「立即更新」
-  （autoUpdate 會直接重新整理，正在填的表單會被清掉）。回到前景與每小時主動檢查一次。
+- **PWA 更新**是 `registerType: 'autoUpdate'`：新版本裝好就直接換上並重新整理，正在填的表單會被清掉
+  （使用者明確接受）。曾改成 prompt（按橫幅才換），大家都停在舊版，2026-10-30 改回來。
+  `App.tsx` 在回到前景與每小時主動檢查一次。
 - **`ExpenseModal.tsx`**：支出新增與編輯。付款人/分攤的鎖定機制、多幣別、
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
   ⚠️ 表單只在「開啟的那一刻」或 `editData` 換了才灌初始值（`initializedFor` ref）——
