@@ -346,6 +346,7 @@ Yoshi! 我是旅遊記帳小幫手「耀西」🥚
 - **AI 呼叫方式**（以下以 Gemini 描述；Claude 的對應做法與差異見 `CLAUDE.md` 的「AI 供應商層」）:
   **文字與 OCR 是兩套不同的契約**，不要互相套用。
   - 人設與不可變規則放在 `systemInstruction`（`YOSHI_SYSTEM_INSTRUCTION`），與每次變動的旅程 context 分開。
+  - **講話風格**也在那裡：像 LINE 聊天一樣 1–2 句、不要開場白與結尾客套、不用 Markdown（使用者嫌回覆太冗長，2026-10-30 收緊）。
   - 對話歷史組成真正的多輪 `contents`，而不是壓成一段文字塞進 prompt。
   - 記帳走低溫（0.2 ~ 0.4）以求穩定。
   - **文字路徑：function calling**（Feature G，`ai.runToolLoop()`，實作於 `_shared/ai/`）。

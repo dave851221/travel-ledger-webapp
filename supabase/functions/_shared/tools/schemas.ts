@@ -173,7 +173,7 @@ export const ANALYZE_RECEIPT_SCHEMA: JsonSchema = {
 export const REPLY_SCHEMA: JsonSchema = {
   type: 'object',
   properties: {
-    text: { type: 'string', description: '要回給使用者的繁體中文訊息。條列式、簡短，適合在手機上閱讀' },
+    text: { type: 'string', description: '要回給使用者的繁體中文訊息。像 LINE 聊天一樣短，通常 1–2 句，不要開場白與結尾客套' },
   },
   required: ['text'],
 }
