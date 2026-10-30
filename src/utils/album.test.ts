@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Expense } from '../types';
 import {
   ALBUM_MIN_COLUMNS,
+  albumCellOffset,
   albumCounts,
   albumDays,
+  albumGridHeight,
+  albumLayoutColumns,
   albumMaxColumns,
   clampAlbumColumns,
   defaultAlbumColumns,
   photoKind,
-  pinchColumns,
+  pinchColumnsFraction,
+  rubberBandColumns,
 } from './album';
 
 const exp = (over: Partial<Expense>): Expense => ({
@@ -64,19 +68,43 @@ describe('album grid columns', () => {
     expect(clampAlbumColumns(5.4, PHONE)).toBe(5);
   });
 
-  it('spreading the fingers means fewer, bigger photos', () => {
-    expect(pinchColumns(4, 100, 200, PHONE)).toBe(2);
-    expect(pinchColumns(4, 100, 133, PHONE)).toBe(3);
-    expect(pinchColumns(4, 100, 100, PHONE)).toBe(4);
-  });
-
-  it('pinching the fingers together means more, smaller photos', () => {
-    expect(pinchColumns(4, 200, 100, PHONE)).toBe(7);
-    expect(pinchColumns(8, 200, 100, DESKTOP)).toBe(12);
+  it('follows the fingers between whole column counts', () => {
+    expect(pinchColumnsFraction(4, 100, 200)).toBe(2);
+    expect(pinchColumnsFraction(4, 100, 125)).toBe(3.2);
+    expect(pinchColumnsFraction(4, 100, 100)).toBe(4);
+    expect(pinchColumnsFraction(4, 200, 100)).toBe(8);
   });
 
   it('ignores a pinch with no measurable distance', () => {
-    expect(pinchColumns(4, 0, 100, PHONE)).toBe(4);
-    expect(pinchColumns(4, 100, 0, PHONE)).toBe(4);
+    expect(pinchColumnsFraction(4, 0, 100)).toBe(4);
+    expect(pinchColumnsFraction(4, 100, 0)).toBe(4);
+  });
+
+  it('resists past the limits instead of stopping dead', () => {
+    expect(rubberBandColumns(3.4, PHONE)).toBe(3.4);
+    expect(rubberBandColumns(1, PHONE)).toBeCloseTo(1.7);
+    expect(rubberBandColumns(10, PHONE)).toBeCloseTo(7.9);
+    expect(rubberBandColumns(10, DESKTOP)).toBe(10);
+  });
+
+  it('lays out enough columns to scale up, never down', () => {
+    expect(albumLayoutColumns(3.2, PHONE)).toBe(4);
+    expect(albumLayoutColumns(4, PHONE)).toBe(4);
+    // What a float tween really lands on must not tip into the next column
+    expect(albumLayoutColumns(3.1 + (4 - 3.1), PHONE)).toBe(4);
+    expect(albumLayoutColumns(1.7, PHONE)).toBe(ALBUM_MIN_COLUMNS);
+    expect(albumLayoutColumns(7.9, PHONE)).toBe(albumMaxColumns(PHONE));
+  });
+
+  it('finds a photo in the grid from the arithmetic alone', () => {
+    // 4 columns of 100 with 2px gaps: (406 - 6) / 4
+    expect(albumCellOffset(0, 4, 406, 2)).toEqual({ x: 0, y: 0, size: 100 });
+    expect(albumCellOffset(6, 4, 406, 2)).toEqual({ x: 204, y: 102, size: 100 });
+  });
+
+  it('measures the grid, including a part-filled last row', () => {
+    expect(albumGridHeight(4, 4, 406, 2)).toBe(100);
+    expect(albumGridHeight(5, 4, 406, 2)).toBe(202);
+    expect(albumGridHeight(0, 4, 406, 2)).toBe(0);
   });
 });

@@ -162,14 +162,16 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
           <p className="text-xs text-muted mt-1 max-w-xs mx-auto">{EMPTY[kind].hint}</p>
         </div>
       ) : showGrid ? (
-        <div
-          ref={gridRef}
-          className="grid gap-0.5 rounded-lg overflow-hidden touch-pan-y"
-          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-        >
-          {flat.map((p, i) => (
-            <AlbumThumb key={p.path} photo={p} compact onOpen={() => setOpenAt(i)} />
-          ))}
+        <div className="overflow-x-clip">
+          <div
+            ref={gridRef}
+            className="grid gap-0.5 rounded-lg overflow-hidden touch-pan-y"
+            style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+          >
+            {flat.map((p, i) => (
+              <AlbumThumb key={p.path} photo={p} compact onOpen={() => setOpenAt(i)} />
+            ))}
+          </div>
         </div>
       ) : (
         <div className="space-y-5">

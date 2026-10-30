@@ -56,13 +56,44 @@ export const clampAlbumColumns = (columns: number, width: number): number =>
   Math.min(albumMaxColumns(width), Math.max(ALBUM_MIN_COLUMNS, Math.round(columns)));
 
 /**
- * The column count for a pinch in progress: spreading the fingers to twice the distance
- * halves the columns, so photos follow the fingers instead of one step per gesture.
+ * The columns a pinch is asking for, usually between two whole numbers:
+ * spreading the fingers to twice the distance halves the columns.
  */
-export const pinchColumns = (startColumns: number, startDistance: number, distance: number, width: number): number =>
-  (startDistance > 0 && distance > 0
-    ? clampAlbumColumns(startColumns * (startDistance / distance), width)
-    : startColumns);
+export const pinchColumnsFraction = (startColumns: number, startDistance: number, distance: number): number =>
+  (startDistance > 0 && distance > 0 ? startColumns * (startDistance / distance) : startColumns);
+
+/**
+ * The whole columns to lay out while zooming to `columns`. Always rounded up, so the grid is
+ * scaled up to fill the screen and never scaled down with blank strips beside it.
+ */
+export const albumLayoutColumns = (columns: number, width: number): number =>
+  Math.min(albumMaxColumns(width), Math.max(ALBUM_MIN_COLUMNS, Math.ceil(columns - 1e-6)));
+
+/** How far past the limits the photos follow the fingers before springing back. */
+const OVERSHOOT = 0.3;
+
+/** Past the limits the grid resists instead of stopping dead. */
+export const rubberBandColumns = (columns: number, width: number): number => {
+  const max = albumMaxColumns(width);
+  if (columns < ALBUM_MIN_COLUMNS) return ALBUM_MIN_COLUMNS - (ALBUM_MIN_COLUMNS - columns) * OVERSHOOT;
+  return columns > max ? max + (columns - max) * OVERSHOOT : columns;
+};
+
+/** Where a photo sits inside a square-celled grid, without touching the DOM. */
+export const albumCellOffset = (index: number, columns: number, width: number, gap: number) => {
+  const size = (width - gap * (columns - 1)) / columns;
+  return {
+    x: (index % columns) * (size + gap),
+    y: Math.floor(index / columns) * (size + gap),
+    size,
+  };
+};
+
+export const albumGridHeight = (count: number, columns: number, width: number, gap: number): number => {
+  const { size } = albumCellOffset(0, columns, width, gap);
+  const rows = Math.ceil(count / columns);
+  return rows * size + Math.max(0, rows - 1) * gap;
+};
 
 /** How many photos of each kind there are, for the toggle's counters. */
 export const albumCounts = (expenses: Expense[]): Record<PhotoKind, number> => {

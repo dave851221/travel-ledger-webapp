@@ -408,7 +408,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
   分組邏輯在 `src/utils/album.ts`）。機器人讀出金額的收據才算收據（LINE 草稿的 `rc` 旗標）；
   網頁上傳與 📷 照片記帳預設是商品，編輯表單的照片縮圖可以逐張切換。
   任何會改 `photo_urls` 的寫入都要一起維護它 —— 移掉的照片也要從這裡移掉。
-  相簿有「依日期分組」與「緊密格子」兩種排法，選擇記在這台裝置（`localStorage` 的 `album_layout`）。緊密格子可以縮放（`features/dashboard/useGridZoom.ts`：手機雙指、電腦觸控板或 Ctrl＋滾輪、＋／－ 按鈕），改的是每排幾張（`album_columns`），格子本身 `touch-pan-y`，手勢才不會變成瀏覽器的整頁縮放。
+  相簿有「依日期分組」與「緊密格子」兩種排法，選擇記在這台裝置（`localStorage` 的 `album_layout`）。緊密格子可以縮放（`features/dashboard/useGridZoom.ts`：手機雙指、電腦觸控板或 Ctrl＋滾輪、＋／－ 按鈕），改的是每排幾張（`album_columns`）：手勢中用 `transform: scale` 讓照片大小連續跟著手指，放開才吸附到整數欄，換欄時照片用 FLIP 滑到新位置。格子本身 `touch-pan-y`，手勢才不會變成瀏覽器的整頁縮放。
 - **Postback 資料上限 300 bytes**：Edge Function 用單字母縮寫鍵（`d`、`a`、`c`、`p`、`s`、`n`），
   但真正的解法是 nonce 間接法 —— 完整內容存在 `line_chat_history`，postback 只帶 nonce。
 - **Tailwind CSS v4**：用 `@tailwindcss/postcss` plugin（非 v3 CLI）。
