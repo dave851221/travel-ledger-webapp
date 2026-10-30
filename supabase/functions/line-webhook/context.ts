@@ -11,8 +11,9 @@ import { getChatMemberName } from "./line-api.ts"
 import { getQuickReply } from "./messages.ts"
 import { getOutstandingDrafts, type OutstandingDraft } from "./drafts.ts"
 import { FOLLOWUP_WINDOW_MS } from "./config.ts"
+import { groupModeOf } from "./guards.ts"
 import { getTodayString, getTripTimezone, isPendingExpired, runInBackground } from "./util.ts"
-import type { QuickReply, SourceType, UserStateRow, WebhookEvent } from "./types.ts"
+import type { GroupMode, QuickReply, SourceType, UserStateRow, WebhookEvent } from "./types.ts"
 
 /** 一則事件從頭到尾共用的狀態。所有 handler 的第一個參數都是它。 */
 export interface EventContext {
@@ -39,7 +40,10 @@ export interface EventContext {
   userState: UserStateRow
   isBound: boolean
   isBinding: boolean
+  /** 群組才有意義；silent 也算 true（文字一樣要 @） */
   mentionRequired: boolean
+  /** 群組的回應模式（見 types.ts 的 GroupMode）。一對一固定是 mention，但用不到 */
+  groupMode: GroupMode
   /** 綁定狀態下的快速回覆，整則事件共用 */
   boundQR: QuickReply
   /**
@@ -166,14 +170,15 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
   //    新旅程的密碼驗證成功了才換過去，中途放棄不該變成「沒綁定」。
   const isBinding = !!userState?.pending_trip_id
   const isBound = !!userState?.current_trip_id
-  const mentionRequired = userState?.mention_required ?? true
+  const groupMode = groupModeOf(userState)
+  const mentionRequired = groupMode !== 'all'
   // last_active_at 原本是從沒被更新過的死欄位（M1 順手處理）。
   // 不影響回覆，交給背景寫。
   runInBackground(supabase.from('line_user_states')
     .update({ last_active_at: new Date().toISOString() })
     .eq('line_user_id', sourceId))
   // 預計算綁定狀態下的快速回覆（含群組切換按鈕與旅程偏好按鈕），整個 event 共用
-  const boundQR = getQuickReply(true, isGroup, mentionRequired, userState?.current_trip_id)
+  const boundQR = getQuickReply(true, isGroup, groupMode, userState?.current_trip_id)
 
   // 一次查、整個 event 共用。
   let draftsCache: OutstandingDraft[] | null = null
@@ -195,6 +200,7 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
     isBound,
     isBinding,
     mentionRequired,
+    groupMode,
     boundQR,
     loadDrafts,
   }

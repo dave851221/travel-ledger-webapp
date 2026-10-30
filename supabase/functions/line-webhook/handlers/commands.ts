@@ -20,6 +20,7 @@ import { CANCEL_DRAFT_KEYWORDS, stripSelfMentions } from "../guards.ts"
 import {
   DELETE_LIST_KEYWORDS,
   EDIT_LIST_KEYWORDS,
+  GROUP_MODE_COMMANDS,
   HELP_KEYWORDS,
   QUICK_CMD_KEYWORDS,
   UNDO_KEYWORDS,
@@ -34,6 +35,7 @@ import {
   buildBindSuccessText,
   formatTotals,
   getQuickReply,
+  GROUP_MODE_INFO,
   preferenceQuickReply,
   replyEditPicker,
 } from "../messages.ts"
@@ -92,7 +94,7 @@ export function routeTextMessage(
   const isUndoKeyword = UNDO_KEYWORDS.includes(userText)
   const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(userText)
   const isEditListKeyword = EDIT_LIST_KEYWORDS.includes(userText)
-  const isToggleKeyword = userText === '模式:全回應模式' || userText === '模式:提及模式'
+  const isToggleKeyword = Object.hasOwn(GROUP_MODE_COMMANDS, userText)
   // ⚠️ 只認真正的偏好指令（M3）。以前是 startsWith('設定')，
   //    群組裡的「設定好了嗎」「設定完再跟我說」都會被當成管理指令送進 AI。
   const isPreferenceCmd = /^設定[:：]/.test(userText) || userText === '設定?' || userText === '設定？'
@@ -153,7 +155,7 @@ export function routeTextMessage(
  * 回傳 false＝沒有任何指令認領這句話，交給 AI 核心（未綁定則回「請先輸入 ID:代碼」）。
  */
 export async function handleCommands(ctx: EventContext, route: TextRoute): Promise<boolean> {
-  const { boundQR, isBinding, isBound, isGroup, mentionRequired, replyToken, sourceId, speakerLabel, userState } = ctx
+  const { boundQR, groupMode, isBinding, isBound, isGroup, replyToken, sourceId, speakerLabel, userState } = ctx
   const { cleanText, isMentioned, startsWithYoshi } = route
 
 // 0a. 明確想看使用說明 → 完整介紹
@@ -196,7 +198,7 @@ if (cleanText.toUpperCase().startsWith('ID:') || cleanText.toUpperCase().startsW
           type: 'text',
           text: buildBindSuccessText(targetTrip.name, targetTrip.members, mapping.trip_id),
           // boundQR 是綁定前算的：沒有「記帳偏好」按鈕，切換旅程時還會指到舊旅程
-          quickReply: getQuickReply(true, isGroup, mentionRequired, mapping.trip_id)
+          quickReply: getQuickReply(true, isGroup, groupMode, mapping.trip_id)
         }], sourceId)
       } else {
         // ⚠️ 這裡**不動 current_trip_id**（M1）。
@@ -251,14 +253,17 @@ if (isBound && (cleanText === '斷開' || cleanText === '切換旅程')) {
   await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼', quickReply: getQuickReply(false) }], sourceId); return true
 }
 
-// 3. 切換群組回應模式
-if (isBound && (cleanText === '模式:全回應模式' || cleanText === '模式:提及模式')) {
-  const newMentionRequired = cleanText === '模式:提及模式'
-  await supabase.from('line_user_states').update({ mention_required: newMentionRequired }).eq('line_user_id', sourceId)
-  const msg = newMentionRequired
-    ? '🎯 已切換為提及模式。\n群組中需 @提及 或以「耀西」開頭才會回應。'
-    : '📣 已切換為全回應模式。\n群組中所有訊息都會被耀西處理！'
-  await replyMessage(replyToken, [{ type: 'text', text: msg, quickReply: getQuickReply(true, isGroup, newMentionRequired) }], sourceId)
+// 3. 切換群組回應模式（提及／全回應／靜音，見 types.ts 的 GroupMode）
+// ⚠️ 用 hasOwn 而不是 in：「toString」「constructor」也會被 in 當成指令
+if (isBound && Object.hasOwn(GROUP_MODE_COMMANDS, cleanText)) {
+  const mode = GROUP_MODE_COMMANDS[cleanText]
+  await supabase.from('line_user_states')
+    .update({ mention_required: mode !== 'all', photos_muted: mode === 'silent' })
+    .eq('line_user_id', sourceId)
+  const info = GROUP_MODE_INFO[mode]
+  const icon = info.button.split(' ')[0]
+  const msg = `${icon} 已切換為${info.name}。\n${info.summary}。`
+  await replyMessage(replyToken, [{ type: 'text', text: msg, quickReply: getQuickReply(true, isGroup, mode, userState.current_trip_id) }], sourceId)
   return true
 }
 
@@ -276,7 +281,7 @@ if (isBound && (cleanText === '設定?' || cleanText === '設定？')) {
     ? `⚙️ 這趟旅程目前的 AI 記帳偏好：\n\n${config}\n\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）\n\n要修改請按下方「⚙️ 記帳偏好」，或輸入「設定: 新的內容」。`
     : '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n按下方「⚙️ 記帳偏好」開啟編輯畫面，或輸入「設定: 預設由我付款，大家均分」。'
   await replyMessage(replyToken, [{
-    type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, mentionRequired),
+    type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
   }], sourceId)
   return true
 }
@@ -288,7 +293,7 @@ if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定�
     await replyMessage(replyToken, [{
       type: 'text',
       text: '⚙️ 設定內容不能為空，請輸入偏好內容，例如：\n「設定: 預設由我付款，大家均分」\n\n要清空請輸入「設定:清除」。',
-      quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, mentionRequired),
+      quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
     }], sourceId)
     return true
   }
@@ -305,7 +310,7 @@ if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定�
     ? '⚙️ 已清空這趟旅程的 AI 記帳偏好。'
     : '⚙️ 已更新這趟旅程的 AI 記帳偏好，之後記帳時會參考它。\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）'
   await replyMessage(replyToken, [{
-    type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, mentionRequired),
+    type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
   }], sourceId)
   return true
 }
@@ -327,7 +332,7 @@ if (isBinding) {
       type: 'text',
       text: buildBindSuccessText(trip!.name, trip!.members, userState.pending_trip_id!),
       // 同上：要用剛綁定的旅程算快速回覆，boundQR 裡沒有偏好按鈕
-      quickReply: getQuickReply(true, isGroup, mentionRequired, userState.pending_trip_id)
+      quickReply: getQuickReply(true, isGroup, groupMode, userState.pending_trip_id)
     }], sourceId)
     return true
   }

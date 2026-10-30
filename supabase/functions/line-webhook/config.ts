@@ -1,12 +1,14 @@
 // ============================================================
 // config.ts —— 環境變數、常數與關鍵字表
 //
-// 這一層不 import 任何東西，是模組相依的最底層：
+// 這一層不 import 任何執行期的東西（只有型別），是模組相依的最底層：
 // config → db → line-api → drafts / messages / gemini → handlers → index
 //
 // 關鍵字表原本宣告在 serve() 裡面，每收到一則訊息就重建一次陣列，
 // 而且 handlers 拆出去之後就再也拿不到 —— 一併提到模組層級。
 // ============================================================
+
+import type { GroupMode } from "./types.ts"
 
 export const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
 export const LINE_CHANNEL_SECRET = Deno.env.get('LINE_CHANNEL_SECRET') || ''
@@ -83,5 +85,11 @@ export const UNDO_KEYWORDS = ['取消上一筆', '撤銷上一筆', '刪除上�
 export const DELETE_LIST_KEYWORDS = ['刪除支出', '刪除紀錄', '刪除記錄', '管理支出', '刪除哪一筆']
 /** 列出近期支出讓使用者點選編輯 */
 export const EDIT_LIST_KEYWORDS = ['編輯支出', '編輯紀錄', '編輯記錄', '修改支出', '修改紀錄']
+/** 切換群組回應模式的指令（見 types.ts 的 GroupMode） */
+export const GROUP_MODE_COMMANDS: Record<string, GroupMode> = {
+  '模式:提及模式': 'mention',
+  '模式:全回應模式': 'all',
+  '模式:靜音模式': 'silent',
+}
 /** 想看完整的自我介紹 */
 export const HELP_KEYWORDS = ['使用說明', '說明', '教學', '怎麼用', '怎麼使用', '如何使用', 'help', 'HELP', 'Help', '功能']

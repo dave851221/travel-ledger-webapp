@@ -15,13 +15,14 @@
 // 純粹在驗證 AI 回傳內容的那一半已經搬到 _shared/validate.ts，
 // 但仍由這裡原樣轉出 —— guards.test.ts 是這兩邊共同的看守者，一行都不必改。
 //
-// import 只有 _shared/deps.ts（Decimal）、_shared/finance.ts 與 _shared/validate.ts ——
+// import 只有 _shared/deps.ts（Decimal）、_shared/finance.ts、_shared/validate.ts 與 types.ts 的型別 ——
 // deps.ts 那層間接就是為了讓 vitest 在 Node 下也載得到，見 vitest.config.ts 的 alias。
 // ============================================================
 
 import { Decimal } from "../_shared/deps.ts"
 import { formatAmount, getRate } from "../_shared/finance.ts"
 import { normalizeName } from "../_shared/validate.ts"
+import type { GroupMode } from "./types.ts"
 
 // 轉出 _shared/validate.ts 的驗證函式，讓既有的 import 路徑與 guards.test.ts 不受影響。
 // ⚠️ 型別要用 `export type`：混在值的 export 裡會讓 vitest 的 esbuild
@@ -86,6 +87,17 @@ const QUESTION_HINT = /([？?]|嗎|多少|幾|誰|哪)/
 export function mentionsDraftField(text: string): boolean {
   if (!text) return false
   return DRAFT_FIELD_HINT.test(text) && !QUESTION_HINT.test(text)
+}
+
+/**
+ * 群組的回應模式：line_user_states 的兩個欄位合成一個（見 types.ts 的 GroupMode）。
+ * 全回應模式下 photos_muted 沒有意義（照片照樣處理），只有 mention_required 不是 false 才看它。
+ */
+export function groupModeOf(
+  state: { mention_required?: boolean | null; photos_muted?: boolean | null } | null | undefined,
+): GroupMode {
+  if (state?.mention_required === false) return 'all'
+  return state?.photos_muted ? 'silent' : 'mention'
 }
 
 /** LINE 的 mention 條目，只列這裡真正會用到的欄位 */

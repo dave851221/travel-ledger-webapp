@@ -72,6 +72,7 @@ import {
   buildEditLiffUrl,
   buildExpenseCard,
   buildUpdatePreviewCard,
+  GROUP_MODE_INFO,
   replyEditPicker,
 } from "../messages.ts"
 import { runInBackground } from "../util.ts"
@@ -232,13 +233,23 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
     return `- nonce=${d.nonce}：${e.d ?? ''} ${e.a ?? ''} ${e.c ?? ''}${photo}（付款：${payers}；分攤：${splits}）`
   }).join('\n')
 
+  // 群組才有模式。「照片怎麼沒反應」「為什麼要 @ 你」這類問題要靠這一行回答 ——
+  // 靜音模式下照片根本沒進到機器人，不給它這一行，它只能亂猜是辨識失敗。
+  const modeInfo = GROUP_MODE_INFO[ctx.groupMode]
+  const groupModeLine = ctx.isGroup
+    ? `
+【群組模式】${modeInfo.name}：${modeInfo.summary}。`
+      + `使用者問照片為什麼沒反應、為什麼要 @ 你時，照這個說明回答；`
+      + `要換模式可以按下方的模式按鈕，或輸入「模式:提及模式」「模式:全回應模式」「模式:靜音模式」。`
+    : ''
+
   // 只放「這次對話的當下狀態」。人設與不可變規則已在 YOSHI_SYSTEM_INSTRUCTION，
   // 可以做哪些事則由 function declarations 描述，不必再用文字講一次。
   const tripContext = `【旅程】${trip.name}｜成員：${trip.members.join('、')}｜分類：${trip.categories.join('、')}（預設：${trip.default_category || '無'}）
 【幣別】記帳預設：${trip.default_currency || trip.base_currency}（使用者沒明講就填這個）｜結算主幣：${trip.base_currency}（只用於統計，不要拿來當記帳幣別）｜可用：${Object.keys(trip.rates ?? {}).join('、') || '（尚未設定）'}
 【今日】${today}｜${trip.is_archived ? '⚠️ 已封存（唯讀，禁止記帳與修改）' : '進行中'}
 【記帳偏好（整趟旅程共用）】${trip.ai_preference || '無'}｜傳訊者：${memberName}
-【旅程預設付款人】${trip.default_payer?.length ? trip.default_payer.join('、') : '無'}｜預設分攤：${trip.default_split_members?.length ? trip.default_split_members.join('、') : '全員'}
+【旅程預設付款人】${trip.default_payer?.length ? trip.default_payer.join('、') : '無'}｜預設分攤：${trip.default_split_members?.length ? trip.default_split_members.join('、') : '全員'}${groupModeLine}
 
 【判斷優先權】
 - payer_data（墊付）：①旅程預設付款人 ②記帳偏好 ③傳訊者對應的成員 ④成員第一位

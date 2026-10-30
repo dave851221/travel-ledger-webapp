@@ -35,6 +35,13 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
 
   const messageId = event.message.id
 
+  // 群組靜音模式：照片完全不碰（不下載、不辨識、不回覆）。
+  // 有人問「怎麼沒反應」時，AI 的 context 裡有目前的模式，答得出來（ai-text.ts）。
+  if (ctx.isGroup && ctx.groupMode === 'silent') {
+    console.log(`[IMAGE] Group is in silent mode, ignoring messageId: ${messageId}`)
+    return
+  }
+
   if (!userState?.current_trip_id) {
     await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程，再傳送收據照片喔！' }], sourceId)
     return

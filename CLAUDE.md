@@ -338,7 +338,10 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    ⚠️ **只有 `expense` 算草稿** —— `getOutstandingDrafts()` 濾掉其餘的，
    否則使用者打「取消」會取消到一張修改卡，AI 也會拿它的 nonce 去填 `corrects_draft`。
    `upd` 不寫 `saved` 列（與 `liff-notify` 的 `mode === 'update'` 一致，見 J11）
-6. **群組**：預設僅在 @提及或訊息以「耀西」開頭時回應，可切換為全回應模式。
+6. **群組**：三種模式（`GroupMode`，`mention_required` + `photos_muted` 由 `groupModeOf()` 合成）：
+   提及模式（預設，照片都處理、文字要 @ 或「耀西」開頭）、全回應模式（全部處理）、
+   靜音模式（照片不處理、文字同提及模式）。群組訊息的 AI context 帶一行【群組模式】，
+   問「照片怎麼沒反應」才答得出來。
    提及模式下另有兩種不必 @ 的情況（`TextRoute.trigger`）：
    - `quote`：對機器人的訊息按 LINE 的「回覆」。`line-api.ts` 把群組裡送出的訊息 id 記在 `line_bot_messages`，
      對得上 `quotedMessageId` 就算（7 天後由 pg_cron 清掉）。

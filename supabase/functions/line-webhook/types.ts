@@ -218,6 +218,15 @@ export interface PendingDraft {
 // DB 列（Supabase 沒有產生型別，只列會讀到的欄位）
 // ============================================================
 
+/**
+ * 群組的回應模式（一對一不適用，永遠都處理）。
+ *   mention  提及模式（預設）：照片都處理，文字要 @耀西 或以「耀西」開頭
+ *   all      全回應模式：照片與文字全部處理
+ *   silent   靜音模式：照片不處理，文字跟提及模式一樣要 @
+ * 存在 line_user_states 的兩個欄位：mention_required 與 photos_muted（context.ts 的 groupModeOf）。
+ */
+export type GroupMode = 'mention' | 'all' | 'silent'
+
 export interface UserStateRow {
   line_user_id: string
   current_trip_id: string | null
@@ -225,6 +234,8 @@ export interface UserStateRow {
   pending_at: string | null
   /** 群組觸發模式，true＝需 @提及或以「耀西」開頭 */
   mention_required: boolean | null
+  /** 群組靜音模式：true 時照片不處理（搭配 mention_required = true，見 GroupMode） */
+  photos_muted?: boolean | null
   last_active_at: string | null
   /**
    * 群組「接話」：機器人剛回覆過的那個人，在 followup_until 之前的下一句話不必 @ 也會處理

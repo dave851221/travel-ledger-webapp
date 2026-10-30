@@ -4,6 +4,7 @@ import {
   CANCEL_DRAFT_KEYWORDS,
   claimsCompletedAction,
   extractJSON,
+  groupModeOf,
   normalizeCurrency,
   normalizeDate,
   hasCurrencyHint,
@@ -63,6 +64,20 @@ describe('mentionsEditingExisting', () => {
     expect(mentionsEditingExisting('今天好累')).toBe(false);
     expect(mentionsEditingExisting('剛剛那個改天再說')).toBe(false);
     expect(mentionsEditingExisting('')).toBe(false);
+  });
+});
+
+describe('groupModeOf', () => {
+  it('合成提及／全回應／靜音三種模式', () => {
+    expect(groupModeOf({ mention_required: true, photos_muted: false })).toBe('mention');
+    expect(groupModeOf({ mention_required: false, photos_muted: false })).toBe('all');
+    expect(groupModeOf({ mention_required: true, photos_muted: true })).toBe('silent');
+  });
+
+  it('全回應模式不看 photos_muted；沒有狀態時是提及模式', () => {
+    expect(groupModeOf({ mention_required: false, photos_muted: true })).toBe('all');
+    expect(groupModeOf(null)).toBe('mention');
+    expect(groupModeOf({ mention_required: null })).toBe('mention');
   });
 });
 

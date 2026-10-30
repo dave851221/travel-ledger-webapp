@@ -12,7 +12,7 @@ import { supabase } from "./db.ts"
 import { replyMessage } from "./line-api.ts"
 import { formatAmount, sumByCurrency } from "../_shared/finance.ts"
 import type { ExpenseRow } from "../_shared/types.ts"
-import type { ExpenseCardData, OutgoingMessage, QuickReply } from "./types.ts"
+import type { ExpenseCardData, GroupMode, OutgoingMessage, QuickReply } from "./types.ts"
 
 /** replyEditPicker 那份清單每一列讀得到的欄位 */
 type PickerRow = Pick<ExpenseRow, "id" | "description" | "amount" | "currency" | "date">
@@ -26,9 +26,9 @@ export function preferenceLiffUrl(tripId: string): string {
  * 「設定?」「設定:」的回覆用：把「記帳偏好」按鈕排到第一顆。
  * 一般的 boundQR 也有這顆，但排在最後 —— 使用者正在講偏好，那顆該最顯眼。
  */
-export function preferenceQuickReply(tripId: string, showGroupToggle: boolean, mentionRequired: boolean) {
+export function preferenceQuickReply(tripId: string, showGroupToggle: boolean, groupMode: GroupMode) {
   // 不傳 tripId 給 getQuickReply，避免同一顆按鈕出現兩次
-  const base = getQuickReply(true, showGroupToggle, mentionRequired)
+  const base = getQuickReply(true, showGroupToggle, groupMode)
   return { items: [preferenceQuickReplyItem(tripId), ...base.items] }
 }
 
@@ -39,10 +39,29 @@ export function preferenceQuickReplyItem(tripId: string) {
   }
 }
 
+/**
+ * 群組三種模式的名稱與說明。切換後的回覆、快速回覆按鈕、
+ * 餵給 AI 的 context（「為什麼照片沒反應」它才答得出來）都用這一份。
+ */
+export const GROUP_MODE_INFO: Record<GroupMode, { name: string; button: string; command: string; summary: string }> = {
+  mention: {
+    name: '提及模式', button: '🎯 提及模式', command: '模式:提及模式',
+    summary: '照片都會處理；文字要 @耀西 或以「耀西」開頭才回應（剛回覆過的人 3 分鐘內接著講、或回覆耀西的訊息也算）',
+  },
+  all: {
+    name: '全回應模式', button: '📣 全回應模式', command: '模式:全回應模式',
+    summary: '照片、文字、語音全部都會處理，不必 @',
+  },
+  silent: {
+    name: '靜音模式', button: '🔕 靜音模式', command: '模式:靜音模式',
+    summary: '照片完全不處理（不辨識、不出卡片）；文字跟提及模式一樣要 @耀西 或以「耀西」開頭',
+  },
+}
+
 export function getQuickReply(
   bound: boolean,
   showGroupToggle = false,
-  mentionRequired = true,
+  groupMode: GroupMode = 'mention',
   tripId?: string | null,
 ) {
   if (!bound) {
@@ -64,11 +83,13 @@ export function getQuickReply(
   // 偏好是旅程層級的，沒有旅程就沒有東西可編輯
   if (tripId) items.push(preferenceQuickReplyItem(tripId))
   items.push({ type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } })
+  // 群組才有模式可切：列出目前以外的另外兩種
   if (showGroupToggle) {
-    items.push(mentionRequired
-      ? { type: "action", action: { type: "message", label: "📣開啟全回應模式", text: "模式:全回應模式" } }
-      : { type: "action", action: { type: "message", label: "🎯改回提及模式", text: "模式:提及模式" } }
-    )
+    for (const mode of ['mention', 'all', 'silent'] as const) {
+      if (mode === groupMode) continue
+      const info = GROUP_MODE_INFO[mode]
+      items.push({ type: "action", action: { type: "message", label: info.button, text: info.command } })
+    }
   }
   return { items }
 }
@@ -470,6 +491,7 @@ export const BOT_SELF_INTRODUCTION = `Yoshi! 我是旅遊記帳小幫手「耀�
 ・「總共花多少？我還要給誰多少？」
 
 👥 群組裡請 @耀西 或用「耀西」開頭叫我，對我的訊息按「回覆」也可以
+🔕 不想讓我看群組裡的照片，就按下方按鈕切成靜音模式
 ⚙️ 分帳習慣按下方「記帳偏好」設定；今日支出、旅程總覽也在下方按鈕（「本月支出」「結算」直接打字）`
 
 /**

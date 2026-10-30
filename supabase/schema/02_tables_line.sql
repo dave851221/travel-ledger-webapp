@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS public.line_trip_id_mapping (
 --        驗證成功才會把 current 換掉，中途放棄不會變成沒綁定（M1）。
 --   pending_at：進入等待通行碼狀態的時間，超過 10 分鐘由 Edge Function 自動放棄
 --   mention_required：群組觸發模式，true = 需 @提及或以「耀西」開頭才回應
+--   photos_muted：群組靜音模式，true = 照片不處理（搭配 mention_required = true）
 --   last_active_at：每次收到事件時由 Edge Function 背景更新
 --   followup_user_id / followup_until：群組「接話」—— 機器人剛回覆過的那個人，
 --     在 followup_until 之前的下一句話不必 @ 也會處理（只有提及模式有作用）
@@ -30,7 +31,8 @@ CREATE TABLE IF NOT EXISTS public.line_user_states (
     last_active_at   TIMESTAMPTZ DEFAULT NOW(),
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     followup_user_id TEXT,
-    followup_until   TIMESTAMPTZ
+    followup_until   TIMESTAMPTZ,
+    photos_muted     BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- 對話紀錄。role 目前有四種用途：
