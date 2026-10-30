@@ -25,7 +25,7 @@ const ctxWith = (placesApiKey?: string) => ({
 }) as unknown as ToolContext;
 
 describe('searchPlaces', () => {
-  it('帶 key 與 field mask，以行程那一天的座標為中心、限定旅程的國家', async () => {
+  it('帶 key 與 field mask，以行程那一天的座標為中心、限定旅程的國家；歇業的濾掉', async () => {
     calls.length = 0;
     response = {
       status: 200,
@@ -51,9 +51,18 @@ describe('searchPlaces', () => {
       query: '宮原眼科 台中',
       places: [
         { name: '宮原眼科', address: '台中市中區中山路20號', maps_url: 'https://maps.google.com/?cid=1', rating: 4.3, rating_count: 51234 },
-        { name: '舊店', address: null, maps_url: 'https://maps.google.com/?cid=2', rating: null, rating_count: null, status: '已歇業' },
       ],
     });
+  });
+
+  it('全部都歇業時只回名稱與狀態，不給連結', async () => {
+    response = {
+      status: 200,
+      body: { places: [{ displayName: { text: '三圓綠豆湯' }, googleMapsUri: 'https://maps.google.com/?cid=3', businessStatus: 'CLOSED_PERMANENTLY' }] },
+    };
+    const out = await searchPlaces({ query: '三圓綠豆湯' }, ctxWith('KEY'));
+    expect(out).toMatchObject({ places: [], closed: ['三圓綠豆湯（已歇業）'] });
+    expect(JSON.stringify(out)).not.toContain('cid=3');
   });
 
   it('沒有 key 就不打 API，叫模型不要附連結', async () => {

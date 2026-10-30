@@ -100,16 +100,24 @@ export async function searchPlaces(
     return { error: `Place search failed (HTTP ${res.status}). Do not attach map links.` }
   }
 
-  const places = (json.places ?? [])
-    .filter((p) => p.displayName?.text && p.googleMapsUri)
-    .map((p) => ({
-      name: p.displayName!.text!,
-      address: p.formattedAddress ?? null,
-      maps_url: shortMapsUrl(p.googleMapsUri!),
-      rating: p.rating ?? null,
-      rating_count: p.userRatingCount ?? null,
-      ...(p.businessStatus && CLOSED_STATUS[p.businessStatus] ? { status: CLOSED_STATUS[p.businessStatus] } : {}),
-    }))
-  if (places.length === 0) return { query, places: [], note: 'Nothing found. Do not recommend or link this place.' }
-  return { query, places }
+  const hits = (json.places ?? []).filter((p) => p.displayName?.text && p.googleMapsUri)
+  // 歇業的直接濾掉：模型看得到就會說「某某已歇業，就不推了」，使用者不想聽這句
+  const open = hits.filter((p) => !(p.businessStatus && CLOSED_STATUS[p.businessStatus]))
+  const places = open.map((p) => ({
+    name: p.displayName!.text!,
+    address: p.formattedAddress ?? null,
+    maps_url: shortMapsUrl(p.googleMapsUri!),
+    rating: p.rating ?? null,
+    rating_count: p.userRatingCount ?? null,
+  }))
+  if (places.length > 0) return { query, places }
+  if (hits.length > 0) {
+    // 全部都歇業：使用者指名問這一家時才需要知道（不然會以為查不到）
+    return {
+      query, places: [],
+      closed: hits.map((p) => `${p.displayName!.text!}（${CLOSED_STATUS[p.businessStatus!]}）`),
+      note: 'Closed. Mention it only if the user asked about this specific place; when recommending, leave it out without saying anything.',
+    }
+  }
+  return { query, places: [], note: 'Nothing found. Do not recommend or link this place.' }
 }

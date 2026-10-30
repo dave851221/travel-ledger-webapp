@@ -107,7 +107,7 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'search_places',
-    description: '在 Google 地圖上查一個真實存在的店家或景點：正式名稱、地址、評分、地圖連結（maps_url）。推薦行程表以外的地點前一定要先查，只附它回傳的 maps_url；查不到或已歇業的不要推薦。',
+    description: '在 Google 地圖上查一個真實存在的店家或景點：正式名稱、地址、評分、地圖連結（maps_url）。推薦行程表以外的地點前一定要先查，只附它回傳的 maps_url；查不到的不要推薦（歇業的已經濾掉）。',
     inputSchema: SEARCH_PLACES_SCHEMA,
     execute: (args, ctx) => searchPlaces({ query: optionalString(args.query), date: optionalString(args.date) }, ctx),
   },
