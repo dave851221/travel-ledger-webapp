@@ -107,7 +107,7 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'search_places',
-    description: '在 Google 地圖上查真實存在的店家或景點：正式名稱、地址、評分、地圖連結（maps_url），以及從中心點（near）過去的距離與步行／大眾運輸／開車分鐘數。推薦行程表以外的地點前一定要先查，只附它回傳的 maps_url；遠近只能引用它給的數字。查不到的不要推薦（歇業的已經濾掉）。只用來找要去的地方（吃、玩、逛、住），不要拿來找計程車行、租車、停車場。',
+    description: '在 Google 地圖上查真實存在的店家或景點：正式名稱、地址、評分、地圖連結（maps_url），以及從中心點（near）過去的距離與步行／大眾運輸／開車分鐘數。推薦行程表以外的地點前一定要先查，只附它回傳的 maps_url；遠近只能引用它給的數字。查不到的不要推薦（歇業的已經濾掉）。主要找要去的地方（吃、玩、逛、住）；計程車行、租車、停車場只有使用者明確要找時才查。',
     inputSchema: SEARCH_PLACES_SCHEMA,
     execute: (args, ctx) => searchPlaces({
       query: optionalString(args.query),
