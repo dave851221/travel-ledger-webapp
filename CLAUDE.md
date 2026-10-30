@@ -155,7 +155,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
 | `balance.ts` | `getBalance`／`getSettlementPlan`，包 `calculateMemberBalances`／`calculateSettlements` |
 | `trip.ts` | `getTrip`（不輸出 `access_code`） |
 | `itinerary.ts` | 行程表的格式化與搜尋：`get_itinerary_overview`／`get_itinerary_day`／`search_itinerary`。輸出精簡的純文字，地點／車票／住宿附的網址跟在名稱後面（模型回答時要附上連結），**超過 160 字的網址只留名稱**（舊的 google.com/maps/place 長網址只會燒 token）；沒附網址的地點給 encode 過的地圖搜尋連結（`placeMapUrl`，規則同網頁的 `placeUrl`）。回覆送出前 `sanitizeMapLinks`（`guards.ts`）只留工具結果與對話裡出現過的地圖網址，模型自己寫的（短網址、搜尋網址、place 網址）**一律拿掉、不改寫**，順便去掉上網搜尋抄進來的 `<cite>` 標記。行程從哪來由 `ctx.loadItinerary` 決定 |
-| `places.ts` | `search_places`：Google Places API (New) Text Search，回正式名稱、地址、評分與 `googleMapsUri`。推薦行程表以外的地點**一定先查**，只附它給的連結。要 `GOOGLE_MAPS_API_KEY`（付費，每月前 1,000 次免費），沒設時 LINE 不公開這支工具 |
+| `places.ts` | `search_places`：Google Places API (New) Text Search，回正式名稱、地址、評分與 `googleMapsUri`，加上從中心點（`near`，沒給就用當天行程）過去的直線距離與步行／大眾運輸／開車分鐘數（Routes API route matrix）。給了 `near` 就只在半徑內找（預設 1 公里）。推薦行程表以外的地點**一定先查**，只附它給的連結，**遠近只能引用它的數字**。要 `GOOGLE_MAPS_API_KEY`（付費，每月前 1,000 次免費），沒設時 LINE 不公開這支工具 |
 | `weather.ts` | `get_weather`：Open-Meteo（免費、免 key），沒給地點就用行程那一天的路線座標；早／午／晚各給一個降雨機率 |
 | `registry.ts` | `TOOLS`、`runTool`、`toGeminiFunctionDeclarations`。同一份定義同時給 Gemini function calling 與未來 MCP 的 `tools/list` 用（見 [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md)） |
 

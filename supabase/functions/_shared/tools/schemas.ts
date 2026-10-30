@@ -134,8 +134,13 @@ export const WEATHER_SCHEMA: JsonSchema = {
 export const SEARCH_PLACES_SCHEMA: JsonSchema = {
   type: 'object',
   properties: {
-    query: { type: 'string', description: '店名或景點名稱加上地區，例如「宮原眼科 台中」「一蘭 新宿」' },
-    date: { type: 'string', description: 'YYYY-MM-DD，以行程表上那一天的位置為中心找。省略代表今天' },
+    query: { type: 'string', description: '要找什麼：店名，或種類（「拉麵」「咖啡廳」「火鍋」）。找附近的店時不要把地名寫進這裡，寫在 near' },
+    near: {
+      type: 'string',
+      description: '以哪裡為中心找「附近」：使用者說的地點（「台中車站」「ROOMIN」「飯店」），使用者沒說就填那一天行程的主要地點。有填就只找半徑內的。指名查某一家、不在乎遠近時才省略',
+    },
+    radius_m: { type: 'number', description: '附近的範圍（公尺），預設 1000（走路約 15 分鐘）。使用者說「走路 10 分鐘內」就填 600，說可以搭車就放大到 5000' },
+    date: { type: 'string', description: 'YYYY-MM-DD，哪一天的行程。省略代表今天' },
   },
   required: ['query'],
 }
