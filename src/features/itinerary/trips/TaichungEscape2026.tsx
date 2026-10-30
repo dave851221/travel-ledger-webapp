@@ -2,18 +2,18 @@ import { defineItinerary } from '../plan';
 import RailStops from '../blocks/RailStops';
 
 /**
- * 2026 台中密室逃脫兩日遊（5/3 – 5/4）。
+ * 2026 台中密室逃脫（5/3 – 5/4 兩日遊，10/31 再加一場）。
  *
- * 只有兩天、沒有航班與清單，所以頁面打開就是每日行程，沒有一覽與行前分頁。
+ * 沒有航班與清單，所以沒有行前分頁；10/31 加進來之後滿三天，多了一覽。
  * 高鐵時刻用客製區塊（blocks/RailStops）畫成一條路線，示範格式裝不下的內容怎麼插進去。
  */
 
 const WASABI = { name: '哇沙謎江戶時代館', href: 'https://maps.app.goo.gl/3iQiAwoHwkJobXfZ8' };
 
 export default defineItinerary({
-  title: '2026 台中密室逃脫兩日遊',
+  title: '2026 台中密室逃脫',
   tagline: 'TAICHUNG · ESCAPE ROOMS',
-  tags: ['兩天四場密室'],
+  tags: ['5 月兩天四場', '10/31 加一場'],
   theme: 'mystery',
   timeZone: 'Asia/Taipei',
 
@@ -64,6 +64,21 @@ export default defineItinerary({
             { text: '全程脫鞋子、脫襪子', tone: 'warn' },
             '遊戲過程中如果有危險動作或夥伴之間沒有幫忙，有可能會全濕',
             '訂金 $2,000，尾款 $6,000',
+          ],
+        },
+      ],
+    },
+    {
+      date: '2026-10-31', city: '台中', title: 'ROOMIN 再闖一關',
+      items: [
+        {
+          time: '11:30', kind: 'activity', title: '密室《查寢》',
+          places: [{ name: 'ROOMIN 台中密室逃脫工作室', query: 'ROOMIN台中密室逃脫工作室' }],
+          notes: [
+            '7 人，預約人：艷櫻',
+            '訂金 $800 已付（艷櫻）',
+            { text: '場館一次只接待一組，請提前 5–10 分鐘抵達', tone: 'warn' },
+            '遊戲日前三天內（含當天）取消或改期不退訂金；改期請私訊粉專「ROOMIN 台中密室逃脫工作室」',
           ],
         },
       ],

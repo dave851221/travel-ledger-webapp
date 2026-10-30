@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  availableViews, dateParts, defineItinerary, flattenNotes, isValidTime, itemStates, linkPlaceNames,
+  availableViews, dateParts, defaultDayIndex, defineItinerary, flattenNotes, isValidTime, itemStates, linkPlaceNames,
   nightsBetween, nowIn, parseRichText, plainText, startMinutes, unlinkedPlaces,
 } from './plan';
 import { ITINERARIES, isPlan } from './registry';
@@ -59,6 +59,18 @@ describe('time helpers', () => {
     ];
     expect(itemStates(items, 11 * 60)).toEqual(['done', 'now', null, 'next', null]);
     expect(itemStates(items, 7 * 60)).toEqual(['next', null, null, null, null]);
+  });
+
+  it('opens today, else the next day ahead, else the last day', () => {
+    const p = plan({ days: [
+      { date: '2026-05-03', title: 'a', items: [] },
+      { date: '2026-05-04', title: 'b', items: [] },
+      { date: '2026-10-31', title: 'c', items: [] },
+    ] });
+    expect(defaultDayIndex(p, '2026-04-01')).toBe(0);
+    expect(defaultDayIndex(p, '2026-05-04')).toBe(1);
+    expect(defaultDayIndex(p, '2026-10-30')).toBe(2);
+    expect(defaultDayIndex(p, '2026-11-01')).toBe(2);
   });
 
   it("computes today's date in another time zone", () => {

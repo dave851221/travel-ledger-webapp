@@ -40,6 +40,15 @@ export const nowIn = (timeZone?: string, now: Date = new Date()): { date: string
 export const todayIndex = (plan: ItineraryPlan, today: string): number =>
   plan.days.findIndex(d => d.date === today);
 
+/**
+ * Which day tab to open: today if the trip is on today, otherwise the next day still ahead,
+ * otherwise (everything is over) the last day. Dates are sorted (plan.test checks it).
+ */
+export const defaultDayIndex = (plan: ItineraryPlan, today: string): number => {
+  const next = plan.days.findIndex(d => d.date >= today);
+  return next >= 0 ? next : plan.days.length - 1;
+};
+
 const TIME_RE = /^(\d{2}):(\d{2})(?:–(\d{2}):(\d{2}))?$/;
 
 export const isValidTime = (time: string): boolean => {

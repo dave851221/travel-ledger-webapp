@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import type { BookingStatus, DayPlan, ItemKind, ItineraryPlan, Stay } from './types';
 import {
-  availableViews, dateParts, itemStates, nightsBetween, nowIn, placeUrl, todayIndex, unlinkedPlaces,
+  availableViews, dateParts, itemStates, nightsBetween, defaultDayIndex, nowIn, placeUrl, todayIndex, unlinkedPlaces,
   type ItemState, type ItineraryView as View,
 } from './plan';
 import { THEMES, TITLE_FONT_FAMILY, TITLE_FONT_HREF } from './themes';
@@ -425,8 +425,12 @@ const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
   }, [plan.timeZone]);
 
   const today = todayIndex(plan, now.date);
-  const [active, setActive] = useState(() => (today >= 0 ? today : 0));
-  const [view, setView] = useState<View>(() => (today >= 0 || !views.includes('overview') ? 'daily' : 'overview'));
+  // 打開時停在今天；今天沒行程就停在下一個還沒到的日子，全部過完了停在最後一天
+  const [active, setActive] = useState(() => defaultDayIndex(plan, now.date));
+  // 還沒出發時先看一覽；出發之後（含中間空檔與結束後）直接看那一天
+  const [view, setView] = useState<View>(() => (
+    now.date < plan.days[0].date && views.includes('overview') ? 'overview' : 'daily'
+  ));
   const [mapOpen, setMapOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [accentHex, setAccentHex] = useState('#3a5ba0');
