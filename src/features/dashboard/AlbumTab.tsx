@@ -6,6 +6,7 @@ import { albumCounts, albumDays, type AlbumPhoto, type PhotoKind } from '../../u
 import { photoUrl } from '../../utils/storage';
 import { formatMoney } from '../../utils/money';
 import { dateParts } from '../itinerary/plan';
+import { useGridZoom } from './useGridZoom';
 
 interface Props {
   trip: Trip;
@@ -51,6 +52,7 @@ const readLayout = (): AlbumLayout => {
  * 相簿：把這趟旅程支出上的照片依日期排好。預設看商品照片，收據另外一區。
  * 哪張是收據由 `expenses.receipt_photo_urls` 決定，在編輯支出的照片縮圖上可以切換。
  * 「緊密格子」拿掉日期分段與文字，一天只有一兩張時才不會空一大塊；日期在放大後看得到。
+ * 格子的大小可以縮放（手機雙指、電腦觸控板或 Ctrl＋滾輪、＋／－ 按鈕），見 `useGridZoom`。
  */
 const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
   const [kind, setKind] = useState<PhotoKind>('item');
@@ -75,6 +77,9 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
     [days],
   );
 
+  const showGrid = layout === 'grid' && flat.length > 0;
+  const { gridRef, columns, stepColumns, canShrink, canGrow } = useGridZoom(showGrid);
+
   // A refetch can shrink the list under an open lightbox (the photo was moved to the other kind or deleted)
   const current = openAt !== null && openAt < flat.length ? openAt : null;
 
@@ -83,9 +88,38 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-xl font-bold">相簿</h2>
-          <p className="text-xs text-muted mt-0.5">點照片放大，再點「明細」看是哪一筆</p>
+          <p className="text-xs text-muted mt-0.5">
+            {showGrid ? (
+              <>
+                <span className="sm:hidden">雙指開合可以調整照片大小</span>
+                <span className="hidden sm:inline">觸控板雙指或 Ctrl＋滾輪可以調整照片大小</span>
+              </>
+            ) : '點照片放大，再點「明細」看是哪一筆'}
+          </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
+          {showGrid && (
+            <div className="hidden sm:flex shrink-0 gap-1 p-1 rounded-xl bg-sunk border border-line" role="group" aria-label="照片大小">
+              <button
+                aria-label="縮小照片"
+                title="縮小照片"
+                disabled={!canShrink}
+                onClick={() => stepColumns(1)}
+                className="inline-flex items-center justify-center w-9 rounded-lg text-ink-2 hover:text-ink disabled:opacity-40 transition-colors"
+              >
+                <ZoomOut size={16} />
+              </button>
+              <button
+                aria-label="放大照片"
+                title="放大照片"
+                disabled={!canGrow}
+                onClick={() => stepColumns(-1)}
+                className="inline-flex items-center justify-center w-9 rounded-lg text-ink-2 hover:text-ink disabled:opacity-40 transition-colors"
+              >
+                <ZoomIn size={16} />
+              </button>
+            </div>
+          )}
           <div className="flex-1 sm:flex-none min-w-0 flex gap-1 p-1 rounded-xl bg-sunk border border-line" role="tablist" aria-label="照片種類">
             {KINDS.map(({ key, label, icon: Icon }) => (
               <button
@@ -127,8 +161,12 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
           <p className="text-sm font-medium mt-3">{EMPTY[kind].title}</p>
           <p className="text-xs text-muted mt-1 max-w-xs mx-auto">{EMPTY[kind].hint}</p>
         </div>
-      ) : layout === 'grid' ? (
-        <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-0.5 rounded-lg overflow-hidden">
+      ) : showGrid ? (
+        <div
+          ref={gridRef}
+          className="grid gap-0.5 rounded-lg overflow-hidden touch-pan-y"
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        >
           {flat.map((p, i) => (
             <AlbumThumb key={p.path} photo={p} compact onOpen={() => setOpenAt(i)} />
           ))}

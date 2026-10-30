@@ -40,6 +40,30 @@ export const albumDays = (expenses: Expense[], kind: PhotoKind): AlbumDay[] => {
   return days;
 };
 
+export const ALBUM_MIN_COLUMNS = 2;
+const PHONE_WIDTH = 640;
+const DESKTOP_WIDTH = 1024;
+
+/** Past these the thumbnails stop being recognisable at this screen width. */
+export const albumMaxColumns = (width: number): number => (width < PHONE_WIDTH ? 7 : 12);
+
+export const defaultAlbumColumns = (width: number): number => {
+  if (width < PHONE_WIDTH) return 4;
+  return width < DESKTOP_WIDTH ? 6 : 8;
+};
+
+export const clampAlbumColumns = (columns: number, width: number): number =>
+  Math.min(albumMaxColumns(width), Math.max(ALBUM_MIN_COLUMNS, Math.round(columns)));
+
+/**
+ * The column count for a pinch in progress: spreading the fingers to twice the distance
+ * halves the columns, so photos follow the fingers instead of one step per gesture.
+ */
+export const pinchColumns = (startColumns: number, startDistance: number, distance: number, width: number): number =>
+  (startDistance > 0 && distance > 0
+    ? clampAlbumColumns(startColumns * (startDistance / distance), width)
+    : startColumns);
+
 /** How many photos of each kind there are, for the toggle's counters. */
 export const albumCounts = (expenses: Expense[]): Record<PhotoKind, number> => {
   const counts: Record<PhotoKind, number> = { item: 0, receipt: 0 };

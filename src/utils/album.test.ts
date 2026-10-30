@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from '../types';
-import { albumCounts, albumDays, photoKind } from './album';
+import {
+  ALBUM_MIN_COLUMNS,
+  albumCounts,
+  albumDays,
+  albumMaxColumns,
+  clampAlbumColumns,
+  defaultAlbumColumns,
+  photoKind,
+  pinchColumns,
+} from './album';
 
 const exp = (over: Partial<Expense>): Expense => ({
   id: 'x', trip_id: 't', date: '2026-11-15', category: '餐飲', description: 'd', amount: 100, currency: 'JPY',
@@ -35,5 +44,39 @@ describe('album', () => {
   it('leaves out trashed expenses and settlements', () => {
     const settle = exp({ id: 's', is_settlement: true, photo_urls: ['p/6.jpg'] });
     expect(albumCounts([...all, settle])).toEqual({ item: 2, receipt: 2 });
+  });
+});
+
+describe('album grid columns', () => {
+  const PHONE = 390;
+  const DESKTOP = 1440;
+
+  it('starts bigger on small screens', () => {
+    expect(defaultAlbumColumns(PHONE)).toBe(4);
+    expect(defaultAlbumColumns(800)).toBe(6);
+    expect(defaultAlbumColumns(DESKTOP)).toBe(8);
+  });
+
+  it('stays inside the range for the screen width', () => {
+    expect(clampAlbumColumns(1, PHONE)).toBe(ALBUM_MIN_COLUMNS);
+    expect(clampAlbumColumns(99, PHONE)).toBe(albumMaxColumns(PHONE));
+    expect(clampAlbumColumns(99, DESKTOP)).toBe(albumMaxColumns(DESKTOP));
+    expect(clampAlbumColumns(5.4, PHONE)).toBe(5);
+  });
+
+  it('spreading the fingers means fewer, bigger photos', () => {
+    expect(pinchColumns(4, 100, 200, PHONE)).toBe(2);
+    expect(pinchColumns(4, 100, 133, PHONE)).toBe(3);
+    expect(pinchColumns(4, 100, 100, PHONE)).toBe(4);
+  });
+
+  it('pinching the fingers together means more, smaller photos', () => {
+    expect(pinchColumns(4, 200, 100, PHONE)).toBe(7);
+    expect(pinchColumns(8, 200, 100, DESKTOP)).toBe(12);
+  });
+
+  it('ignores a pinch with no measurable distance', () => {
+    expect(pinchColumns(4, 0, 100, PHONE)).toBe(4);
+    expect(pinchColumns(4, 100, 0, PHONE)).toBe(4);
   });
 });
