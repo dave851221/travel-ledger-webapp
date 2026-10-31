@@ -45,6 +45,7 @@ export default defineItinerary({
       checkIn: '2026-11-14',
       checkOut: '2026-11-17',
       href: 'https://maps.app.goo.gl/6wTzhRoADPGRYqLVA',
+      notes: ['最晚 11:00 退房'],
     },
     {
       id: 'osaka',
@@ -54,6 +55,7 @@ export default defineItinerary({
       checkIn: '2026-11-17',
       checkOut: '2026-11-22',
       href: 'https://maps.app.goo.gl/Tg3927BbvTzgnXWr9',
+      notes: ['最晚 11:00 退房'],
     },
   ],
 
@@ -88,9 +90,10 @@ export default defineItinerary({
       items: [
         { time: '13:30–16:55', kind: 'flight', title: '去程航班 BR130' },
         {
-          time: '17:44', kind: 'train', title: 'HARUKA 特急 → 京都',
+          time: '17:44–19:04', kind: 'train', title: 'HARUKA 特急 → 京都',
           booking: { label: 'Haruka 車票', status: 'booked' },
           notes: [
+            'Haruka 44 号：關西機場 17:44 出發 → 京都 19:04 抵達',
             '[時刻表](https://japantravel.navitime.com/zh-tw/area/jp/depArrTimeList/00001353/00001756/00000047?direction=up&date=2026-11-14&hour=17)',
             '[車票連結](https://guest-ui.west-qr.com/#/)（需綁定帳號）',
           ],
@@ -142,7 +145,7 @@ export default defineItinerary({
     },
     {
       date: '2026-11-16', city: '京都', title: '下鴨神社・金閣寺・鴨川', stay: 'kyoto',
-      route: [KYOTO_HOTEL, [35.0391, 135.7727], [35.0394, 135.7292], [35.00133, 135.76696], [35.0037, 135.7690], [35.0040, 135.7717], [35.00946, 135.77063], KYOTO_HOTEL],
+      route: [KYOTO_HOTEL, [35.0391, 135.7727], [35.0394, 135.7292], [35.00133, 135.76696], [35.0037, 135.7690], [35.0040, 135.77462], [35.0040, 135.7717], [35.00946, 135.77063], KYOTO_HOTEL],
       items: [
         {
           slot: '早上', kind: 'sight', title: '下鴨神社（賀茂御祖神社） → 金閣寺',
@@ -156,9 +159,10 @@ export default defineItinerary({
           places: [{ name: '豬一拉麵', href: 'https://maps.app.goo.gl/vYGfYbx2tbbdWvyD6' }],
         },
         {
-          slot: '下午', kind: 'walk', title: '河原町 → 鴨川',
+          slot: '下午', kind: 'walk', title: '河原町 → Ousu之里 衹園本店 → 鴨川',
           places: [
             { name: '河原町', query: '河原町 京都' },
+            { name: 'Ousu之里 衹園本店', href: 'https://maps.app.goo.gl/F3jqQLNjzk5isDPb7' },
             { name: '鴨川', href: 'https://maps.app.goo.gl/bjWGofV3mRitE5t39' },
           ],
         },
@@ -186,7 +190,7 @@ export default defineItinerary({
           slot: '早上', kind: 'sight', title: '伏見稻荷神社',
           places: [{ name: '伏見稻荷神社', href: 'https://maps.app.goo.gl/pNZF7B9Zbp8Tyez19' }],
         },
-        { slot: '早上', kind: 'train', title: '退房、前往大阪', notes: ['待確認行李寄放'] },
+        { slot: '早上', kind: 'hotel', title: '退房、前往大阪', notes: ['最晚 11:00 退房', '待確認行李寄放'] },
         {
           slot: '午餐', kind: 'food', title: '牛かつもと村 難波店（炸牛排）',
           places: [{ name: '牛かつもと村 難波店', href: 'https://maps.app.goo.gl/7duoLoUn5CSrUkvLA' }],
@@ -278,6 +282,7 @@ export default defineItinerary({
       date: '2026-11-22', city: '大阪', title: '返程',
       route: [OSAKA_HOTEL, NAMBA, KIX],
       items: [
+        { slot: '早上', kind: 'hotel', title: '退房', notes: ['最晚 11:00 退房'] },
         {
           slot: '早上', kind: 'train', title: '南海電鐵特急 Rapi:t α：難波 → 關西機場',
           booking: { label: 'Rapi:t 車票', status: 'todo', href: 'https://hop2.fun/ZRfyvGWu' },
