@@ -257,6 +257,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
   // Handlers
   const toggleActive = (member: string, type: 'payer' | 'split') => {
+    // 勾掉再勾回來時 signature 會變回基準值，不清掉的話自動重算會被略過
+    (type === 'payer' ? payerBaselineRef : splitBaselineRef).current = null;
     if (type === 'payer') {
       const next = new Set(payerActive);
       const isRemoving = next.has(member);
@@ -277,6 +279,30 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         // Clear data and lock when removing
         setSplitData(prev => ({ ...prev, [member]: 0 }));
         setSplitLocked(prev => { const n = new Set(prev); n.delete(member); return n; });
+      }
+    }
+  };
+
+  const isAllActive = (type: 'payer' | 'split') => {
+    const active = type === 'payer' ? payerActive : splitActive;
+    return trip.members.every(m => active.has(m));
+  };
+
+  // 全選；已經全選時改成全部取消。全選時鎖定的金額照舊保留，其餘的人分掉剩下的
+  const toggleAll = (type: 'payer' | 'split') => {
+    const allActive = isAllActive(type);
+    (type === 'payer' ? payerBaselineRef : splitBaselineRef).current = null;
+    if (type === 'payer') {
+      setPayerActive(allActive ? new Set() : new Set([...payerActive, ...trip.members]));
+      if (allActive) {
+        setPayerData({});
+        setPayerLocked(new Set());
+      }
+    } else {
+      setSplitActive(allActive ? new Set() : new Set([...splitActive, ...trip.members]));
+      if (allActive) {
+        setSplitData({});
+        setSplitLocked(new Set());
       }
     }
   };
@@ -579,13 +605,25 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     );
   };
 
-  const sectionHeader = (title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
-    <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
-      <span className="text-sm font-bold text-ink shrink-0">{title}</span>
-      <ValidationBadge isValid={valid} current={sum} target={numAmount} />
-      {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
-      <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
-    </button>
+  const sectionHeader = (type: 'payer' | 'split', title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
+    <div className="relative">
+      <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
+        <span className="text-sm font-bold text-ink shrink-0">{title}</span>
+        <ValidationBadge isValid={valid} current={sum} target={numAmount} />
+        {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
+        <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {/* 標題列本身是按鈕，不能巢狀，所以疊在上面 */}
+      {open && (
+        <button
+          type="button"
+          onClick={() => toggleAll(type)}
+          className="absolute right-6 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-lg bg-sunk text-xs font-medium text-ink-2 hover:text-ink transition-colors"
+        >
+          {isAllActive(type) ? '全部取消' : '全選'}
+        </button>
+      )}
+    </div>
   );
 
   return (
@@ -637,12 +675,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         </div>
 
         <section className="space-y-2">
-          {sectionHeader('誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
+          {sectionHeader('payer', '誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
           {showPayerDetail && renderMemberRows('payer')}
         </section>
 
         <section className="space-y-2">
-          {sectionHeader('怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
+          {sectionHeader('split', '怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
           {showSplitDetail && (
             <>
               {renderMemberRows('split')}
