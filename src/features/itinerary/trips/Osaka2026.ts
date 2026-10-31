@@ -106,7 +106,7 @@ export default defineItinerary({
       route: [KYOTO_HOTEL, [34.99467, 135.78466], [34.99832, 135.77873], [34.9985, 135.7803], [34.9962, 135.7813], [35.0129, 135.6777], KYOTO_HOTEL],
       items: [
         {
-          slot: '早上', kind: 'sight', title: '清水寺 → 八坂庚申堂', notes: ['預計 7 點左右抵達'],
+          slot: '早上', kind: 'sight', title: '清水寺 → 八坂庚申堂', notes: ['預計 6 點左右抵達'],
           places: [
             { name: '清水寺', href: 'https://maps.app.goo.gl/xfrJi2qATBTyw9Ay7' },
             { name: '八坂庚申堂', href: 'https://maps.app.goo.gl/oHpHDhpxTSBDZ5td6' },
@@ -119,6 +119,7 @@ export default defineItinerary({
             { name: '三年坂', href: 'https://maps.app.goo.gl/ifnYAFvQgwySZFMv7' },
           ],
         },
+        { slot: '午餐／下午茶', kind: 'food', title: '蕎麥麵', notes: ['逛完街到嵐山渡月橋附近吃'] },
         {
           time: '16:02–16:25', kind: 'train', title: '嵐山小火車：嵯峨 → 亀岡',
           booking: { label: '嵐山嵯峨野觀光小火車', status: 'paid', href: 'https://linkt.to/h3hbgyeo' },
@@ -184,18 +185,25 @@ export default defineItinerary({
     },
     {
       date: '2026-11-17', city: '京都 → 大阪', title: '伏見稻荷，移動到大阪', stay: 'osaka',
-      route: [KYOTO_HOTEL, [34.96769, 135.77919], OSAKA_HOTEL, [34.66662, 135.50197], NIPPONBASHI, DOTONBORI, NAMBA, OSAKA_HOTEL],
+      route: [KYOTO_HOTEL, [34.96769, 135.77919], [35.0040, 135.7717], OSAKA_HOTEL, [34.66662, 135.50197], NIPPONBASHI, DOTONBORI, NAMBA, [34.6750, 135.5007], [34.66729, 135.50432], OSAKA_HOTEL],
       items: [
         {
-          slot: '早上', kind: 'sight', title: '伏見稻荷神社',
-          places: [{ name: '伏見稻荷神社', href: 'https://maps.app.goo.gl/pNZF7B9Zbp8Tyez19' }],
+          slot: '早上', kind: 'sight', title: '伏見稻荷神社 → 鴨川', notes: ['8 點出門'],
+          places: [
+            { name: '伏見稻荷神社', href: 'https://maps.app.goo.gl/pNZF7B9Zbp8Tyez19' },
+            { name: '鴨川', href: 'https://maps.app.goo.gl/bjWGofV3mRitE5t39' },
+          ],
         },
         { slot: '早上', kind: 'hotel', title: '退房、前往大阪', notes: ['最晚 11:00 退房', '待確認行李寄放'] },
         {
           slot: '午餐', kind: 'food', title: '牛かつもと村 難波店（炸牛排）',
           places: [{ name: '牛かつもと村 難波店', href: 'https://maps.app.goo.gl/7duoLoUn5CSrUkvLA' }],
         },
-        { slot: '下午', kind: 'shopping', title: '日本橋 → 道頓堀 → 難波', places: MINAMI },
+        { slot: '下午', kind: 'shopping', title: '日本橋 → 道頓堀 → 難波 → 心齋橋', places: [...MINAMI, { name: '心齋橋', query: '心齋橋 大阪' }] },
+        {
+          slot: '下午茶', kind: 'food', title: '鳴門鯛燒本舖',
+          places: [{ name: '鳴門鯛燒本舖', query: '鳴門鯛燒本舖 千日前' }],
+        },
         {
           slot: '晚餐', kind: 'food', title: '福太郎大阪燒',
           places: [{ name: '福太郎大阪燒', href: 'https://maps.app.goo.gl/uRegVkX2Zh9UC9EM9' }],
@@ -207,10 +215,13 @@ export default defineItinerary({
       date: '2026-11-18', city: '宇治 → 大阪', title: '任天堂博物館・Harukas・難波', stay: 'osaka',
       route: [OSAKA_HOTEL, [34.9033, 135.7928], [34.6459, 135.5135], NIPPONBASHI, DOTONBORI, NAMBA, OSAKA_HOTEL],
       items: [
-        { slot: '早餐', kind: 'food', title: '客美多' },
+        { slot: '早餐', kind: 'food', title: '客美多', places: [{ name: '客美多', href: 'https://maps.app.goo.gl/ViQ75vS72Zce7te2A' }] },
         {
-          slot: '早上', kind: 'activity', title: '任天堂博物館 → 中村藤吉',
-          places: [{ name: '任天堂博物館', href: 'https://maps.app.goo.gl/mtRPmZq8jynFNbTw6' }],
+          slot: '早上', kind: 'activity', title: '任天堂博物館 → 丸久小山園 → 中村藤吉',
+          places: [
+            { name: '任天堂博物館', href: 'https://maps.app.goo.gl/mtRPmZq8jynFNbTw6' },
+            { name: '丸久小山園', href: 'https://maps.app.goo.gl/McTgKbn33JLcdgLGA' },
+          ],
         },
         {
           slot: '下午', kind: 'sight', title: 'Harukas300 展望台 → 日本橋 → 道頓堀 → 難波',
@@ -220,7 +231,7 @@ export default defineItinerary({
     },
     {
       date: '2026-11-19', city: '大阪', title: '環球影城一整天', stay: 'osaka',
-      route: [OSAKA_HOTEL, [34.6654, 135.4323], OSAKA_HOTEL],
+      route: [OSAKA_HOTEL, [34.6654, 135.4323], [34.6525, 135.5063], OSAKA_HOTEL],
       items: [
         {
           slot: '全天', kind: 'activity', title: '環球影城',
@@ -241,6 +252,7 @@ export default defineItinerary({
             },
           ],
         },
+        { slot: '晚上', kind: 'sight', title: '通天閣', places: [{ name: '通天閣', query: '通天閣 大阪' }] },
         { slot: '晚餐', kind: 'food', title: '居酒屋', undecided: true },
       ],
     },
@@ -251,7 +263,7 @@ export default defineItinerary({
       tips: ['視天氣情況調整動物園及海生館之順序'],
       items: [
         {
-          slot: '早上', kind: 'sight', title: '神戶動物王國',
+          slot: '早上', kind: 'sight', title: '神戶動物王國', notes: ['8:30 出門'],
           places: [{ name: '神戶動物王國', href: 'https://maps.app.goo.gl/175zih4p6cow5kLS7' }],
           booking: { label: '神戶動物王國', status: 'pending' },
         },
@@ -271,7 +283,7 @@ export default defineItinerary({
       date: '2026-11-21', city: '大阪', title: '勝尾寺・梅田', stay: 'osaka',
       route: [OSAKA_HOTEL, [34.8654, 135.4910], [34.7025, 135.4959], OSAKA_HOTEL],
       items: [
-        { slot: '早上', kind: 'sight', title: '勝尾寺', places: [{ name: '勝尾寺', href: 'https://maps.app.goo.gl/cJY5n3fmgv9wEvfTA' }] },
+        { slot: '早上', kind: 'sight', title: '勝尾寺', notes: ['8 點出門'], places: [{ name: '勝尾寺', href: 'https://maps.app.goo.gl/cJY5n3fmgv9wEvfTA' }] },
         { slot: '午餐', kind: 'food', title: '壽司' },
         { slot: '下午', kind: 'shopping', title: '梅田逛街', places: [{ name: '梅田', query: '梅田 大阪' }] },
         { slot: '下午', kind: 'shopping', title: 'Alpen', undecided: true },
