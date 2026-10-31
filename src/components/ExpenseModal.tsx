@@ -534,8 +534,23 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     const locked = type === 'payer' ? payerLocked : splitLocked;
     const data = type === 'payer' ? payerData : splitData;
     const setLocked = type === 'payer' ? setPayerLocked : setSplitLocked;
+    const allOn = isAllActive(type);
+    const someOn = trip.members.some(m => active.has(m));
     return (
       <ul className="border border-line rounded-xl divide-y divide-line">
+        <li className="bg-sunk rounded-t-xl">
+          <label className="flex items-center gap-2 pl-2.5 pr-1.5 py-2 cursor-pointer">
+            <input
+              type="checkbox"
+              // 只勾了部分成員時顯示橫線；indeterminate 只能從 DOM 設定
+              ref={el => { if (el) el.indeterminate = someOn && !allOn; }}
+              className="w-[18px] h-[18px] rounded accent-[var(--app-primary)] cursor-pointer shrink-0"
+              checked={allOn}
+              onChange={() => toggleAll(type)}
+            />
+            <span className="text-sm font-medium text-ink">全選</span>
+          </label>
+        </li>
         {trip.members.map(member => {
           const on = active.has(member);
           const isLocked = locked.has(member);
@@ -605,25 +620,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     );
   };
 
-  const sectionHeader = (type: 'payer' | 'split', title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
-    <div className="relative">
-      <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
-        <span className="text-sm font-bold text-ink shrink-0">{title}</span>
-        <ValidationBadge isValid={valid} current={sum} target={numAmount} />
-        {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
-        <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {/* 標題列本身是按鈕，不能巢狀，所以疊在上面 */}
-      {open && (
-        <button
-          type="button"
-          onClick={() => toggleAll(type)}
-          className="absolute right-6 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-lg bg-sunk text-xs font-medium text-ink-2 hover:text-ink transition-colors"
-        >
-          {isAllActive(type) ? '全部取消' : '全選'}
-        </button>
-      )}
-    </div>
+  const sectionHeader = (title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
+    <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
+      <span className="text-sm font-bold text-ink shrink-0">{title}</span>
+      <ValidationBadge isValid={valid} current={sum} target={numAmount} />
+      {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
+      <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
   );
 
   return (
@@ -675,12 +678,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         </div>
 
         <section className="space-y-2">
-          {sectionHeader('payer', '誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
+          {sectionHeader('誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
           {showPayerDetail && renderMemberRows('payer')}
         </section>
 
         <section className="space-y-2">
-          {sectionHeader('split', '怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
+          {sectionHeader('怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
           {showSplitDetail && (
             <>
               {renderMemberRows('split')}
