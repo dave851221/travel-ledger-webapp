@@ -74,11 +74,11 @@ export default defineItinerary({
   // 沿用舊行程頁的 key，大家已經勾過的項目不會消失
   checklist: {
     storageKey: 'itinerary_checklist_osaka2026',
-    items: ['護照', '信用卡', '外幣', '入境資料（Visit Japan）', '保險', 'E-SIM', '充電線', '藥', '環保袋', '牙刷', '口罩', '行動電源'],
+    items: ['護照', '信用卡', '外幣', '入境資料（Visit Japan）', '保險', 'E-SIM', '充電線', '藥', '環保袋', '牙刷', '口罩', '行動電源', '預訂機場接送'],
   },
 
   notes: [
-    { text: '待辦', tone: 'warn', items: ['Haruka 車票要劃位', '南海特急要劃位'] },
+    { text: '待辦', tone: 'warn', items: ['南海特急要劃位'] },
     '還沒排進的：生魚片（可以排在任何一天的午餐）',
     '各種早餐、午餐、晚餐都還能再排；標「未定」的是還沒決定的餐廳或店家。',
   ],
