@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
+import { buildSavedText } from "./format.ts"
 
 const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
@@ -66,6 +67,22 @@ serve(async (req) => {
       { type: "action", action: { type: "message", label: "💰 結算", text: "結算" } }
     )
 
+    // 推播內容以資料庫裡實際存進去的那一筆為準（使用者在 LIFF 改過的標題、
+    // 金額、類別、付款人、分帳都會反映出來）。查不到時退回前端帶來的描述與金額。
+    let text = `${isUpdate ? '✏️ 已透過 LIFF 更新' : '✅ 已透過 LIFF 存入'}：${description}\n💰 ${amount} ${currency}`
+    if (expense_id) {
+      const { data: saved, error: readErr } = await supabase
+        .from('expenses')
+        .select('date, category, description, amount, currency, payer_data, split_data, trips(precision_config)')
+        .eq('id', expense_id)
+        .single()
+      if (readErr) console.error('[LIFF_NOTIFY] read saved expense failed:', readErr)
+      if (saved) {
+        const trip = (Array.isArray(saved.trips) ? saved.trips[0] : saved.trips) as { precision_config?: Record<string, number> } | null
+        text = buildSavedText(saved, isUpdate, trip?.precision_config ?? {})
+      }
+    }
+
     // LINE push 推播確認訊息
     const pushRes = await fetch('https://api.line.me/v2/bot/message/push', {
       method: 'POST',
@@ -74,7 +91,7 @@ serve(async (req) => {
         to: line_user_id,
         messages: [{
           type: 'text',
-          text: `${isUpdate ? '✏️ 已透過 LIFF 更新' : '✅ 已透過 LIFF 存入'}：${description}\n💰 ${amount} ${currency}`,
+          text,
           quickReply: { items: quickReplyItems }
         }]
       })

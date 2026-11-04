@@ -223,7 +223,7 @@ M4、M14、M15 與 K12／K13 的缺口於 2026-09-06）。M9 不存在。
 | H2 | 連點兩次確認 | — | 第二次回「已於先前成功存入」 | ✅ nonce 鎖 | `line_processed_actions` |
 | H3 | 取消 | 按「❌ 取消」 | 失效 nonce，有照片就刪 | ✅ | P1 cancel |
 | H4 | 先取消再確認 | — | 回「此操作已處理過」 | ✅ | nonce 鎖 |
-| H5 | LIFF 編輯後存檔 | 按「✏️ 編輯」→ 改金額 → 存 | 佔用 nonce → INSERT → `liff-notify` 推播「已透過 LIFF 存入」（編輯既有支出則推播「已更新」，見 J11） | ✅ 網址改為只帶 `n` 與 `u`，草稿內容由 `LiffEdit` 自己去 `pending` 列撈（T2）；nonce 已被處理過就直接說明，不開表單 | `ExpenseModal.handleSubmit`、`liff-notify`、`buildDraftLiffUrl` |
+| H5 | LIFF 編輯後存檔 | 按「✏️ 編輯」→ 改金額 → 存 | 佔用 nonce → INSERT → `liff-notify` 推播「已透過 LIFF 存入」，內容照資料庫存進去的那筆列出標題、金額、日期與類別、付款人、分帳明細（純文字，不附照片；編輯既有支出則推播「已更新」，見 J11） | ✅ 網址改為只帶 `n` 與 `u`，草稿內容由 `LiffEdit` 自己去 `pending` 列撈（T2）；nonce 已被處理過就直接說明，不開表單 | `ExpenseModal.handleSubmit`、`liff-notify`、`buildDraftLiffUrl` |
 | H6 | LIFF 存檔後再按確認 | — | 回「已處理過」，不重複寫入 | ✅ | nonce 鎖 |
 | H7 | 群組裡 B 確認 A 的卡片 | — | 允許（共用同一本帳），訊息標明「由 B 記錄」 | ✅ 刻意設計 | `speakerLabel` |
 | H8 | 兩張卡同時待確認 | 連續記兩筆 | 兩張都能確認 | ✅ 只有 AI 用 `corrects_draft` 指名的那一張會失效 | `supersedeDraft` |
