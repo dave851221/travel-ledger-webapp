@@ -77,7 +77,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   它只負責資料、處理函式與彈窗；各分頁與外框在 `src/features/dashboard/`
   （`LedgerTab`、`StatsTab`、`SettlementTab`、`AlbumTab`、`TrashTab`、`SiblingsTab`、`TripChrome`、`BottomNav`、
   `BalanceTicket`、`SummaryPanel`）。新功能請放進對應的元件，不要再往 Dashboard 塞。
-  **版面**：手機是頂列 + 浮起的底部導覽（分頁膠囊 + 右側 ＋ 新增，`相簿`、`其他旅程`與`垃圾桶`在 ⋯ 選單）；
+  **版面**：手機是頂列 + 浮起的底部導覽（分頁膠囊含帳目、統計、結清、行程、相簿 + 右側 ＋ 新增；`其他旅程`與`垃圾桶`在 ⋯ 選單，⋯ 也保留`相簿`入口）；
   `md` 以上換成左側欄；`lg` 以上帳目改成表格欄位；`xl` 以上帳目頁多一欄右側面板（淨額、成員餘額、建議結清）。
   手機上點一筆支出開 `ExpenseDetailModal`，編輯與刪除在它底部；電腦上滑鼠移過那一列才出現。
   手機的底部面板都能往下拉收起（`components/useSheetDrag.ts`）：明細從內容區捲到頂再拉也行，

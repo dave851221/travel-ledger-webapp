@@ -100,7 +100,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
 export const SideNav: React.FC<ChromeProps> = ({
   trip, tabs, active, onChange, trashCount, onBack, onOpenSettings,
 }) => {
-  const items = [...tabs, TAB_ALBUM, TAB_SIBLINGS];
+  const items = [...tabs, TAB_SIBLINGS];
   const navBtn = (on: boolean) =>
     `w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors ${
       on ? 'bg-accent/15 text-accent font-bold' : 'text-[#c9d0de] hover:bg-white/5 hover:text-white'

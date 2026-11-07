@@ -12,7 +12,7 @@ interface Props {
 
 /**
  * 手機底部導覽（分離式）：分頁收在浮起的膠囊裡，新增按鈕獨立在右側。
- * 沒有行程頁時膠囊只剩三格，新增按鈕的位置不變。
+ * 膠囊依序是帳目、統計、結清、行程（有行程頁才有）、相簿；沒有行程頁時少一格，新增按鈕的位置不變。
  */
 const BottomNav: React.FC<Props> = ({ tabs, active, onChange, onAdd }) => (
   <nav
