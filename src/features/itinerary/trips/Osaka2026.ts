@@ -144,8 +144,8 @@ export default defineItinerary({
       ],
     },
     {
-      date: '2026-11-16', city: '京都', title: '貴船神社・下鴨神社・鴨川', stay: 'kyoto',
-      route: [KYOTO_HOTEL, [35.1221, 135.7629], [35.0391, 135.7727], [35.00133, 135.76696], [35.0037, 135.7690], [35.0040, 135.77462], [35.0040, 135.7717], [35.00946, 135.77063], KYOTO_HOTEL],
+      date: '2026-11-16', city: '京都', title: '貴船神社・下鴨神社・河原町', stay: 'kyoto',
+      route: [KYOTO_HOTEL, [35.1221, 135.7629], [35.0391, 135.7727], [35.00133, 135.76696], [35.0037, 135.7690], [35.0040, 135.77462], [35.00946, 135.77063], KYOTO_HOTEL],
       items: [
         {
           slot: '早上', kind: 'sight', title: '貴船神社 → 下鴨神社（賀茂御祖神社）',
@@ -159,11 +159,10 @@ export default defineItinerary({
           places: [{ name: '豬一拉麵', href: 'https://maps.app.goo.gl/vYGfYbx2tbbdWvyD6' }],
         },
         {
-          slot: '下午', kind: 'walk', title: '河原町 → Ousu之里 衹園本店 → 鴨川',
+          slot: '下午', kind: 'walk', title: '河原町 → Ousu之里 衹園本店',
           places: [
             { name: '河原町', query: '河原町 京都' },
             { name: 'Ousu之里 衹園本店', href: 'https://maps.app.goo.gl/F3jqQLNjzk5isDPb7' },
-            { name: '鴨川', href: 'https://maps.app.goo.gl/bjWGofV3mRitE5t39' },
           ],
         },
         {
