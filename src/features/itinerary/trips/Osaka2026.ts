@@ -144,14 +144,14 @@ export default defineItinerary({
       ],
     },
     {
-      date: '2026-11-16', city: '京都', title: '下鴨神社・金閣寺・鴨川', stay: 'kyoto',
-      route: [KYOTO_HOTEL, [35.0391, 135.7727], [35.0394, 135.7292], [35.00133, 135.76696], [35.0037, 135.7690], [35.0040, 135.77462], [35.0040, 135.7717], [35.00946, 135.77063], KYOTO_HOTEL],
+      date: '2026-11-16', city: '京都', title: '貴船神社・下鴨神社・鴨川', stay: 'kyoto',
+      route: [KYOTO_HOTEL, [35.1221, 135.7629], [35.0391, 135.7727], [35.00133, 135.76696], [35.0037, 135.7690], [35.0040, 135.77462], [35.0040, 135.7717], [35.00946, 135.77063], KYOTO_HOTEL],
       items: [
         {
-          slot: '早上', kind: 'sight', title: '下鴨神社（賀茂御祖神社） → 金閣寺',
+          slot: '早上', kind: 'sight', title: '貴船神社 → 下鴨神社（賀茂御祖神社）',
           places: [
+            { name: '貴船神社', query: '貴船神社 京都' },
             { name: '下鴨神社（賀茂御祖神社）', href: 'https://maps.app.goo.gl/rzCK1TSHp7kfS2Fw8' },
-            { name: '金閣寺', href: 'https://maps.app.goo.gl/SV5ZpxeHYqGJnCHW7' },
           ],
         },
         {
