@@ -68,7 +68,7 @@ export default defineItinerary({
     { date: '2026-11-19', category: '景點', item: '環球影城門票 快通', status: 'paid' },
     { date: '2026-11-20', category: '景點', item: '神戶動物王國', status: 'pending' },
     { date: '2026-11-20', time: '20:00', category: '大吃大喝', item: '神戶牛燒肉（Kobe Beef Yakiniku WASSIA）', status: 'booked' },
-    { date: '2026-11-22', time: '09:00', category: '交通', item: '[南海電鐵特急 Rapi:t 車票（難波到關西機場）](https://hop2.fun/ZRfyvGWu)', status: 'paid' },
+    { date: '2026-11-22', time: '09:00', category: '交通', item: '[南海電鐵特急 Rapi:t 車票（難波到關西機場）](https://hop2.fun/ZRfyvGWu)', status: 'booked' },
   ],
 
   // 沿用舊行程頁的 key，大家已經勾過的項目不會消失
@@ -295,7 +295,7 @@ export default defineItinerary({
         { slot: '早上', kind: 'hotel', title: '退房', notes: ['最晚 11:00 退房'] },
         {
           time: '09:00–09:38', kind: 'train', title: '南海電鐵特急 Rapi:t α 13 號：難波 → 關西機場',
-          booking: { label: 'Rapi:t 車票', status: 'paid', href: 'https://hop2.fun/ZRfyvGWu' },
+          booking: { label: 'Rapi:t 車票', status: 'booked', href: 'https://hop2.fun/ZRfyvGWu' },
           notes: [
             'Rapi:t α 13 號：難波 09:00 出發 → 關西機場 09:38 抵達',
             '大人 4 名・一般席・3 號車廂・座位 03、04、07、08',
