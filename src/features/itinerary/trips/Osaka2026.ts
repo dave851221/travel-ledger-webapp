@@ -74,7 +74,7 @@ export default defineItinerary({
   // 沿用舊行程頁的 key，大家已經勾過的項目不會消失
   checklist: {
     storageKey: 'itinerary_checklist_osaka2026',
-    items: ['護照', '信用卡', '外幣', '入境資料（Visit Japan）', '保險', 'E-SIM', '充電線', '藥', '環保袋', '牙刷', '口罩', '行動電源', '預訂機場接送', '起飛 48 小時前線上報到及選位'],
+    items: ['護照', '信用卡', '外幣', '入境資料（Visit Japan）', '保險', 'E-SIM', '充電線', '藥', '環保袋', '牙刷', '口罩', '行動電源', '雨傘', '預訂機場接送', '起飛 48 小時前線上報到及選位'],
   },
 
   notes: [
