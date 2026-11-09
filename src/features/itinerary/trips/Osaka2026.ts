@@ -150,7 +150,7 @@ export default defineItinerary({
         {
           slot: '早上', kind: 'sight', title: '貴船神社 → 下鴨神社（賀茂御祖神社）',
           places: [
-            { name: '貴船神社', query: '貴船神社 京都' },
+            { name: '貴船神社', href: 'https://maps.app.goo.gl/AkGicXP9cfaV3feZ9' },
             { name: '下鴨神社（賀茂御祖神社）', href: 'https://maps.app.goo.gl/rzCK1TSHp7kfS2Fw8' },
           ],
         },
