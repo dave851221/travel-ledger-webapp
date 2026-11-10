@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertTriangle, ArrowDown, ArrowRight, Check, HandCoins, Trash2 } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import type { Expense } from '../types';
@@ -21,7 +21,7 @@ import { useTrash } from '../hooks/useTrash';
 import { useTripAuthGuard } from '../hooks/useTripAuthGuard';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import { insertExpenseOrQueue, withPending } from '../utils/offlineQueue';
-import { primaryTabs, type TabType } from '../features/dashboard/tabs';
+import { isTabType, primaryTabs, type TabType } from '../features/dashboard/tabs';
 import BottomNav from '../features/dashboard/BottomNav';
 import { DesktopHeader, MobileTopBar, SideNav } from '../features/dashboard/TripChrome';
 import BalanceTicket from '../features/dashboard/BalanceTicket';
@@ -54,7 +54,14 @@ const Dashboard: React.FC = () => {
     trip, expenses, deletedExpenses, siblingTrips, loading,
     refetchTrip, refetchExpenses, refetchDeleted,
   } = useTripData(authed ? id : undefined, useCallback(() => navigate('/'), [navigate]));
-  const [activeTab, setActiveTab] = useState<TabType>(() => hasItinerary(id || '') ? 'itinerary' : 'ledger');
+  // 目前的分頁記在網址（?tab=ledger）：重新整理、或 PWA 自動更新重新載入之後還留在同一頁。
+  // 用 replace 而不是 push —— 分頁不疊進瀏覽紀錄，按返回仍然是回到所有旅程。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const defaultTab: TabType = hasItinerary(id || '') ? 'itinerary' : 'ledger';
+  const tabParam = searchParams.get('tab');
+  const activeTab: TabType = isTabType(tabParam) && (tabParam !== 'itinerary' || hasItinerary(id || ''))
+    ? tabParam
+    : defaultTab;
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -75,10 +82,12 @@ const Dashboard: React.FC = () => {
   const closeWelcome = () => { setWelcomeRequested(false); setWelcomeDismissed(true); };
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
-  const { toast, showToast } = useToast();
+  const { toast, showToast, dismissToast } = useToast();
 
   // Delete Confirmation State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  // The detail panel the delete was started from, so cancelling goes back to it
+  const [deleteCameFrom, setDeleteCameFrom] = useState<Expense | null>(null);
   const [permDeleteConfirmId, setPermDeleteConfirmId] = useState<string | null>(null);
   const [isEmptyTrashConfirmOpen, setIsEmptyTrashConfirmOpen] = useState(false);
 
@@ -91,6 +100,14 @@ const Dashboard: React.FC = () => {
 
   // Settlement Confirmation State
   const [settleConfirm, setSettleConfirm] = useState<SettleRequest | null>(null);
+  // The confirmation was reached from the manual form: cancelling goes back to it, still filled in
+  const [settleFromManual, setSettleFromManual] = useState(false);
+  const requestSettle = (s: SettleRequest) => { setSettleFromManual(false); setSettleConfirm(s); };
+  const cancelSettle = () => {
+    setSettleConfirm(null);
+    if (settleFromManual) setIsManualSettleOpen(true);
+    setSettleFromManual(false);
+  };
 
   // 記住的身分已經不是成員了（被移除）就清掉，下次不會再讀到
   useEffect(() => {
@@ -105,9 +122,9 @@ const Dashboard: React.FC = () => {
 
   // 切換分頁時回到頂端，否則手機上會停在上一頁捲到的位置
   const changeTab = useCallback((tab: TabType) => {
-    setActiveTab(tab);
+    setSearchParams({ tab }, { replace: true });
     window.scrollTo({ top: 0 });
-  }, []);
+  }, [setSearchParams]);
 
   const { softDelete, restore, permanentlyDelete, emptyTrash } = useTrash(id, showToast);
 
@@ -121,10 +138,20 @@ const Dashboard: React.FC = () => {
 
   const handleDeleteExpense = async () => {
     if (!deleteConfirmId) return;
-    if (await softDelete(deleteConfirmId)) {
+    const deletedId = deleteConfirmId;
+    if (await softDelete(deletedId)) {
       setDeleteConfirmId(null);
+      setDeleteCameFrom(null);
       refetchLedgerAndTrash();
+      // 刪錯了可以直接按回來，不必進垃圾桶找
+      showToast('紀錄已移至垃圾桶', 'success', { label: '還原', onClick: () => { void handleRestoreExpense(deletedId); } });
     }
+  };
+
+  const cancelDelete = () => {
+    setDeleteConfirmId(null);
+    if (deleteCameFrom) setDetailExpense(deleteCameFrom);
+    setDeleteCameFrom(null);
   };
 
   const handleRestoreExpense = async (expenseId: string) => {
@@ -191,6 +218,7 @@ const Dashboard: React.FC = () => {
 
   const requestDelete = (exp: Expense) => {
     if (blockPending(exp)) return;
+    setDeleteCameFrom(detailExpense);
     setDetailExpense(null);
     setDeleteConfirmId(exp.id);
   };
@@ -237,6 +265,7 @@ const Dashboard: React.FC = () => {
       amount: parsedAmount,
       cur: manualSettleCurrency
     });
+    setSettleFromManual(true);
     setIsManualSettleOpen(false);
   };
 
@@ -266,7 +295,7 @@ const Dashboard: React.FC = () => {
         payer_data: { [from]: amount }, split_data: { [to]: amount }, is_settlement: true,
         adjustment_member: null, photo_urls: [],
       });
-      setSettleConfirm(null); refetchExpenses();
+      setSettleConfirm(null); setSettleFromManual(false); refetchExpenses();
       showToast(queued ? '目前離線，結清已先存在手機，恢復連線後會自動上傳' : '已記錄結清');
     } catch (err) { showToast('結清失敗：' + (err instanceof Error ? err.message : String(err)), 'error'); }
   };
@@ -346,7 +375,8 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'ledger' && (
+          {/* 帳目一直掛著、只是藏起來：去別的分頁再回來，搜尋、篩選、收合的日期都還在 */}
+          <div hidden={activeTab !== 'ledger'}>
             <LedgerTab
               trip={trip}
               expenses={allExpenses}
@@ -361,7 +391,7 @@ const Dashboard: React.FC = () => {
               showToast={showToast}
               summary={<div className="xl:hidden">{ticket('var(--app-bg)')}</div>}
             />
-          )}
+          </div>
 
           {activeTab === 'stats' && (
             <Suspense fallback={<TabLoading />}>
@@ -375,7 +405,7 @@ const Dashboard: React.FC = () => {
               expenses={allExpenses}
               stats={stats}
               currentUser={currentUser}
-              onRecord={setSettleConfirm}
+              onRecord={requestSettle}
               onManual={handleOpenManualSettle}
               onEdit={handleEditExpense}
               onDelete={requestDelete}
@@ -418,7 +448,7 @@ const Dashboard: React.FC = () => {
           stats={stats}
           currentUser={currentUser}
           ticket={ticket('var(--app-sunk)')}
-          onRecordSettlement={readOnly ? undefined : setSettleConfirm}
+          onRecordSettlement={readOnly ? undefined : requestSettle}
           onOpenSettlement={() => changeTab('settlement')}
         />
       )}
@@ -439,7 +469,7 @@ const Dashboard: React.FC = () => {
       {settleConfirm && (
         <ConfirmDialog
           isOpen={!!settleConfirm}
-          onClose={() => setSettleConfirm(null)}
+          onClose={cancelSettle}
           onConfirm={confirmSettleUp}
           title="記錄結清"
           icon={<HandCoins />}
@@ -461,7 +491,7 @@ const Dashboard: React.FC = () => {
 
       {/* Manual Settlement Modal */}
       {isManualSettleOpen && (
-        <Modal isOpen={isManualSettleOpen} onClose={() => setIsManualSettleOpen(false)} title="手動新增結清">
+        <Modal isOpen={isManualSettleOpen} onClose={() => setIsManualSettleOpen(false)} title="手動新增結清" dirty={manualSettleAmount !== ''}>
           <div className="space-y-4">
             <div>
               <label htmlFor="settle-from" className={ui.label}>誰付錢</label>
@@ -520,7 +550,7 @@ const Dashboard: React.FC = () => {
       {deleteConfirmId && (
         <ConfirmDialog
           isOpen={!!deleteConfirmId}
-          onClose={() => setDeleteConfirmId(null)}
+          onClose={cancelDelete}
           onConfirm={handleDeleteExpense}
           title="刪除支出"
           icon={<Trash2 />}
@@ -578,7 +608,7 @@ const Dashboard: React.FC = () => {
         />
       )}
 
-      <Toast toast={toast} />
+      <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 };

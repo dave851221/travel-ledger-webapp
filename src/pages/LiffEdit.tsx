@@ -237,6 +237,7 @@ const LiffEdit: React.FC = () => {
           onSuccess={handleSuccess}
           showToast={showToast}
           editData={initialData}
+          standalone
         />
       )}
     </div>

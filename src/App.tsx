@@ -1,5 +1,5 @@
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from 'react';
 import Home from './pages/Home';
 import TripPortal from './pages/TripPortal';
 import { WifiOff, Wifi, Loader2 } from 'lucide-react';
@@ -35,6 +35,26 @@ function App() {
     },
   });
 
+  // 離線提示條固定在最上面，但不能蓋住頁面自己的頂列（返回鍵、選單都在那裡）。
+  // 把它的高度寫進 --app-top-offset：下面留一塊同高的空位，黏在頂端的元素（index.css 的
+  // .top-offset／.h-below-offset、Toast）也跟著往下讓開。
+  const offlineBarRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const bar = offlineBarRef.current;
+    if (!isOffline || !bar) {
+      root.style.removeProperty('--app-top-offset');
+      return;
+    }
+    const measure = () => root.style.setProperty('--app-top-offset', `${bar.offsetHeight}px`);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      root.style.removeProperty('--app-top-offset');
+    };
+  }, [isOffline]);
+
   useEffect(() => {
     const handleOnline = () => {
       setIsOffline(false);
@@ -57,10 +77,13 @@ function App() {
       <div className="relative min-h-screen">
         {/* Offline Notification Bar */}
         {isOffline && (
-          <div className="fixed top-0 left-0 right-0 z-[100] bg-navy text-navy-fg pt-[max(8px,env(safe-area-inset-top))] pb-2 px-4 flex items-center justify-center gap-2 text-xs">
-            <WifiOff size={14} className="text-accent" />
-            目前離線：新增的支出會先存在手機，恢復連線後自動上傳
-          </div>
+          <>
+            <div ref={offlineBarRef} role="status" className="fixed top-0 left-0 right-0 z-[100] bg-navy text-navy-fg pt-[max(8px,env(safe-area-inset-top))] pb-2 px-4 flex items-center justify-center gap-2 text-xs">
+              <WifiOff size={14} className="text-accent shrink-0" />
+              目前離線：新增的支出會先存在手機，恢復連線後自動上傳
+            </div>
+            <div aria-hidden style={{ height: 'var(--app-top-offset, 0px)' }} />
+          </>
         )}
 
         {/* Back Online Toast */}

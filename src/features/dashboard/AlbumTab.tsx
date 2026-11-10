@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { CalendarDays, ChevronLeft, ChevronRight, Images, LayoutGrid, Receipt, ShoppingBag, X, ZoomIn, ZoomOut } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { CalendarDays, Images, LayoutGrid, Receipt, ShoppingBag, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import { albumCounts, albumDays, type AlbumPhoto, type PhotoKind } from '../../utils/album';
 import { photoUrl } from '../../utils/storage';
 import { formatMoney } from '../../utils/money';
 import { dateParts } from '../itinerary/plan';
 import { useGridZoom } from './useGridZoom';
+import PhotoLightbox from '../../components/PhotoLightbox';
 
 interface Props {
   trip: Trip;
@@ -71,6 +71,7 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
   const days = useMemo(() => albumDays(expenses, kind), [expenses, kind]);
   const counts = useMemo(() => albumCounts(expenses), [expenses]);
   const flat = useMemo(() => days.flatMap(d => d.photos), [days]);
+  const flatUrls = useMemo(() => flat.map(p => photoUrl(p.path)), [flat]);
   // The lightbox indexes into the flat list, so each thumbnail needs its position in it.
   const offsets = useMemo(
     () => days.map((_, i) => days.slice(0, i).reduce<number>((n, d) => n + d.photos.length, 0)),
@@ -195,13 +196,13 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
       )}
 
       {current !== null && (
-        <Lightbox
-          trip={trip}
-          photos={flat}
+        <PhotoLightbox
+          photos={flatUrls}
           index={current}
           onIndex={setOpenAt}
           onClose={() => setOpenAt(null)}
-          onOpenExpense={exp => { setOpenAt(null); onOpenExpense(exp); }}
+          alt={flat[current].expense.description}
+          footer={<LightboxCaption trip={trip} expense={flat[current].expense} onOpenExpense={exp => { setOpenAt(null); onOpenExpense(exp); }} />}
         />
       )}
     </div>
@@ -230,120 +231,25 @@ const AlbumThumb: React.FC<{ photo: AlbumPhoto; compact?: boolean; onOpen: () =>
   </button>
 );
 
-interface LightboxProps {
-  trip: Trip;
-  photos: AlbumPhoto[];
-  index: number;
-  onIndex: (i: number) => void;
-  onClose: () => void;
-  onOpenExpense: (exp: Expense) => void;
-}
-
-/** 全螢幕看照片：左右滑或方向鍵換張、點照片放大、往下滑關閉。 */
-const Lightbox: React.FC<LightboxProps> = ({ trip, photos, index, onIndex, onClose, onOpenExpense }) => {
-  const [zoomed, setZoomed] = useState(false);
-  const touch = useRef<{ x: number; y: number } | null>(null);
-  const photo = photos[index];
-  const many = photos.length > 1;
-
-  const go = useCallback((step: number) => {
-    setZoomed(false);
-    onIndex((index + step + photos.length) % photos.length);
-  }, [index, photos.length, onIndex]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft' && many) go(-1);
-      else if (e.key === 'ArrowRight' && many) go(1);
-    };
-    document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [go, many, onClose]);
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    if (zoomed || e.touches.length !== 1) { touch.current = null; return; }
-    touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    const start = touch.current;
-    touch.current = null;
-    if (!start) return;
-    const dx = e.changedTouches[0].clientX - start.x;
-    const dy = e.changedTouches[0].clientY - start.y;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) && many) go(dx < 0 ? 1 : -1);
-    else if (dy > 90 && dy > Math.abs(dx)) onClose();
-  };
-
-  const exp = photo.expense;
+/** 放大照片時下方那一行：是哪一筆支出，以及前往明細的按鈕。 */
+const LightboxCaption: React.FC<{ trip: Trip; expense: Expense; onOpenExpense: (exp: Expense) => void }> = ({ trip, expense: exp, onOpenExpense }) => {
   const { md, weekday } = dateParts(exp.date);
-  const navBtn = 'absolute top-1/2 -translate-y-1/2 z-10 hidden sm:flex items-center justify-center w-11 h-11 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white';
-
-  // Portaled to <body> so no ancestor's stacking context can put page content above it
-  return createPortal(
-    <div className="fixed inset-0 z-[80] bg-black flex flex-col anim-fade" role="dialog" aria-modal="true" aria-label="照片">
-      <div className="flex items-center gap-2 px-3 pt-[max(12px,env(safe-area-inset-top))] pb-2 text-white">
-        <span className="num text-sm text-white/70 px-1">{index + 1} / {photos.length}</span>
-        <div className="flex-1" />
-        <button
-          onClick={() => setZoomed(z => !z)}
-          aria-label={zoomed ? '縮小' : '放大'}
-          className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
-        >
-          {zoomed ? <ZoomOut size={19} /> : <ZoomIn size={19} />}
-        </button>
-        <button onClick={onClose} aria-label="關閉" className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20">
-          <X size={20} />
-        </button>
+  return (
+    <div className="mx-auto max-w-xl flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-bold line-clamp-2">{exp.description}</p>
+        <p className="text-xs text-white/65 mt-0.5 truncate">
+          <span className="num">{md}</span>（{weekday}）· {exp.category} ·{' '}
+          <span className="num">{formatMoney(exp.amount, exp.currency, trip.precision_config)}</span>
+        </p>
       </div>
-
-      <div
-        className={`relative flex-1 min-h-0 ${zoomed ? 'overflow-auto' : 'overflow-hidden flex items-center justify-center px-3'}`}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        onClick={e => { if (e.target === e.currentTarget && !zoomed) onClose(); }}
+      <button
+        onClick={() => onOpenExpense(exp)}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-white text-black font-bold px-3.5 py-2 text-sm active:scale-[.98]"
       >
-        {many && !zoomed && (
-          <>
-            <button aria-label="上一張" onClick={() => go(-1)} className={`${navBtn} left-3`}><ChevronLeft size={26} /></button>
-            <button aria-label="下一張" onClick={() => go(1)} className={`${navBtn} right-3`}><ChevronRight size={26} /></button>
-          </>
-        )}
-        <img
-          key={photo.path}
-          src={photoUrl(photo.path)}
-          alt={exp.description}
-          onClick={() => setZoomed(z => !z)}
-          className={zoomed
-            ? 'max-w-none w-[200%] sm:w-auto cursor-zoom-out'
-            : 'max-w-full max-h-full object-contain rounded-lg cursor-zoom-in select-none'}
-        />
-      </div>
-
-      <div className="px-4 pt-3 pb-[max(16px,env(safe-area-inset-bottom))] text-white">
-        <div className="mx-auto max-w-xl flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-bold line-clamp-2">{exp.description}</p>
-            <p className="text-xs text-white/65 mt-0.5 truncate">
-              <span className="num">{md}</span>（{weekday}）· {exp.category} ·{' '}
-              <span className="num">{formatMoney(exp.amount, exp.currency, trip.precision_config)}</span>
-            </p>
-          </div>
-          <button
-            onClick={() => onOpenExpense(exp)}
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-white text-black font-bold px-3.5 py-2 text-sm active:scale-[.98]"
-          >
-            明細
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        明細
+      </button>
+    </div>
   );
 };
 

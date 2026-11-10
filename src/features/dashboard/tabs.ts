@@ -3,6 +3,12 @@ import { ChartPie, Compass, Images, LayoutList, Map, Scale, Trash2 } from 'lucid
 
 export type TabType = 'ledger' | 'stats' | 'settlement' | 'itinerary' | 'album' | 'recycle' | 'siblings';
 
+const TAB_KEYS: readonly TabType[] = ['ledger', 'stats', 'settlement', 'itinerary', 'album', 'recycle', 'siblings'];
+
+/** Guards a value read from the URL (?tab=…) */
+export const isTabType = (value: string | null): value is TabType =>
+  value !== null && (TAB_KEYS as readonly string[]).includes(value);
+
 export interface TabDef {
   key: TabType;
   label: string;

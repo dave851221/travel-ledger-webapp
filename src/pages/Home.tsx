@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, ChevronRight, ChevronDown, Plane } from 'lucide-react';
+import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, Archive, ChevronRight, ChevronDown, Plane } from 'lucide-react';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -59,7 +59,7 @@ const TripRow: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick 
     </div>
     {trip.is_archived ? (
       <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-ink-2 bg-sunk border border-line rounded-md px-2 py-0.5">
-        <Lock size={10} />已封存
+        <Archive size={10} />已封存
       </span>
     ) : (
       <ChevronRight size={18} className="shrink-0 text-muted" />
@@ -97,6 +97,7 @@ const Home: React.FC = () => {
     if (!supabase) return;
     try {
       setLoading(true);
+      setError(null);
       const { data, error } = await supabase
         .from('trips')
         .select(TRIP_COLUMNS)
@@ -226,7 +227,8 @@ const Home: React.FC = () => {
         {error && (
           <div className={`${ui.errorBox} mb-6`}>
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
-            <span>無法載入旅程：{error}</span>
+            <span className="flex-1 min-w-0">無法載入旅程：{error}</span>
+            <button onClick={fetchTrips} className="shrink-0 font-bold underline">重新載入</button>
           </div>
         )}
 
@@ -303,6 +305,7 @@ const Home: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setCreateError(null); }}
         title="建立新旅程"
+        dirty={[newTrip.name, newTrip.members, newTrip.category, newTrip.access_code].some(v => v.trim() !== '')}
       >
         <form onSubmit={handleCreateTrip} className="space-y-4">
           <div>

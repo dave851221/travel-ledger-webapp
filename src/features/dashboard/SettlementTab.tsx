@@ -102,7 +102,7 @@ const SettlementTab: React.FC<Props> = ({ trip, expenses, stats, currentUser, on
       {perCurrency.length > 0 && (
         <section className="bg-surface border border-line rounded-2xl px-4 sm:px-5 pt-4 pb-1">
           <h3 className="text-[15px] font-bold">想用原幣別結清的話</h3>
-          <p className="text-xs text-muted mt-0.5">每種幣別各自算，不做換算。</p>
+          <p className="text-xs text-muted mt-0.5">和上面的建議轉帳二擇一就好。這裡每種幣別各自算，不做換算。</p>
           {perCurrency.map(({ cur, list }) => (
             <div key={cur} className="mt-3">
               <p className="num text-xs font-bold text-ink-2">{cur}</p>

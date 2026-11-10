@@ -126,6 +126,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setDefaultSplitMembers(trip.default_split_members || []);
       setMemberOrigins([...trip.members]);
       setRatesNote(null);
+      setBaselineSignature(null);
+      setInitTick(t => t + 1);
 
       const rStr: Record<string, string> = {};
       Object.keys(trip.rates).forEach(k => rStr[k] = trip.rates[k].toString());
@@ -171,6 +173,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       fetchKnownCategories();
     }
   }, [isOpen, trip]);
+
+  // 有沒有還沒存的修改：和剛開啟時比（做法同 ExpenseModal）
+  const formSignature = JSON.stringify([
+    name, accessCode, isArchived, members, categories, tripCategory, aiPreference, ratesStr, precisionStr,
+    baseCurrency, timezone, defaultCurrency, defaultCategory, defaultPayer, defaultSplitMembers,
+  ]);
+  const [baselineSignature, setBaselineSignature] = useState<string | null>(null);
+  const [initTick, setInitTick] = useState(0);
+  useEffect(() => {
+    if (initTick > 0 && baselineSignature === null) setBaselineSignature(formSignature);
+  }, [initTick, baselineSignature, formSignature]);
+  const dirty = baselineSignature !== null && baselineSignature !== formSignature;
 
   const handleCopy = () => {
     if (lineBotId) {
@@ -485,7 +499,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const chipToggle = (on: boolean) => `${ui.chip} text-sm px-3.5 ${on ? ui.chipOn : ui.chipOff}`;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="旅程設定" maxWidth="sm:max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="旅程設定" maxWidth="sm:max-w-2xl" dirty={dirty}>
       <div className="-mt-5 -mx-5">
         <div className="sticky -top-5 z-10 bg-surface px-5 pt-4 pb-3 border-b border-line">
           <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-sunk border border-line" role="tablist">

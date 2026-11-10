@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Star, ArrowRight, Pencil, Trash2 } from 'lucide-react';
+import { X, Star, ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import type { Expense, Trip } from '../types';
 import { photoUrl } from '../utils/storage';
 import { formatMoney } from '../utils/money';
@@ -7,6 +7,8 @@ import { CategoryTile } from '../features/dashboard/ExpenseRow';
 import MemberAvatar from '../features/dashboard/MemberAvatar';
 import { ui } from './ui';
 import { useSheetDrag } from './useSheetDrag';
+import { useBackClose } from '../hooks/useBackClose';
+import PhotoLightbox from './PhotoLightbox';
 import Decimal from 'decimal.js';
 
 interface Props {
@@ -25,11 +27,12 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null
   const [lightboxOpen, setLightboxOpen] = useState(false);
   // 明細只能看不能改，從內容區捲到頂端再往下拉也可以收起
   const { sheetRef, handleRef, scrollRef } = useSheetDrag(onClose);
+  useBackClose(true, onClose);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (lightboxOpen) setLightboxOpen(false); else onClose();
+      // The photo viewer handles its own Esc
+      if (e.key === 'Escape' && !lightboxOpen) onClose();
     };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
@@ -73,35 +76,13 @@ const ExpenseDetailModal: React.FC<Props> = ({ expense, trip, currentUser = null
   return (
     <>
       {lightboxOpen && photos.length > 0 && (
-        <div className="fixed inset-0 z-[80] bg-black/95 flex items-center justify-center p-4 anim-fade" onClick={() => setLightboxOpen(false)}>
-          <button aria-label="關閉照片" className="absolute top-[max(16px,env(safe-area-inset-top))] right-4 text-white bg-white/10 p-2 rounded-full z-10">
-            <X size={22} />
-          </button>
-          {photos.length > 1 && (
-            <>
-              <button
-                aria-label="上一張"
-                className="absolute left-2 top-1/2 -translate-y-1/2 text-white/60 hover:text-white p-3 z-10"
-                onClick={e => { e.stopPropagation(); setPhotoIdx(i => (i > 0 ? i - 1 : photos.length - 1)); }}
-              >
-                <ChevronLeft size={40} />
-              </button>
-              <button
-                aria-label="下一張"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-white/60 hover:text-white p-3 z-10"
-                onClick={e => { e.stopPropagation(); setPhotoIdx(i => (i < photos.length - 1 ? i + 1 : 0)); }}
-              >
-                <ChevronRight size={40} />
-              </button>
-            </>
-          )}
-          <img key={photoIdx} src={photos[photoIdx]} className="max-w-full max-h-[88vh] object-contain rounded-xl" alt={`照片 ${photoIdx + 1}`} onClick={e => e.stopPropagation()} />
-          {photos.length > 1 && (
-            <div className="absolute bottom-[max(20px,env(safe-area-inset-bottom))] flex gap-1.5">
-              {photos.map((_, i) => <span key={i} className={`w-1.5 h-1.5 rounded-full ${i === photoIdx ? 'bg-white' : 'bg-white/40'}`} />)}
-            </div>
-          )}
-        </div>
+        <PhotoLightbox
+          photos={photos}
+          index={Math.min(photoIdx, photos.length - 1)}
+          onIndex={setPhotoIdx}
+          onClose={() => setLightboxOpen(false)}
+          alt={expense.description}
+        />
       )}
 
       <div className="fixed inset-0 z-[70] bg-scrim flex items-end sm:items-center justify-center sm:p-4 anim-fade" onClick={onClose}>

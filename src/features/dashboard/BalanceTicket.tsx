@@ -32,8 +32,9 @@ const BalanceTicket: React.FC<Props> = ({ trip, stats, currentUser, onSettle, on
 
   return (
     <section className="bg-navy text-navy-fg rounded-2xl" aria-label="我的帳">
-      <div className="px-[18px] pt-4 pb-3.5 flex items-end justify-between gap-3">
-        <div className="min-w-0">
+      {/* flex-wrap：金額放不下時按鈕換到下一行，而不是把金額截成「+NT$34,2…」（右側欄只有 320px 寬） */}
+      <div className="px-[18px] pt-4 pb-3.5 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0 max-w-full">
           <p className="text-xs text-navy-sub">{currentUser ? '我的淨額' : '全團支出'}</p>
           <p className="num text-[30px] leading-tight font-extrabold tracking-tight text-accent truncate">
             {currentUser ? netText : formatMoney(stats.grandBase.total, base, prec)}
@@ -43,7 +44,7 @@ const BalanceTicket: React.FC<Props> = ({ trip, stats, currentUser, onSettle, on
         {currentUser && !settled && onSettle && (
           <button
             onClick={onSettle}
-            className="shrink-0 inline-flex items-center gap-0.5 rounded-full bg-accent text-on-accent text-xs font-bold pl-3 pr-2 py-1.5 hover:brightness-105 transition"
+            className="shrink-0 ml-auto inline-flex items-center gap-0.5 rounded-full bg-accent text-on-accent text-xs font-bold pl-3 pr-2 py-1.5 hover:brightness-105 transition"
           >
             去結清<ChevronRight size={14} strokeWidth={2.4} />
           </button>
@@ -51,7 +52,7 @@ const BalanceTicket: React.FC<Props> = ({ trip, stats, currentUser, onSettle, on
         {!currentUser && onPickUser && (
           <button
             onClick={onPickUser}
-            className="shrink-0 rounded-full bg-accent text-on-accent text-xs font-bold px-3 py-1.5 hover:brightness-105 transition"
+            className="shrink-0 ml-auto rounded-full bg-accent text-on-accent text-xs font-bold px-3 py-1.5 hover:brightness-105 transition"
           >
             選擇身分
           </button>

@@ -217,7 +217,7 @@ const LedgerTab: React.FC<Props> = ({
               <button
                 onClick={() => setCollapsedDates(prev => ({ ...prev, [date]: !prev[date] }))}
                 aria-expanded={!collapsed}
-                className="w-full flex items-baseline gap-2 px-1 pb-1.5 lg:px-4 lg:py-2 lg:bg-sunk lg:border-y lg:border-line text-xs text-muted text-left"
+                className="w-full flex items-baseline gap-2 px-1 pt-2.5 -mt-2.5 pb-1.5 lg:mt-0 lg:px-4 lg:py-2 lg:bg-sunk lg:border-y lg:border-line text-xs text-muted text-left"
               >
                 <ChevronDown size={14} className={`self-center shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
                 <b className="num text-[13px] text-ink font-bold">{md} 週{weekday}</b>

@@ -48,8 +48,9 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
   const [moreOpen, setMoreOpen] = useState(false);
   return (
     <header
-      className="md:hidden sticky top-0 z-30 bg-canvas/90 backdrop-blur"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      className="md:hidden sticky top-offset z-30 bg-canvas/90 backdrop-blur"
+      // The offline bar already covers the notch area when it is showing
+      style={{ paddingTop: 'max(0px, calc(env(safe-area-inset-top) - var(--app-top-offset, 0px)))' }}
     >
       <div className="flex items-center gap-1.5 px-2.5 h-14">
         <button onClick={onBack} aria-label="所有旅程" className={ui.iconBtn}><ChevronLeft size={21} /></button>
@@ -106,7 +107,7 @@ export const SideNav: React.FC<ChromeProps> = ({
       on ? 'bg-accent/15 text-accent font-bold' : 'text-[#c9d0de] hover:bg-white/5 hover:text-white'
     }`;
   return (
-    <aside className="hidden md:flex flex-col gap-1 w-[232px] shrink-0 bg-side text-[#c9d0de] px-3.5 py-5 sticky top-0 h-dvh">
+    <aside className="hidden md:flex flex-col gap-1 w-[232px] shrink-0 bg-side text-[#c9d0de] px-3.5 py-5 sticky top-offset h-below-offset">
       <button onClick={onBack} className="flex items-center gap-2.5 px-1.5 pb-4 text-white font-bold text-base text-left">
         <BrandMark inverted />旅遊小本本
       </button>

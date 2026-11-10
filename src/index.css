@@ -197,6 +197,13 @@ select,
   .it-theme-alpine { --t-accent: #86c99a; --t-soft: #18291e; --t-on: #0c1a11; --t-cover: linear-gradient(160deg, #13251a 0%, #24492f 60%, #4f7a55 100%); }
 }
 
+/*
+ * --app-top-offset is the height of the offline bar (set in App.tsx, 0 when online).
+ * Anything that sticks to the top of the viewport uses these so the bar never covers it.
+ */
+.top-offset { top: var(--app-top-offset, 0px); }
+.h-below-offset { height: calc(100dvh - var(--app-top-offset, 0px)); }
+
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 

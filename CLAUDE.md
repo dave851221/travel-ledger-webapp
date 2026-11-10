@@ -83,6 +83,14 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   手機的底部面板都能往下拉收起（`components/useSheetDrag.ts`）：明細從內容區捲到頂再拉也行，
   `Modal`（多半是表單）只認把手與標題列，避免半填好的表單被拉掉。
   觸控裝置上整頁關掉長按選字（`index.css`，iPhone 會跳放大鏡與拷貝選單），輸入框例外。
+  **返回鍵先關面板**（`hooks/useBackClose.ts`）：`Modal`、`ExpenseDetailModal`、`PhotoLightbox` 開著時各占一筆同網址的 history，
+  按返回（Android 返回鍵、iPhone 邊緣右滑）只關最上面那一層，不會跳回首頁。所有面板共用一份狀態、延後對帳，
+  新的全螢幕面板請用這支 hook，**不要自己 pushState／history.back()**（一關一開會互相打架）。LIFF 的表單傳 `standalone` 不參與。
+  **表單防誤關**：`Modal` 的 `dirty` 為 true 時，點背景、Esc、返回會先問「要放棄嗎」；✕、往下拉、取消鍵照舊直接關。
+  `ExpenseModal`／`SettingsModal` 用「開啟時的欄位快照」判斷有沒有改過（`formSignature`），加新欄位時記得放進去。
+  **分頁記在網址**（`?tab=ledger`，`replace` 不疊紀錄），重新整理或 PWA 自動更新後留在同一頁；帳目分頁切走時只是 `hidden`，篩選條件會留著。
+  **離線提示條**的高度寫在 `--app-top-offset`（`App.tsx`），黏在頂端的元素用 `index.css` 的 `.top-offset`／`.h-below-offset` 讓開，不要再寫 `top-0`。
+  看照片一律用 `components/PhotoLightbox.tsx`（相簿與明細共用）。Toast 可帶一顆按鈕（刪除後的「還原」），錯誤與長訊息停 5 秒、點一下收起。
   **載入**：`Dashboard`、兩個 LIFF 頁、統計分頁（recharts）、行程分頁都是 `React.lazy`，首頁不必先下載它們。
   `vite.config.ts` 的 `manualChunks` 比對**套件目錄**，不要改回 `id.includes('react')`（會把 lucide-react、react-redux 拉進首頁）。
   **「我是誰」**（`currentUser`）由 `localStorage` 的 `me_{id}` 推導、只認還在成員清單裡的名字，不另外存 state。

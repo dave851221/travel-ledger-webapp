@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Save,
   GripVertical,
   Star,
@@ -36,9 +38,11 @@ interface ExpenseModalProps {
   onSuccess: () => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   editData?: Expense | null; // Pass this to enter Edit Mode
+  /** The form is the whole page (LIFF): closing it leaves the page, so back and the discard question stay out of it */
+  standalone?: boolean;
 }
 
-const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, currentUser, onSuccess, showToast, editData }) => {
+const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, currentUser, onSuccess, showToast, editData, standalone = false }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,6 +72,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [photoList, setPhotoList] = useState<PhotoEntry[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
+  // Photos being compressed right now; the add tile shows a spinner and saving waits for them
+  const [compressing, setCompressing] = useState(false);
 
   const precision = getCurrencyPrecision(currency, trip.precision_config);
   const numAmount = useMemo(() => parseFloat(amount) || 0, [amount]);
@@ -153,8 +159,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     }
     if (initializedFor.current && initializedFor.current.editData === editData) return;
     initializedFor.current = { editData };
+    setBaselineSignature(null);
+    setInitTick(t => t + 1);
     setError(null);
     setLoading(false);
+    setCompressing(false);
     if (editData) {
       // --- Edit Mode ---
       // LINE 的照片記帳草稿還沒有金額（以 0 占位）：金額欄留空讓人直接輸入，
@@ -233,6 +242,23 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       setAdjustmentMember(adjMember);
     }
   }, [isOpen, editData, trip, currentUser]);
+
+  // 「有沒有還沒存的內容」：拿使用者會動到的欄位和剛開啟時比。
+  // 自動算出來的分帳金額不算，不然一打開就會被當成改過。
+  const formSignature = JSON.stringify([
+    description, amount, currency, date, category, adjustmentMember,
+    [...payerActive].sort(), [...splitActive].sort(),
+    [...payerLocked].sort().map(m => [m, payerData[m]]),
+    [...splitLocked].sort().map(m => [m, splitData[m]]),
+    photoList.map(p => [p.key, p.receipt]),
+  ]);
+  // 初始值是在 effect 裡灌的，要等下一次 render 才讀得到，所以用 initTick 晚一拍記下基準
+  const [baselineSignature, setBaselineSignature] = useState<string | null>(null);
+  const [initTick, setInitTick] = useState(0);
+  useEffect(() => {
+    if (initTick > 0 && baselineSignature === null) setBaselineSignature(formSignature);
+  }, [initTick, baselineSignature, formSignature]);
+  const dirty = !standalone && baselineSignature !== null && baselineSignature !== formSignature;
 
   const payerSummary = useMemo(() => {
     const names = [...payerActive];
@@ -349,19 +375,42 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     // 清掉 input 的值：否則刪掉一張照片後再選同一張，onChange 不會觸發
     e.target.value = '';
     if (files.length === 0) return;
-    setLoading(true);
+    setCompressing(true);
+    setError(null);
     const newEntries: PhotoEntry[] = [];
+    let failed = 0;
     for (const file of files) {
       try {
         const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true };
         const compressed = await imageCompression(file, options);
         // 自己上傳的照片預設是商品照片；是收據的話點縮圖下方切換
         newEntries.push({ kind: 'new', key: `new-${crypto.randomUUID()}`, file: compressed, preview: URL.createObjectURL(compressed), receipt: false });
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        console.error(err);
+        failed++;
+      }
     }
     setPhotoList(prev => [...newEntries, ...prev]);
-    setLoading(false);
+    setCompressing(false);
+    // 以前失敗只寫進 console，使用者會以為照片有加上
+    if (failed > 0) {
+      setError(failed === files.length
+        ? '照片無法加入，請換一張或再試一次'
+        : `有 ${failed} 張照片無法加入，其餘 ${newEntries.length} 張已經加上`);
+    }
   };
+
+  const movePhoto = (from: number, step: number) => {
+    setPhotoList(prev => {
+      const to = from + step;
+      if (to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
+  };
+  // Touch screens only; with a mouse the thumbnails are dragged instead
+  const photoArrow = 'absolute top-1/2 -translate-y-1/2 z-10 p-1 hidden [@media(hover:none)]:flex';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -572,7 +621,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                   disabled={!on}
                   aria-label={`由 ${member} 吸收尾差`}
                   aria-pressed={adjustmentMember === member}
-                  className={`p-1 shrink-0 transition-colors disabled:opacity-30 ${adjustmentMember === member ? 'text-accent' : 'text-line hover:text-muted'}`}
+                  className={`p-2.5 -m-1.5 shrink-0 transition-colors disabled:opacity-30 ${adjustmentMember === member ? 'text-accent' : 'text-line hover:text-muted'}`}
                 >
                   <Star size={15} className={adjustmentMember === member ? 'fill-accent' : ''} />
                 </button>
@@ -609,7 +658,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                 disabled={!on}
                 aria-label={isLocked ? `解除鎖定 ${member} 的金額` : `鎖定 ${member} 的金額`}
                 aria-pressed={isLocked}
-                className={`p-1.5 shrink-0 transition-colors disabled:opacity-30 ${isLocked ? 'text-ink' : 'text-muted/60 hover:text-muted'}`}
+                className={`p-2.5 -m-1 shrink-0 transition-colors disabled:opacity-30 ${isLocked ? 'text-ink' : 'text-muted/60 hover:text-muted'}`}
               >
                 {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
               </button>
@@ -623,14 +672,14 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const sectionHeader = (title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
     <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
       <span className="text-sm font-bold text-ink shrink-0">{title}</span>
-      <ValidationBadge isValid={valid} current={sum} target={numAmount} />
+      {numAmount !== 0 && <ValidationBadge isValid={valid} current={sum} target={numAmount} />}
       {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
       <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
   );
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? '編輯支出' : '新增支出'} maxWidth="sm:max-w-lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? '編輯支出' : '新增支出'} maxWidth="sm:max-w-lg" dirty={dirty} backClose={!standalone}>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="flex gap-2">
           <div className="relative w-[104px] shrink-0">
@@ -646,7 +695,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           </div>
           <input
             required
-            autoFocus
+            autoFocus={!editData?.id}
             type="number"
             step="any"
             inputMode="decimal"
@@ -697,7 +746,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             <span className="text-sm font-bold">照片</span>
             {photoList.length > 0 && <span className="text-xs text-muted">點標籤切換收據／商品</span>}
             {photoList.length > 1 && (
-              <span className="flex items-center gap-1 text-xs text-muted"><GripVertical size={12} />拖拉可調整順序</span>
+              <>
+                {/* HTML5 拖拉在觸控螢幕上不會觸發：手機改用縮圖兩側的箭頭 */}
+                <span className="flex [@media(hover:none)]:hidden items-center gap-1 text-xs text-muted"><GripVertical size={12} />拖拉可調整順序</span>
+                <span className="hidden [@media(hover:none)]:inline text-xs text-muted">按箭頭調整順序</span>
+              </>
             )}
           </div>
           <div className="flex flex-wrap gap-2.5">
@@ -745,20 +798,31 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                     {item.receipt ? <Receipt size={11} /> : <ShoppingBag size={11} />}
                     {item.receipt ? '收據' : '商品'}
                   </button>
+                  {photoList.length > 1 && i > 0 && (
+                    <button type="button" aria-label="往前移" onClick={() => movePhoto(i, -1)} className={`${photoArrow} left-0`}>
+                      <span className="flex bg-black/60 text-white p-0.5 rounded-full"><ChevronLeft size={14} /></span>
+                    </button>
+                  )}
+                  {photoList.length > 1 && i < photoList.length - 1 && (
+                    <button type="button" aria-label="往後移" onClick={() => movePhoto(i, 1)} className={`${photoArrow} right-0`}>
+                      <span className="flex bg-black/60 text-white p-0.5 rounded-full"><ChevronRight size={14} /></span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     aria-label="移除這張照片"
                     onClick={() => setPhotoList(prev => prev.filter(p => p.key !== item.key))}
-                    className="absolute top-1 right-1 bg-black/60 text-white p-1 rounded-full z-10"
+                    className="absolute top-0 right-0 p-1.5 z-10"
                   >
-                    <X size={11} />
+                    <span className="flex bg-black/60 text-white p-1 rounded-full"><X size={11} /></span>
                   </button>
                 </div>
               );
             })}
-            <label className="w-20 h-20 rounded-xl border border-dashed border-ink-2/40 flex flex-col items-center justify-center text-ink-2 hover:bg-sunk cursor-pointer transition-colors">
-              <ImagePlus size={20} /><span className="text-[11px] mt-1">加照片</span>
-              <input type="file" multiple accept="image/*" className="hidden" onChange={handlePhotoChange} />
+            <label className={`w-20 h-20 rounded-xl border border-dashed border-ink-2/40 flex flex-col items-center justify-center text-ink-2 transition-colors ${compressing ? 'opacity-70' : 'hover:bg-sunk cursor-pointer'}`}>
+              {compressing ? <Loader2 size={20} className="animate-spin" /> : <ImagePlus size={20} />}
+              <span className="text-[11px] mt-1">{compressing ? '處理中…' : '加照片'}</span>
+              <input type="file" multiple accept="image/*" className="hidden" disabled={compressing} onChange={handlePhotoChange} />
             </label>
           </div>
         </section>
@@ -766,7 +830,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         {error && <div className={ui.errorBox} role="alert"><AlertCircle size={16} className="shrink-0 mt-0.5" />{error}</div>}
 
         <div className="sticky bottom-0 -mx-5 px-5 pt-3 -mb-1 bg-gradient-to-t from-surface from-70% to-transparent">
-          <button disabled={loading} type="submit" className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}>
+          <button disabled={loading || compressing} type="submit" className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}>
             {loading ? <Loader2 className="animate-spin" size={18} /> : (editData?.id ? <Save size={18} /> : <Plus size={18} strokeWidth={2.6} />)}
             {loading ? '儲存中…' : (editData?.id ? '儲存修改' : '新增支出')}
           </button>

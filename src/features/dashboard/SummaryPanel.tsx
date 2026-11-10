@@ -25,7 +25,7 @@ export const MemberBalances: React.FC<BalancesProps> = ({ trip, stats, currentUs
         const zero = !/[1-9]/.test(text);
         return (
           <li key={m} className="grid grid-cols-[minmax(0,64px)_1fr_auto] items-center gap-2.5 py-1 text-[13px]">
-            <span className={`truncate ${m === currentUser ? 'font-bold' : ''}`}>{m}</span>
+            <span title={m} className={`truncate ${m === currentUser ? 'font-bold' : ''}`}>{m}</span>
             <span className="relative h-1.5 rounded-full bg-line" aria-hidden>
               <span className="absolute left-1/2 top-[-3px] bottom-[-3px] w-px bg-muted/50" />
               {!zero && (
@@ -56,7 +56,7 @@ const SummaryPanel: React.FC<PanelProps> = ({ trip, stats, currentUser, ticket, 
     getCurrencyPrecision(trip.base_currency, trip.precision_config),
   );
   return (
-    <aside className="hidden xl:flex flex-col gap-5 w-[320px] shrink-0 border-l border-line bg-sunk px-5 py-6 sticky top-0 h-dvh overflow-y-auto">
+    <aside className="hidden xl:flex flex-col gap-5 w-[320px] shrink-0 border-l border-line bg-sunk px-5 py-6 sticky top-offset h-below-offset overflow-y-auto">
       {ticket}
       <section>
         <h2 className="text-[13px] text-muted mb-1.5">成員餘額 · 折合 {trip.base_currency}</h2>
@@ -74,7 +74,7 @@ const SummaryPanel: React.FC<PanelProps> = ({ trip, stats, currentUser, ticket, 
             {settlements.map(s => (
               <li key={`${s.from}-${s.to}`} className="flex items-center gap-2 bg-surface border border-line rounded-xl pl-2.5 pr-2 py-2 text-[13px]">
                 <MemberAvatar name={s.from} size={22} isMe={s.from === currentUser} />
-                <span className="min-w-0 flex-1 truncate">{s.from} → {s.to}</span>
+                <span className="min-w-0 flex-1 leading-snug break-words">{s.from} → {s.to}</span>
                 <span className="num font-bold">{formatMoney(s.amount, trip.base_currency, trip.precision_config)}</span>
                 {onRecordSettlement && (
                   <button
