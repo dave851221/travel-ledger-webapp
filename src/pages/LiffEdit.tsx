@@ -231,7 +231,8 @@ const LiffEdit: React.FC = () => {
       {trip && initialData && (
         <ExpenseModal
           isOpen={true}
-          onClose={closeLiffWindow}
+          // 沒有 LIFF ID 時頁面關不掉：✕ 與其沒反應，不如告訴使用者怎麼回去
+          onClose={canCloseWindow ? closeLiffWindow : () => showToast('可以直接關閉這個頁面回到 LINE')}
           trip={trip}
           currentUser={trip.members[0]}
           onSuccess={handleSuccess}

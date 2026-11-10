@@ -38,7 +38,7 @@ interface ExpenseModalProps {
   onSuccess: () => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   editData?: Expense | null; // Pass this to enter Edit Mode
-  /** The form is the whole page (LIFF): closing it leaves the page, so back and the discard question stay out of it */
+  /** The form is the whole page (LIFF): only ✕ closes it, see Modal's `standalone` */
   standalone?: boolean;
 }
 
@@ -679,7 +679,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   );
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? '編輯支出' : '新增支出'} maxWidth="sm:max-w-lg" dirty={dirty} backClose={!standalone}>
+    <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? '編輯支出' : '新增支出'} maxWidth="sm:max-w-lg" dirty={dirty} standalone={standalone}>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="flex gap-2">
           <div className="relative w-[104px] shrink-0">
@@ -695,7 +695,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           </div>
           <input
             required
-            autoFocus={!editData?.id}
+            autoFocus={!editData?.id && !(Number(editData?.amount) > 0)}
             type="number"
             step="any"
             inputMode="decimal"

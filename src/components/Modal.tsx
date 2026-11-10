@@ -15,17 +15,21 @@ interface ModalProps {
    * 右上角的 ✕、往下拉、表單自己的取消鍵都是明確的動作，照舊直接關。
    */
   dirty?: boolean;
-  /** false：這個彈窗就是整個頁面（LIFF），返回鍵維持原本的意思 */
-  backClose?: boolean;
+  /**
+   * 這個彈窗就是整個頁面（LINE 裡的 LIFF 編輯頁），背後沒有東西可以回去。
+   * 往下拉、點背景、Esc、返回鍵都不關它 —— 以前往下一拉表單就滑出畫面，
+   * 但頁面關不掉（沒有 LIFF ID 時 closeWindow 無效），只剩一片空白。只留右上角的 ✕。
+   */
+  standalone?: boolean;
 }
 
 /**
  * 共用彈窗。手機上是從底部滑出的面板（拇指搆得到關閉與送出），按住把手或標題列往下拉可以收起；
  * sm 以上是置中的對話框。內容過長時只捲內容區，標題列固定。
  */
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidth = 'sm:max-w-md', dirty = false, backClose = true }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidth = 'sm:max-w-md', dirty = false, standalone = false }) => {
   // 這裡多半是表單：只從把手與標題列往下拉才收起，免得往上捲回頂端時一不小心整張表單被關掉
-  const { sheetRef, handleRef, scrollRef } = useSheetDrag(onClose, { fromContent: false, enabled: isOpen });
+  const { sheetRef, handleRef, scrollRef } = useSheetDrag(onClose, { fromContent: false, enabled: isOpen && !standalone });
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 
   // Each time the modal opens it starts without the question showing
@@ -40,11 +44,11 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
     else onClose();
   };
 
-  useBackClose(isOpen, requestClose, backClose);
+  useBackClose(isOpen, requestClose, !standalone);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || standalone) return;
       // Esc on the question means "keep editing"
       if (confirmingDiscard) setConfirmingDiscard(false);
       else if (dirty) setConfirmingDiscard(true);
@@ -58,7 +62,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
       document.removeEventListener('keydown', handleEscape);
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen, onClose, dirty, confirmingDiscard]);
+  }, [isOpen, onClose, dirty, confirmingDiscard, standalone]);
 
   if (!isOpen) return null;
 
@@ -68,7 +72,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-scrim anim-fade"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !standalone) requestClose(); }}
     >
       <div
         ref={sheetRef}
@@ -78,8 +82,9 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
         className={`relative bg-surface text-ink w-full ${width} max-h-[92dvh] sm:max-h-[88dvh] flex flex-col rounded-t-3xl sm:rounded-2xl shadow-2xl anim-sheet`}
       >
         <div ref={handleRef} className="shrink-0">
+          {/* The grab handle promises "pull me down"; a standalone sheet has nowhere to go */}
           <div className="sm:hidden pt-2.5 flex justify-center" aria-hidden>
-            <span className="w-9 h-1 rounded-full bg-line" />
+            <span className={`w-9 h-1 rounded-full ${standalone ? 'bg-transparent' : 'bg-line'}`} />
           </div>
           <div className="flex items-center justify-between gap-3 px-5 pt-3 pb-3 sm:pt-4 border-b border-line">
             <h3 className="text-lg font-bold text-ink truncate">{title}</h3>

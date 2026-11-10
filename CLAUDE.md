@@ -85,7 +85,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   觸控裝置上整頁關掉長按選字（`index.css`，iPhone 會跳放大鏡與拷貝選單），輸入框例外。
   **返回鍵先關面板**（`hooks/useBackClose.ts`）：`Modal`、`ExpenseDetailModal`、`PhotoLightbox` 開著時各占一筆同網址的 history，
   按返回（Android 返回鍵、iPhone 邊緣右滑）只關最上面那一層，不會跳回首頁。所有面板共用一份狀態、延後對帳，
-  新的全螢幕面板請用這支 hook，**不要自己 pushState／history.back()**（一關一開會互相打架）。LIFF 的表單傳 `standalone` 不參與。
+  新的全螢幕面板請用這支 hook，**不要自己 pushState／history.back()**（一關一開會互相打架）。LIFF 的編輯頁就是整個頁面，傳 `standalone`：往下拉、點背景、Esc、返回都不關它（以前一拉表單就滑出畫面、頁面卻關不掉），只留 ✕。
   **表單防誤關**：`Modal` 的 `dirty` 為 true 時，點背景、Esc、返回會先問「要放棄嗎」；✕、往下拉、取消鍵照舊直接關。
   `ExpenseModal`／`SettingsModal` 用「開啟時的欄位快照」判斷有沒有改過（`formSignature`），加新欄位時記得放進去。
   **分頁記在網址**（`?tab=ledger`，`replace` 不疊紀錄），重新整理或 PWA 自動更新後留在同一頁；帳目分頁切走時只是 `hidden`，篩選條件會留著。
