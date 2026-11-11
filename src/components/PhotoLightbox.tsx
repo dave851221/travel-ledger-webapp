@@ -20,8 +20,7 @@ type Mode = 'none' | 'pending' | 'pan' | 'swipe' | 'dismiss' | 'pinch';
 const IDENTITY: View = { s: 1, x: 0, y: 0 };
 const GAP = 16;
 const MAX_SCALE = 5;
-const DOUBLE_TAP_SCALE = 2.5;
-const DOUBLE_TAP_MS = 300;
+const ZOOM_SCALE = 2.5;
 const EASE = 'cubic-bezier(.2,.8,.2,1)';
 // Gesture-driven, so it ignores prefers-reduced-motion like phone galleries do
 const duration = 260;
@@ -31,7 +30,7 @@ const mod = (n: number, m: number) => ((n % m) + m) % m;
 /**
  * 全螢幕看照片，手勢比照手機相簿：
  * - 左右滑換張（跟手滑動、放開後滑到定位），方向鍵、左右按鈕也有同樣的動畫
- * - 雙指縮放、點兩下放大／縮小；放大後單指拖曳移動
+ * - 雙指縮放（或按右上角放大鏡）；放大後單指拖曳移動。沒有雙擊放大，單擊才能立刻反應
  * - 點一下不會縮放：點畫面左／右三成換上一張／下一張，點中間照片外的黑底或往下滑關閉
  * - 電腦：點照片放大／縮小、滾輪縮放、拖曳移動，右上角按鈕也能縮放
  * 相簿與支出明細共用這一個。
@@ -57,8 +56,8 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
   useEffect(() => { indexRef.current = index; }, [index]);
   const busy = useRef(false);
   const timers = useRef<number[]>([]);
-  const tapTimer = useRef<number | null>(null);
-  const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
+  /** The slide animation in flight: its timer and the step that lands it */
+  const slide = useRef<{ timer: number; land: () => void } | null>(null);
   const g = useRef({
     pointers: new Map<number, { x: number; y: number }>(),
     mode: 'none' as Mode,
@@ -74,7 +73,7 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
 
   useEffect(() => () => {
     timers.current.forEach(t => clearTimeout(t));
-    if (tapTimer.current) clearTimeout(tapTimer.current);
+    if (slide.current) clearTimeout(slide.current.timer);
   }, []);
 
   const later = (fn: () => void, ms: number) => {
@@ -115,7 +114,7 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
 
   const toggleZoomAt = (clientX: number, clientY: number) => {
     if (viewRef.current.s > 1.01) applyView(IDENTITY, true);
-    else zoomTo(DOUBLE_TAP_SCALE, clientX, clientY, IDENTITY, true);
+    else zoomTo(ZOOM_SCALE, clientX, clientY, IDENTITY, true);
   };
 
   const snapBack = () => {
@@ -125,22 +124,32 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
   };
 
   /** Slide to the next (1) or previous (-1) photo */
+  /** Land a slide that is still animating right away, so rapid taps or a new swipe never wait */
+  const flushSlide = () => {
+    const sl = slide.current;
+    if (!sl) return;
+    clearTimeout(sl.timer);
+    sl.land();
+  };
+
   const go = useCallback((dir: number) => {
     if (busy.current || n < 2) return;
-    busy.current = true;
+    flushSlide();
     const w = stageRef.current?.clientWidth ?? window.innerWidth;
     setDragAnim(true);
     setDrag({ x: -dir * (w + GAP), y: 0 });
-    timers.current.push(window.setTimeout(() => {
+    const land = () => {
+      slide.current = null;
       setDragAnim(false);
       setDrag({ x: 0, y: 0 });
       viewRef.current = IDENTITY;
       setViewAnim(false);
       setView(IDENTITY);
       setV(x => x + dir);
-      onIndex(mod(indexRef.current + dir, n));
-      busy.current = false;
-    }, duration));
+      indexRef.current = mod(indexRef.current + dir, n);
+      onIndex(indexRef.current);
+    };
+    slide.current = { timer: window.setTimeout(land, duration), land };
   }, [n, onIndex]);
 
   const dismiss = () => {
@@ -186,6 +195,7 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as Element).closest('button')) return;
     if (busy.current || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    flushSlide();
     const s = g.current;
     try { stageRef.current?.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
     s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -254,29 +264,14 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
       else if (viewRef.current.s <= 1.01) onClose();
       return;
     }
-    // Touch: a single tap never zooms; double tap does
-    const now = Date.now();
-    const lt = lastTap.current;
-    if (lt && now - lt.t < DOUBLE_TAP_MS && Math.hypot(x - lt.x, y - lt.y) < 40) {
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-      tapTimer.current = null;
-      lastTap.current = null;
-      toggleZoomAt(x, y);
-      return;
-    }
-    lastTap.current = { t: now, x, y };
-    if (tapTimer.current) clearTimeout(tapTimer.current);
-    tapTimer.current = window.setTimeout(() => {
-      tapTimer.current = null;
-      lastTap.current = null;
-      if (viewRef.current.s > 1.01) return;
-      // Tapping the left / right third flips photos; elsewhere off the photo closes
-      const { w, cx } = stageBox();
-      const rel = (x - (cx - w / 2)) / w;
-      if (many && rel < 0.3) go(-1);
-      else if (many && rel > 0.7) go(1);
-      else if (!onImage) onClose();
-    }, DOUBLE_TAP_MS);
+    // Touch: no double-tap zoom, so a tap acts at once.
+    // Left / right third flips photos; elsewhere off the photo closes.
+    if (viewRef.current.s > 1.01) return;
+    const { w, cx } = stageBox();
+    const rel = (x - (cx - w / 2)) / w;
+    if (many && rel < 0.3) go(-1);
+    else if (many && rel > 0.7) go(1);
+    else if (!onImage) onClose();
   };
 
   const endPointer = (e: React.PointerEvent, cancelled: boolean) => {
