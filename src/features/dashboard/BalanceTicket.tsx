@@ -16,7 +16,8 @@ interface Props {
 
 /**
  * 「我的淨額」票根。淨額取自 balances（含結清紀錄），
- * 已付／份額取自 grandBase（不含結清），和統計頁的定義一致。
+ * 墊付／份額取自 grandBase（不含結清），和統計頁的定義一致。
+ * 「我先墊付」原本叫「我已付」，容易被看成「我自己花掉的錢」。
  */
 const BalanceTicket: React.FC<Props> = ({ trip, stats, currentUser, onSettle, onPickUser, notchBg = 'var(--app-bg)' }) => {
   const base = trip.base_currency;
@@ -62,7 +63,7 @@ const BalanceTicket: React.FC<Props> = ({ trip, stats, currentUser, onSettle, on
       <dl className="grid grid-cols-3 gap-2 px-[18px] pt-3 pb-3.5">
         {currentUser ? (
           <>
-            <div className="min-w-0"><dt className="text-[11px] text-navy-sub">我已付</dt><dd className="num text-[15px] font-bold truncate">{formatNumber(stats.grandBase.paidByMe, base, prec)}</dd></div>
+            <div className="min-w-0"><dt className="text-[11px] text-navy-sub">我先墊付</dt><dd className="num text-[15px] font-bold truncate">{formatNumber(stats.grandBase.paidByMe, base, prec)}</dd></div>
             <div className="min-w-0"><dt className="text-[11px] text-navy-sub">我的份額</dt><dd className="num text-[15px] font-bold truncate">{formatNumber(stats.grandBase.owedByMe, base, prec)}</dd></div>
             <div className="min-w-0"><dt className="text-[11px] text-navy-sub">全團支出</dt><dd className="num text-[15px] font-bold truncate">{formatNumber(stats.grandBase.total, base, prec)}</dd></div>
           </>
