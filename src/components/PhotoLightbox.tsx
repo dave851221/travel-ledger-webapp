@@ -32,7 +32,7 @@ const mod = (n: number, m: number) => ((n % m) + m) % m;
  * 全螢幕看照片，手勢比照手機相簿：
  * - 左右滑換張（跟手滑動、放開後滑到定位），方向鍵、左右按鈕也有同樣的動畫
  * - 雙指縮放、點兩下放大／縮小；放大後單指拖曳移動
- * - 點一下照片不會縮放（避免誤觸）；點照片外的黑底或往下滑關閉
+ * - 點一下不會縮放：點畫面左／右三成換上一張／下一張，點中間照片外的黑底或往下滑關閉
  * - 電腦：點照片放大／縮小、滾輪縮放、拖曳移動，右上角按鈕也能縮放
  * 相簿與支出明細共用這一個。
  */
@@ -269,7 +269,13 @@ const PhotoLightbox: React.FC<Props> = ({ photos, index, onIndex, onClose, alt =
     tapTimer.current = window.setTimeout(() => {
       tapTimer.current = null;
       lastTap.current = null;
-      if (!onImage && viewRef.current.s <= 1.01) onClose();
+      if (viewRef.current.s > 1.01) return;
+      // Tapping the left / right third flips photos; elsewhere off the photo closes
+      const { w, cx } = stageBox();
+      const rel = (x - (cx - w / 2)) / w;
+      if (many && rel < 0.3) go(-1);
+      else if (many && rel > 0.7) go(1);
+      else if (!onImage) onClose();
     }, DOUBLE_TAP_MS);
   };
 
