@@ -261,20 +261,19 @@ export function buildExpenseCard(opts: {
   const webButton = { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
   const editButton = { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } }
   const row = (...contents: unknown[]) => ({ type: "box", layout: "horizontal", spacing: "sm", contents })
+  const soloAction = { type: "button", style: "primary", color: "#FF9F0A", action: { type: "postback", label: "👤 只算我", data: JSON.stringify({ act: "me", n: nonce }) } }
   const footerButtons = needsAmount
     ? [
         { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: unidentified ? "✏️ 填寫內容" : "✏️ 填金額", uri: liffUrl } },
-        cancelButton,
+        // 只算我 + 取消 一列，跟有金額的卡片同樣是 1 + 2 + 1 的高度
+        ...(soloButton ? [row(soloAction, cancelButton)] : [cancelButton]),
         webButton,
       ]
     : soloButton
       // 有「只算我」時排成 1 + 2 + 2：確認存入獨占一列最醒目，其餘兩兩一列，卡片不會拉得太長
       ? [
           { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-          row(
-            { type: "button", style: "primary", color: "#FF9F0A", action: { type: "postback", label: "👤 只算我", data: JSON.stringify({ act: "me", n: nonce }) } },
-            editButton,
-          ),
+          row(soloAction, editButton),
           row(cancelButton, webButton),
         ]
       : [
@@ -318,8 +317,8 @@ export function buildExpenseCard(opts: {
             ? [{
                 type: "text", size: "xs", color: "#888888", wrap: true, margin: "md",
                 text: unidentified
-                  ? "我認不出這張照片是什麼，照片先幫你留著。按「✏️ 填寫內容」補上項目與金額就會存入。"
-                  : "這張照片不是收據，按「✏️ 填金額」補上金額後就會存入。",
+                  ? "我認不出這張照片是什麼，照片先幫你留著。按「✏️ 填寫內容」補上項目與金額，或直接回我「抹茶冰淇淋 600」。"
+                  : "這張照片不是收據。按「✏️ 填金額」，或直接回我金額就好，例如「750」或「750 只有我」。",
               }]
             : []),
         ],

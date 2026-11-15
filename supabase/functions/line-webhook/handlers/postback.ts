@@ -257,6 +257,9 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       nonce: newNonce,
       webUrl: `${WEBAPP_URL}/#/trip/${tripIdForMe}/dashboard`,
       liffUrl: buildDraftLiffUrl(tripIdForMe, newNonce, sourceId),
+      // 照片記帳（還沒填金額）換出來的卡片一樣只能「✏️ 填金額」，不能直接存 0 元
+      needsAmount: amount <= 0,
+      unidentified: amount <= 0 && !String(src.d ?? '').trim(),
     })], sourceId)
     return
   }
