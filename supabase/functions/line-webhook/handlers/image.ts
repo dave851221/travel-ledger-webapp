@@ -24,7 +24,7 @@ import { supabase } from "../db.ts"
 import { storePendingExpense } from "../drafts.ts"
 import { ai, OCR_RESPONSE_SCHEMA } from "../ai.ts"
 import { downloadLineContent, replyMessage, showLoading } from "../line-api.ts"
-import { buildDraftLiffUrl, buildExpenseCard } from "../messages.ts"
+import { buildDraftLiffUrl, buildExpenseCard, canGoSolo } from "../messages.ts"
 import { runInBackground } from "../util.ts"
 import type { ExpenseInput } from "../../_shared/tools/types.ts"
 import type { ImageMessageEvent, OcrResponse } from "../types.ts"
@@ -310,6 +310,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
           : needsAmount ? `照片記帳（還沒填金額）: ${expense.description}` : `收據辨識預覽: ${expense.description}`,
         heroUrl: publicUrl,
         nonce, webUrl, liffUrl, needsAmount, unidentified,
+        soloButton: canGoSolo(expense, trip.members),
       })], sourceId)
       // 傳完照片接著打「這是抹茶冰淇淋 600」來補充，群組的提及模式下也不必再 @
       extendFollowup(ctx)

@@ -73,6 +73,7 @@ import {
   buildDraftLiffUrl,
   buildEditLiffUrl,
   buildExpenseCard,
+  canGoSolo,
   buildUpdatePreviewCard,
   GROUP_MODE_INFO,
   replyEditPicker,
@@ -574,6 +575,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
       webUrl,
       // 草稿卡片的「✏️ 編輯」只帶 nonce，完整內容 LiffEdit 自己去 pending 列撈（T2）
       liffUrl: buildDraftLiffUrl(trip.id, nonce, sourceId),
+      soloButton: canGoSolo(expense, trip.members),
     }))
   })
 

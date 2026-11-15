@@ -288,7 +288,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 | `context.ts` | ~195 | `EventContext` 與 `buildEventContext`（一則事件只查一次），含 `eventTimestamp`；群組接話的 `extendFollowup`／`isInFollowupWindow`／`isQuotingBot` |
 | `types.ts` | ~350 | LINE 事件、postback、DB 列、AI 訊息的型別 |
 | `guards.ts` | ~430 | 與 LINE 有關的純函式（見下） |
-| `handlers/postback.ts` | ~505 | undo / cur / del / **upd** / save / cancel（寫入走 `_shared/tools/`） |
+| `handlers/postback.ts` | ~585 | undo / cur / me / del / **upd** / save / cancel（寫入走 `_shared/tools/`） |
 | `handlers/image.ts` | ~275 | 收據 OCR（驗證走 `prepareExpense`） |
 | `handlers/audio.ts` | ~55 | 語音轉文字（回傳 transcript 給文字路徑） |
 | `handlers/commands.ts` | ~640 | 群組觸發判斷 + 所有明確指令與快捷查詢 |
@@ -340,7 +340,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    **OCR 路徑維持 JSON mode**（`ai.generate` + `OCR_RESPONSE_SCHEMA`），不走工具迴圈
 4b. **語音訊息**：下載 m4a → Gemini 免費版逐字轉錄（不管 `AI_PROVIDER` 是什麼；中文寫繁體，英日文照原文）→ **當成使用者打的字**走上面第 3 點的流程
    （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
-5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`。
+5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`、`me`（「👤 只算我」：付款人與分攤都改成按的人，換一張新卡）。
    按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
    但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著。

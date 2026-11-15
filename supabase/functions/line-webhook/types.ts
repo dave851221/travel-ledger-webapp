@@ -159,7 +159,7 @@ export interface DraftExpense {
  */
 export interface PostbackData {
   /** 新版動作 */
-  act?: 'undo' | 'cur' | 'del' | 'upd' | 'save' | 'cancel'
+  act?: 'undo' | 'cur' | 'me' | 'del' | 'upd' | 'save' | 'cancel'
   /** 舊版動作（save_expense / cancel） */
   action?: string
   /** nonce（新版短鍵） */

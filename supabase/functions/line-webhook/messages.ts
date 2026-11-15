@@ -198,6 +198,21 @@ export async function replyEditPicker(opts: {
 }
 
 /**
+ * 要不要在卡片上給「👤 只算我」。
+ * 旅程只有一個人、或這筆本來就是同一個人付也只算他一個時，按了也沒有差別。
+ */
+export function canGoSolo(
+  expense: { payer_data?: Record<string, unknown>; split_details?: Record<string, unknown> },
+  members: string[] | null | undefined,
+): boolean {
+  if ((members?.length ?? 0) < 2) return false
+  const payers = Object.keys(expense.payer_data ?? {})
+  const splits = Object.keys(expense.split_details ?? {})
+  const alreadySolo = payers.length === 1 && splits.length === 1 && payers[0] === splits[0]
+  return !alreadySolo
+}
+
+/**
  * 待確認的記帳卡片。
  *
  * OCR、文字記帳、以及「幣別沒匯率 → 選一個幣別」（M10）三條路徑送出的卡片完全一樣，
@@ -223,8 +238,13 @@ export function buildExpenseCard(opts: {
    * 隱含 needsAmount。照片照樣留著，不會因為辨識不出來就被丟掉。
    */
   unidentified?: boolean
+  /**
+   * 「👤 只算我」：按下去付款人與分攤都改成按的那個人（收據上只有自己的東西時一鍵改好）。
+   * 旅程只有一個人、或這張卡本來就只算一個人時不必給。
+   */
+  soloButton?: boolean
 }): OutgoingMessage {
-  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, unidentified = false } = opts
+  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, unidentified = false, soloButton = false } = opts
   const needsAmount = opts.needsAmount || unidentified
   // 還沒有金額時只列名字，不印一排 0
   const amountRows = (data: Record<string, unknown> | undefined) =>
@@ -238,18 +258,30 @@ export function buildExpenseCard(opts: {
           ],
     }))
   const cancelButton = { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
+  const webButton = { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
+  const editButton = { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } }
+  const row = (...contents: unknown[]) => ({ type: "box", layout: "horizontal", spacing: "sm", contents })
   const footerButtons = needsAmount
     ? [
         { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: unidentified ? "✏️ 填寫內容" : "✏️ 填金額", uri: liffUrl } },
         cancelButton,
+        webButton,
       ]
-    : [
-        { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-        { type: "box", layout: "horizontal", spacing: "sm", contents: [
-          { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } },
-          cancelButton,
-        ]},
-      ]
+    : soloButton
+      // 有「只算我」時排成 1 + 2 + 2：確認存入獨占一列最醒目，其餘兩兩一列，卡片不會拉得太長
+      ? [
+          { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
+          row(
+            { type: "button", style: "primary", color: "#FF9F0A", action: { type: "postback", label: "👤 只算我", data: JSON.stringify({ act: "me", n: nonce }) } },
+            editButton,
+          ),
+          row(cancelButton, webButton),
+        ]
+      : [
+          { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
+          row(editButton, cancelButton),
+          webButton,
+        ]
 
   return {
     type: "flex", altText,
@@ -294,10 +326,7 @@ export function buildExpenseCard(opts: {
       },
       footer: {
         type: "box", layout: "vertical", spacing: "sm",
-        contents: [
-          ...footerButtons,
-          { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } },
-        ],
+        contents: footerButtons,
       },
     },
   }

@@ -1,7 +1,7 @@
 // ============================================================
 // handlers/postback.ts —— Flex 卡片按鈕（postback）
 //
-// 六種動作：undo（撤銷已存入）、cur（換個幣別重新出卡）、del（刪除既有支出）、
+// 七種動作：undo（撤銷已存入）、cur（換個幣別重新出卡）、me（改成只算按的人）、del（刪除既有支出）、
 // upd（套用 AI 提議的修改）、save（確認存入）、cancel（取消草稿或提議）。
 //
 // ⚠️ 防重複點擊的鎖是 line_processed_actions 的 PK 衝突：先寫 nonce 再做事。
@@ -16,6 +16,7 @@ import {
   deleteExpense,
   resolveExpenseRef,
 } from "../../_shared/tools/expenses.ts"
+import { resolveMember } from "../../_shared/validate.ts"
 import { RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
@@ -176,6 +177,86 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       nonce: newNonce,
       webUrl: `${WEBAPP_URL}/#/trip/${tripIdForCur}/dashboard`,
       liffUrl: buildDraftLiffUrl(tripIdForCur, newNonce, sourceId),
+    })], sourceId)
+    return
+  }
+
+  // 「👤 只算我」—— 收據上只有自己的東西（個人記帳）時一鍵改成：按的人付、也只算他。
+  // 跟 cur 一樣是換一張新卡：舊卡失效、內容存成新的 pending，按「確認存入」才落地。
+  if (postbackData.act === 'me') {
+    const oldNonce = postbackData.n
+    const pending = oldNonce ? await getPendingExpense(sourceId, oldNonce) : null
+    if (!oldNonce || !pending) {
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，可能已經過期了。' }], sourceId)
+      return
+    }
+
+    const { error: lockErr } = await supabase.from('line_processed_actions')
+      .insert({ nonce: oldNonce, line_user_id: sourceId, action_type: 'superseded' })
+    if (lockErr) {
+      const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', oldNonce).maybeSingle()
+      await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+      return
+    }
+
+    const tripIdForMe = pending.tid || userState.current_trip_id as string
+    const { data: meTrip } = await supabase.from('trips')
+      .select('id, members, precision_config').eq('id', tripIdForMe).maybeSingle()
+    if (!meTrip) {
+      await releaseNonce(oldNonce)
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。' }], sourceId)
+      return
+    }
+
+    // 按按鈕的人（LINE 名稱，例如「張代杰」）對應回成員清單（「代杰」）
+    const me = resolveMember(ctx.memberName, meTrip.members ?? [])
+    if (!me) {
+      // 沒換出新卡，舊卡的鎖要放掉，「確認存入」「✏️ 編輯」才還能用
+      await releaseNonce(oldNonce)
+      await replyMessage(replyToken, [{
+        type: 'text',
+        text: `🤔 對不到你是哪位成員（LINE 名稱：${ctx.memberName}，成員：${(meTrip.members ?? []).join('、')}）。
+請按卡片上的「✏️ 編輯」自己改付款人與分攤。`,
+        quickReply: boundQR,
+      }], sourceId)
+      return
+    }
+
+    const src = pending.exp ?? {}
+    const currency = String(src.c ?? '')
+    const precision = (meTrip.precision_config as PrecisionConfig | null)?.[currency] ?? DEFAULT_PRECISION[currency] ?? 2
+    const amount = new Decimal(Number(src.a) || 0).toDecimalPlaces(precision).toNumber()
+    const soloExpense = {
+      description: src.d, amount, currency,
+      date: src.dt, category: src.cat,
+      payer_data: { [me]: amount },
+      split_details: { [me]: amount },
+    }
+
+    const newNonce = Math.random().toString(36).substring(2, 10)
+    const photoIds = pending.p ?? []
+    await storePendingExpense(sourceId, newNonce, {
+      kind: 'expense',
+      exp: {
+        d: soloExpense.description, a: amount, c: currency,
+        dt: soloExpense.date, cat: soloExpense.category,
+        p: soloExpense.payer_data, s: soloExpense.split_details,
+      },
+      p: photoIds, rc: pending.rc, tid: tripIdForMe,
+    })
+    // 對話歷史也記一筆新的建議（帶新 nonce），之後說「改成 500」AI 才找得到這張卡
+    await supabase.from('line_chat_history').insert({
+      line_user_id: sourceId, role: 'model',
+      content: `[記帳建議] ${JSON.stringify({ ...soloExpense, photo_ids: photoIds, nonce: newNonce }, null, 2)}`,
+    })
+    await replyMessage(replyToken, [buildExpenseCard({
+      expense: soloExpense,
+      title: `👤 改成只算 ${me}`,
+      altText: `確認記帳: ${soloExpense.description}`,
+      heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], tripIdForMe) : null,
+      nonce: newNonce,
+      webUrl: `${WEBAPP_URL}/#/trip/${tripIdForMe}/dashboard`,
+      liffUrl: buildDraftLiffUrl(tripIdForMe, newNonce, sourceId),
     })], sourceId)
     return
   }
