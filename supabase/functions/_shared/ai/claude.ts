@@ -24,6 +24,7 @@ import {
   pickTerminal,
   planRound,
   toFunctionResponseObject,
+  unwrapPseudoCall,
   WEB_SEARCH_CALL_TIMEOUT_MS,
 } from "./loop.ts"
 import {
@@ -305,7 +306,7 @@ export function createClaudeProvider(opts: {
             const text = textOf(res)
             if (!text) throw new RetryableError(`no tool call and no text (stop_reason: ${res.stop_reason})`)
             console.log(`[AI] ${model} replied with plain text instead of a tool call`)
-            return { kind: 'terminal', call: { name: replyName, args: { text } }, model }
+            return { kind: 'terminal', call: { name: replyName, args: { text: unwrapPseudoCall(text, replyName) } }, model }
           }
 
           const terminal = pickTerminal(calls, terminalNames, replyName, model)

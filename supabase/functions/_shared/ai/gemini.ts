@@ -18,7 +18,7 @@
 // 那是 proto3 JSON 的正式名稱，新程式碼不要再混用 snake_case。
 // ============================================================
 
-import { executeAll, pickTerminal, planRound, toFunctionResponseObject } from "./loop.ts"
+import { executeAll, pickTerminal, planRound, toFunctionResponseObject, unwrapPseudoCall } from "./loop.ts"
 import {
   type AiMessage,
   type AiProvider,
@@ -274,7 +274,7 @@ export async function runGeminiToolLoop(params: GeminiToolLoopParams): Promise<T
           const text = textIn(content)
           if (!text) throw new RetryableError('no function call and no text')
           console.log(`[AI] ${model} replied with plain text instead of a function call`)
-          return { kind: 'terminal', call: { name: replyName, args: { text } }, model }
+          return { kind: 'terminal', call: { name: replyName, args: { text: unwrapPseudoCall(text, replyName) } }, model }
         }
 
         const terminal = pickTerminal(calls, terminalNames, replyName, model)

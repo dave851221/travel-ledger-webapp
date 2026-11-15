@@ -16,6 +16,19 @@ export const MAX_CALL_TIMEOUT_MS = 10_000
 export const WEB_SEARCH_CALL_TIMEOUT_MS = 25_000
 /** 已經超過 deadline 時，最後一輪仍給這麼久 —— 遲到的回覆也好過完全不回。 */
 export const MIN_CALL_TIMEOUT_MS = 5_000
+/**
+ * 模型偶爾不呼叫函式，而是把呼叫「寫成文字」：`reply(text="這筆是日幣還是台幣？")`。
+ * 原樣送出去，使用者就會在 LINE 看到 reply(text="…") 這串（2026-11-15 真的發生過）。
+ * 認得出這個形狀就只留引號裡的內容；認不出來的文字原樣回傳。
+ */
+export function unwrapPseudoCall(text: string, replyName = 'reply'): string {
+  const m = text.trim().match(
+    new RegExp(`^${replyName}\\s*\\(\\s*(?:text\\s*[=:]\\s*)?(["'“「])([\\s\\S]*?)["'”」]\\s*\\)\\s*;?$`),
+  )
+  if (!m) return text
+  return m[2].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim() || text
+}
+
 /** 一次工具結果的 JSON 上限。超過就截斷，免得整包 context 被一次查詢灌爆。 */
 export const MAX_TOOL_RESPONSE_CHARS = 6000
 

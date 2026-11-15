@@ -691,6 +691,14 @@ describe('hasCurrencyHint', () => {
     expect(hasCurrencyHint('restaurant 300')).toBe(false);
     expect(hasCurrencyHint('dinner 3000')).toBe(false);
   });
+
+  it('單獨的 $ 只是金額符號，不算明講幣別', () => {
+    expect(hasCurrencyHint('清水寺計程車$1128')).toBe(false);
+    expect(hasCurrencyHint('午餐 ＄500')).toBe(false);
+    expect(hasCurrencyHint('NT$500')).toBe(true);
+    expect(hasCurrencyHint('HK$80')).toBe(true);
+    expect(hasCurrencyHint('清水寺計程車 JPY$1128')).toBe(true);
+  });
 });
 
 describe('normalizeDate', () => {

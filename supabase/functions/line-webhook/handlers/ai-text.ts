@@ -250,7 +250,7 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
   // 只放「這次對話的當下狀態」。人設與不可變規則已在 YOSHI_SYSTEM_INSTRUCTION，
   // 可以做哪些事則由 function declarations 描述，不必再用文字講一次。
   const tripContext = `【旅程】${trip.name}｜成員：${trip.members.join('、')}｜分類：${trip.categories.join('、')}（預設：${trip.default_category || '無'}）
-【幣別】記帳預設：${trip.default_currency || trip.base_currency}（使用者沒明講就填這個）｜結算主幣：${trip.base_currency}（只用於統計，不要拿來當記帳幣別）｜可用：${Object.keys(trip.rates ?? {}).join('、') || '（尚未設定）'}
+【幣別】記帳預設：${trip.default_currency || trip.base_currency}（使用者沒明講就填這個，單獨的「$」不算明講，不要反問幣別）｜結算主幣：${trip.base_currency}（只用於統計，不要拿來當記帳幣別）｜可用：${Object.keys(trip.rates ?? {}).join('、') || '（尚未設定）'}
 【今日】${today}｜${trip.is_archived ? '⚠️ 已封存（唯讀，禁止記帳與修改）' : '進行中'}
 【記帳偏好（整趟旅程共用）】${trip.ai_preference || '無'}｜傳訊者：${memberName}
 【旅程預設付款人】${trip.default_payer?.length ? trip.default_payer.join('、') : '無'}｜預設分攤：${trip.default_split_members?.length ? trip.default_split_members.join('、') : '全員'}${groupModeLine}
