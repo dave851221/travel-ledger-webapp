@@ -9,6 +9,7 @@
 // 純型別檔，沒有執行期程式碼。
 // ============================================================
 
+import type { ReceiptItem } from "../_shared/itemSplit.ts"
 import type { AmountMap } from "../_shared/types.ts"
 import type { CurrencySource } from "../_shared/validate.ts"
 
@@ -212,6 +213,8 @@ export interface PendingDraft {
   rc?: boolean
   /** 這張草稿屬於哪個旅程 —— 換旅程後舊草稿必須失效，靠的就是它（M13） */
   tid?: string
+  /** 收據品項明細（🧾 逐項分）。換卡（只算我、換幣別、AI 修正）時要一路帶著 */
+  it?: ReceiptItem[]
 }
 
 // ============================================================
@@ -315,6 +318,8 @@ export interface OcrResponse {
   /** expense＝收據；item_photo＝可記帳的品項照片（金額先填 0）；not_receipt＝與消費無關 */
   type: 'expense' | 'item_photo' | 'not_receipt'
   data?: AiExpenseData
+  /** 收據上的品項明細（🧾 逐項分用） */
+  items?: unknown
   /** 兩種 type 都不是時的後備說明 */
   content?: string
 }

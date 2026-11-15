@@ -201,7 +201,10 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         : `${editData.amount}|${[...sActive].sort().join(',')}|${editData.adjustment_member ?? ''}`;
 
       setShowPayerDetail(pActive.size > 1);
-      setShowSplitDetail(sActive.size > 0 && sActive.size !== trip.members.length);
+      // 全員都有分、但金額明顯不一樣（逐項分帶進來的）也要展開，不然看不出每人多少
+      const splitValues = [...sActive].map(m => Number(editData.split_data[m]) || 0);
+      const uneven = !noAmountYet && splitValues.length > 1 && Math.max(...splitValues) - Math.min(...splitValues) > 1;
+      setShowSplitDetail(sActive.size > 0 && (sActive.size !== trip.members.length || uneven));
     } else {
       // --- New Mode ---
       setDescription('');
@@ -270,10 +273,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const splitSummary = useMemo(() => {
     const names = [...splitActive];
     if (names.length === 0) return '尚未選擇分攤成員';
-    if (names.length === trip.members.length) return '全員均分';
+    const values = names.map(m => Number(splitData[m]) || 0);
+    const uneven = values.length > 1 && Math.max(...values) - Math.min(...values) > 1;
+    if (names.length === trip.members.length) return uneven ? '全員分攤（金額不同）' : '全員均分';
     if (names.length === 1) return `只有${names[0]}`;
     return `${names.length} 人分攤`;
-  }, [splitActive, trip.members.length]);
+  }, [splitActive, splitData, trip.members.length]);
 
   const payerSum = useMemo(() => Object.values(payerData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [payerData]);
   const splitSum = useMemo(() => Object.values(splitData).reduce<number>((a, b) => a + (Number(b) || 0), 0), [splitData]);

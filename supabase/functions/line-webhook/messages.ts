@@ -119,6 +119,16 @@ export function buildDraftLiffUrl(tripId: string, nonce: string, sourceId: strin
   return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&n=${nonce}&u=${encodeURIComponent(sourceId)}`
 }
 
+/** 🧾 逐項分：同一個 LIFF 編輯頁，先開品項清單點「這是誰的」，再進表單確認 */
+export function buildItemsLiffUrl(tripId: string, nonce: string, sourceId: string): string {
+  return `${buildDraftLiffUrl(tripId, nonce, sourceId)}&mode=items`
+}
+
+/** 至少兩個品項、兩個成員，逐項分才有意義 */
+export function canSplitByItems(items: unknown[] | null | undefined, members: string[] | null | undefined): boolean {
+  return (items?.length ?? 0) >= 2 && (members?.length ?? 0) >= 2
+}
+
 /**
  * 列出近期支出讓使用者點選編輯（每列一顆 LIFF「✏️ 編輯」）。
  *
@@ -243,8 +253,10 @@ export function buildExpenseCard(opts: {
    * 旅程只有一個人、或這張卡本來就只算一個人時不必給。
    */
   soloButton?: boolean
+  /** 「🧾 逐項分」的 LIFF 網址。收據有讀到品項明細時才給 */
+  itemsUrl?: string
 }): OutgoingMessage {
-  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, unidentified = false, soloButton = false } = opts
+  const { expense, title, altText, heroUrl, nonce, webUrl, liffUrl, unidentified = false, soloButton = false, itemsUrl } = opts
   const needsAmount = opts.needsAmount || unidentified
   // 還沒有金額時只列名字，不印一排 0
   const amountRows = (data: Record<string, unknown> | undefined) =>
@@ -261,6 +273,13 @@ export function buildExpenseCard(opts: {
   const webButton = { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
   const editButton = { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } }
   const row = (...contents: unknown[]) => ({ type: "box", layout: "horizontal", spacing: "sm", contents })
+  const pairUp = (buttons: unknown[]) => {
+    const rows: unknown[] = []
+    for (let i = 0; i < buttons.length; i += 2) {
+      rows.push(i + 1 < buttons.length ? row(buttons[i], buttons[i + 1]) : buttons[i])
+    }
+    return rows
+  }
   const soloAction = { type: "button", style: "primary", color: "#FF9F0A", action: { type: "postback", label: "👤 只算我", data: JSON.stringify({ act: "me", n: nonce }) } }
   const footerButtons = needsAmount
     ? [
@@ -269,18 +288,18 @@ export function buildExpenseCard(opts: {
         ...(soloButton ? [row(soloAction, cancelButton)] : [cancelButton]),
         webButton,
       ]
-    : soloButton
-      // 有「只算我」時排成 1 + 2 + 2：確認存入獨占一列最醒目，其餘兩兩一列，卡片不會拉得太長
-      ? [
-          { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-          row(soloAction, editButton),
-          row(cancelButton, webButton),
-        ]
-      : [
-          { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
-          row(editButton, cancelButton),
+    : [
+        // 確認存入獨占一列最醒目，其餘兩兩一列（只剩一顆就自己一列），卡片才不會拉得太長：
+        //   只算我＋逐項分 / 編輯＋取消 / 查看網頁
+        { type: "button", style: "primary", color: "#1DB446", action: { type: "postback", label: "✅ 確認存入", data: JSON.stringify({ act: "save", n: nonce }) } },
+        ...pairUp([
+          ...(soloButton ? [soloAction] : []),
+          ...(itemsUrl ? [{ type: "button", style: "primary", color: "#34A3A3", action: { type: "uri", label: "🧾 逐項分", uri: itemsUrl } }] : []),
+          editButton,
+          cancelButton,
           webButton,
-        ]
+        ]),
+      ]
 
   return {
     type: "flex", altText,

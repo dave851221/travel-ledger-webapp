@@ -115,6 +115,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   `?id=<expenseId>` 直接查 DB（每次開啟都是最新內容）、`?n=<nonce>` 從
   `line_chat_history` 的 `pending` 列取草稿、`?data=<base64url>` 是舊格式，
   **必須保留**，已經發出去的 LINE 卡片還帶著它。
+  **🧾 逐項分**：收據 OCR 會多讀品項（`items`，`sanitizeReceiptItems` 收斂，少於 2 項視為沒有），存在 pending 列的 `it`。
+  品項與成員都 ≥2 時卡片多一顆「🧾 逐項分」（`buildItemsLiffUrl`，網址多帶 `&mode=items`），
+  LiffEdit 先顯示 `components/ItemSplitPanel.tsx` 讓人點每個品項是誰的，再把算好的 `split_data` 帶進一般表單確認。
+  打字也行（「雞皮、啤酒是賢佑的，其他平分」）：`propose_expenses` 的 `item_assignments`／`others`，**金額由程式算**不讓模型算。
+  計算在 `utils/itemSplit.ts` 與 `_shared/itemSplit.ts` 各一份（稅、折扣依比例攤，尾差給付款人），`itemSplit.test.ts` 做契約比對。
 - **`LiffPreference.tsx`**：同樣走 LIFF，編輯 `trips.ai_preference`
   （LINE Bot 解析文字與收據時參考的自由文字偏好，整趟旅程共用一份）。
   只覆寫單一欄位，不需要 nonce／postback。

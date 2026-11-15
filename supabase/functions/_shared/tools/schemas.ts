@@ -168,6 +168,25 @@ export const PROPOSE_EXPENSES_SCHEMA: JsonSchema = {
       type: 'string',
       description: '若這句話是在修正某張尚未確認的草稿，填該草稿的 nonce；否則不要填',
     },
+    item_assignments: {
+      type: 'array',
+      description: '只在修正一張【有品項明細】的收據草稿、使用者說了哪些品項是誰的時候填（「雞皮、啤酒是賢佑的，其他平分」）。'
+        + '每一筆是「這幾個品項 → 這幾個人」，幾個人就平分。沒提到的品項由 others 平分。'
+        + '系統會自己依品項金額算出每個人該付多少（含稅與折扣的比例），split_details 照原本填就好，不必自己算。',
+      items: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { type: 'integer' }, description: '品項編號（草稿清單裡 # 後面的數字）' },
+          members: { type: 'array', items: { type: 'string' }, description: '這幾個品項是誰的（成員正式名稱）' },
+        },
+        required: ['items', 'members'],
+      },
+    },
+    others: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '沒被指定的品項由誰平分。沒講就不要填（照草稿原本的分攤名單）',
+    },
   },
   required: ['expenses'],
 }

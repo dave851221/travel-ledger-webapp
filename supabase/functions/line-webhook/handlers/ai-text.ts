@@ -24,6 +24,7 @@ import { formatAmount } from "../../_shared/finance.ts"
 import { optionalString, toExpenseInput, toExpensePatch } from "../../_shared/tools/args.ts"
 import {
   expenseRef,
+  expensePrecision,
   prepareExpense,
   prepareExpenseUpdate,
   resolveExpenseRef,
@@ -73,12 +74,16 @@ import {
   buildDraftLiffUrl,
   buildEditLiffUrl,
   buildExpenseCard,
+  buildItemsLiffUrl,
   canGoSolo,
+  canSplitByItems,
   buildUpdatePreviewCard,
   GROUP_MODE_INFO,
   replyEditPicker,
 } from "../messages.ts"
 import { runInBackground } from "../util.ts"
+import { splitByItems } from "../../_shared/itemSplit.ts"
+import { resolveMember } from "../../_shared/validate.ts"
 import { itineraryTodayLine } from "../../_shared/tools/itinerary.ts"
 import { countryForTimezone } from "../../_shared/tools/weather.ts"
 import type { ToolArgs, ToolContext } from "../../_shared/tools/types.ts"
@@ -235,7 +240,11 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
     const payers = Object.keys(e.p ?? {}).join('、') || '未指定'
     const splits = Object.keys(e.s ?? {}).join('、') || '未指定'
     const photo = d.photoIds.length > 0 ? '（附收據照片）' : ''
-    return `- nonce=${d.nonce}：${e.d ?? ''} ${e.a ?? ''} ${e.c ?? ''}${photo}（付款：${payers}；分攤：${splits}）`
+    // 有品項明細的收據：列出編號，使用者說「雞皮是賢佑的」時 AI 才填得出 item_assignments
+    const items = d.items.length > 0
+      ? `\n  品項：${d.items.map((it, i) => `#${i} ${it.name} ${it.amount}`).join('、')}`
+      : ''
+    return `- nonce=${d.nonce}：${e.d ?? ''} ${e.a ?? ''} ${e.c ?? ''}${photo}（付款：${payers}；分攤：${splits}）${items}`
   }).join('\n')
 
   // 群組才有模式。「照片怎麼沒反應」「為什麼要 @ 你」這類問題要靠這一行回答 ——
@@ -518,6 +527,45 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
     return
   }
 
+  // 🧾 逐項分（打字版）：「雞皮、啤酒是賢佑的，其他平分」。
+  // 模型只負責說「哪幾項是誰的」，每個人該付多少由程式依品項金額算（含稅與折扣的比例），
+  // 不靠模型心算 —— 結果加總一定等於總額。
+  const assignments = Array.isArray(args.item_assignments) ? args.item_assignments as ToolArgs[] : []
+  if (correctedDraft && correctedDraft.items.length > 0 && assignments.length > 0 && prepared[0]) {
+    const items = correctedDraft.items
+    const owners: string[][] = items.map(() => [])
+    const unknownOwners: string[] = []
+    const toMembers = (names: unknown): string[] => (Array.isArray(names) ? names : []).flatMap((n) => {
+      const m = resolveMember(String(n ?? ''), trip.members)
+      if (!m) unknownOwners.push(String(n ?? ''))
+      return m ? [m] : []
+    })
+    for (const a of assignments) {
+      const who = toMembers(a.members)
+      for (const idx of Array.isArray(a.items) ? a.items : []) {
+        const i = Number(idx)
+        if (Number.isInteger(i) && i >= 0 && i < items.length) owners[i] = [...new Set([...owners[i], ...who])]
+      }
+    }
+    const othersArg = toMembers(args.others)
+    if (unknownOwners.length > 0) {
+      await reply(scope, [{
+        type: 'text',
+        text: `😅 對不到這幾個名字：${unknownOwners.join('、')}\n目前成員：${trip.members.join('、')}`,
+        quickReply: boundQR,
+      }])
+      return
+    }
+    const target = prepared[0].expense
+    const others = othersArg.length > 0 ? othersArg : Object.keys(correctedDraft.exp?.s ?? target.split_details ?? {})
+    const payer = Object.keys(target.payer_data ?? {})[0] ?? null
+    const result = splitByItems(Number(target.amount), items, owners, others.length > 0 ? others : trip.members,
+      expensePrecision(trip, target.currency), payer)
+    console.log(`[ITEMS] Split ${items.length} items by text: ${JSON.stringify(result.split)}`)
+    target.split_details = result.split
+    target.adjustment_member = result.adjustment
+  }
+
   // 這趟旅程沒有這個幣別的匯率 —— 存下去統計會以 1:1 換算而失真。
   // （文字路徑沒有照片要留，直接請使用者換一個幣別就好。）
   const rejected = prepared.find(p => p.reject)
@@ -552,6 +600,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
     const photoIds = (idx === 0 && correctedDraft && correctedDraft.photoIds.length > 0)
       ? correctedDraft.photoIds
       : []
+    const carriedItems = idx === 0 && correctedDraft ? correctedDraft.items : []
 
     // 摘要要帶 nonce，AI 下一輪才有辦法指名它要修正哪一張
     historyRows.push({
@@ -565,6 +614,8 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
         dt: expense.date, cat: expense.category, p: expense.payer_data, s: expense.split_details,
       },
       p: photoIds, rc: photoIds.length > 0 && correctedDraft?.receipt === true, tid: tripId,
+      // 品項明細跟著收據走：只有第一筆、而且是在修正那張收據時才沿用
+      it: carriedItems.length > 0 ? carriedItems : undefined,
     }))
     cards.push(buildExpenseCard({
       expense,
@@ -576,6 +627,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
       // 草稿卡片的「✏️ 編輯」只帶 nonce，完整內容 LiffEdit 自己去 pending 列撈（T2）
       liffUrl: buildDraftLiffUrl(trip.id, nonce, sourceId),
       soloButton: canGoSolo(expense, trip.members),
+      itemsUrl: canSplitByItems(carriedItems, trip.members) ? buildItemsLiffUrl(trip.id, nonce, sourceId) : undefined,
     }))
   })
 

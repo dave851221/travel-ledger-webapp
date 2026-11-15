@@ -24,7 +24,8 @@ import { supabase } from "../db.ts"
 import { storePendingExpense } from "../drafts.ts"
 import { ai, OCR_RESPONSE_SCHEMA } from "../ai.ts"
 import { downloadLineContent, replyMessage, showLoading } from "../line-api.ts"
-import { buildDraftLiffUrl, buildExpenseCard, canGoSolo } from "../messages.ts"
+import { buildDraftLiffUrl, buildExpenseCard, buildItemsLiffUrl, canGoSolo, canSplitByItems } from "../messages.ts"
+import { sanitizeReceiptItems } from "../../_shared/itemSplit.ts"
 import { runInBackground } from "../util.ts"
 import type { ExpenseInput } from "../../_shared/tools/types.ts"
 import type { ImageMessageEvent, OcrResponse } from "../types.ts"
@@ -162,6 +163,10 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
    行動支付（LINE Pay、街口、PayPay、Suica、悠遊卡）的付款完成畫面、
    信用卡的消費通知簡訊或 App 推播、轉帳成功畫面、電子發票畫面、訂單確認頁。
    這些沒有紙本收據的品項描述，就用商店名稱或服務名稱當描述。
+7b. **品項明細（items）**：type 是 expense 而且收據上有逐項列出買了什麼時，把每一行都放進 items：
+   name 照抄品名（外文保留原文，可在括號補兩三個字的中文），amount 是那一行最後印的金額。
+   同一行有數量（×2）就填乘完的金額；品項下面緊接的折扣（値引、割引、-50）直接從那一項扣掉，不要另列。
+   🚫 小計、消費稅、合計、找零、點數、付款方式都不是品項。看不出明細（付款畫面、只有總額）就不要填 items。
 8. **重要限制**：若封存狀態為「已封存」，一律回傳 type: "not_receipt"，系統會另行告知使用者旅程已封存。
 `
 
@@ -216,6 +221,8 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         { today, actorName: memberName, sourceText: null },
       )
       const expense = prepared.expense
+      // 🧾 逐項分要用的品項明細。只有真的收據才有；照片記帳（還沒有金額）不給
+      const items = needsAmount ? [] : sanitizeReceiptItems(res.items)
 
       // 成員名稱：prepareExpense 會先嘗試對應回正式名稱（暱稱、大小寫、部分符合
       // 都能救回來），對不上的從 map 裡拿掉並補上旅程預設 —— 照片留著、卡片照出，
@@ -243,7 +250,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
             dt: expense.date, cat: expense.category,
             p: expense.payer_data, s: expense.split_details,
           },
-          p: [messageId], rc: !needsAmount, tid: tripId,
+          p: [messageId], rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined,
         })
         // 幣別按鈕 + 取消。快速回覆上限 13 顆，留一顆給取消。
         const currencyItems = available.slice(0, 12).map(cur => ({
@@ -281,7 +288,9 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       // ⚠️ 這裡刻意不讓舊草稿失效。一次選兩張收據送出時，
       //    第二張會讓第一張作廢，使用者只記得到最後一張（H1、H7）。
       //    卡片失效只發生在 AI 明確指出「這句是在修正某張草稿」的時候。
-      await storePendingExpense(sourceId, nonce, { exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId })
+      await storePendingExpense(sourceId, nonce, {
+        exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined,
+      })
 
       // 摘要要帶 nonce：AI 才有辦法用 corrects_draft 指名它要修正哪一張卡片
       const historySummary = `[記帳建議] ${JSON.stringify({ ...expense, photo_ids, nonce }, null, 2)}`
@@ -311,6 +320,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         heroUrl: publicUrl,
         nonce, webUrl, liffUrl, needsAmount, unidentified,
         soloButton: canGoSolo(expense, trip.members),
+        itemsUrl: canSplitByItems(items, trip.members) ? buildItemsLiffUrl(trip.id, nonce, sourceId) : undefined,
       })], sourceId)
       // 傳完照片接著打「這是抹茶冰淇淋 600」來補充，群組的提及模式下也不必再 @
       extendFollowup(ctx)

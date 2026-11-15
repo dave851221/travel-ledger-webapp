@@ -8,6 +8,7 @@
 // import config.ts（bucket 名稱）與 db.ts。
 // ============================================================
 
+import { type ReceiptItem, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
 import { RECEIPTS_BUCKET } from "./config.ts"
 import { supabase } from "./db.ts"
 import type { DraftExpense, PendingDraft } from "./types.ts"
@@ -20,6 +21,8 @@ export interface OutstandingDraft {
   /** 照片是收據（見 PendingDraft.rc） */
   receipt: boolean
   tripId: string
+  /** 收據品項明細（🧾 逐項分），沒有就是空陣列 */
+  items: ReceiptItem[]
 }
 
 /** 一次看多少張 pending 卡。修改／刪除的確認卡也佔位子，所以比原本的 5 張寬鬆。 */
@@ -55,7 +58,10 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
       const photoIds = Array.isArray(parsed.p) ? parsed.p : []
       const kind = parsed.kind ?? 'expense'
       if (parsed.n && kind === 'expense') {
-        candidates.push({ nonce: parsed.n, exp: parsed.exp, photoIds, receipt: parsed.rc === true, tripId: parsed.tid })
+        candidates.push({
+          nonce: parsed.n, exp: parsed.exp, photoIds, receipt: parsed.rc === true, tripId: parsed.tid,
+          items: sanitizeReceiptItems(parsed.it),
+        })
       }
     } catch { /* skip malformed */ }
   }

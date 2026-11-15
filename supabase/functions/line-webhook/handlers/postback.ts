@@ -30,6 +30,9 @@ import { replyMessage } from "../line-api.ts"
 import {
   buildDraftLiffUrl,
   buildExpenseCard,
+  buildItemsLiffUrl,
+  canGoSolo,
+  canSplitByItems,
   describeProcessedAction,
   fieldLabel,
 } from "../messages.ts"
@@ -167,7 +170,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         dt: curExpense.date, cat: curExpense.category,
         p: curExpense.payer_data, s: curExpense.split_details,
       },
-      p: photoIds, rc: pending.rc, tid: tripIdForCur,
+      p: photoIds, rc: pending.rc, tid: tripIdForCur, it: pending.it,
     })
     await replyMessage(replyToken, [buildExpenseCard({
       expense: curExpense,
@@ -177,6 +180,8 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       nonce: newNonce,
       webUrl: `${WEBAPP_URL}/#/trip/${tripIdForCur}/dashboard`,
       liffUrl: buildDraftLiffUrl(tripIdForCur, newNonce, sourceId),
+      soloButton: canGoSolo(curExpense, curTrip.members),
+      itemsUrl: canSplitByItems(pending.it, curTrip.members) ? buildItemsLiffUrl(tripIdForCur, newNonce, sourceId) : undefined,
     })], sourceId)
     return
   }
@@ -242,7 +247,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         dt: soloExpense.date, cat: soloExpense.category,
         p: soloExpense.payer_data, s: soloExpense.split_details,
       },
-      p: photoIds, rc: pending.rc, tid: tripIdForMe,
+      p: photoIds, rc: pending.rc, tid: tripIdForMe, it: pending.it,
     })
     // 對話歷史也記一筆新的建議（帶新 nonce），之後說「改成 500」AI 才找得到這張卡
     await supabase.from('line_chat_history').insert({

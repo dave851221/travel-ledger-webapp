@@ -6,6 +6,8 @@ import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import { getLocalDateString } from '../utils/date';
+import ItemSplitPanel from '../components/ItemSplitPanel';
+import { sanitizeReceiptItems, type ReceiptItem } from '../utils/itemSplit';
 
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -14,6 +16,9 @@ const LiffEdit: React.FC = () => {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [initialData, setInitialData] = useState<Expense | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  // 🧾 逐項分：卡片帶 mode=items 而且草稿有品項時，先指派品項再進表單
+  const [items, setItems] = useState<ReceiptItem[]>([]);
+  const [step, setStep] = useState<'items' | 'form'>('form');
   const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
 
   // 儲存 init 完成後的 liff 實例
@@ -140,6 +145,11 @@ const LiffEdit: React.FC = () => {
           if (!draft) throw new Error('這張卡片已過期，請重新記帳。');
           // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, rc: 照片是收據, tid }
           decoded = { ...draft.exp, pi: draft.p, rc: draft.rc === true, n: draft.n, u: sourceId ?? undefined };
+          const receiptItems = sanitizeReceiptItems(draft.it);
+          if (receiptItems.length > 0) {
+            setItems(receiptItems);
+            if (searchParams.get('mode') === 'items') setStep('items');
+          }
         } else {
           // 舊格式：Base64 -> JSON
           if (!dataStr) throw new Error('缺少必要參數');
@@ -228,7 +238,22 @@ const LiffEdit: React.FC = () => {
   return (
     <div className="liff-shell-container min-h-dvh bg-canvas">
       {toastPortal}
-      {trip && initialData && (
+      {trip && initialData && step === 'items' && (
+        <ItemSplitPanel
+          trip={trip}
+          currency={initialData.currency}
+          total={initialData.amount}
+          items={items}
+          initialOthers={Object.keys(initialData.split_data)}
+          payer={Object.keys(initialData.payer_data)[0] ?? null}
+          onDone={(split, adjustment) => {
+            setInitialData({ ...initialData, split_data: split, adjustment_member: adjustment });
+            setStep('form');
+          }}
+          onSkip={() => setStep('form')}
+        />
+      )}
+      {trip && initialData && step === 'form' && (
         <ExpenseModal
           isOpen={true}
           // 沒有 LIFF ID 時頁面關不掉：✕ 與其沒反應，不如告訴使用者怎麼回去
