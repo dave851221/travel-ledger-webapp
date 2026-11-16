@@ -63,6 +63,10 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
 
   console.log(`[POSTBACK] Data: ${event.postback.data}`)
 
+  // 「👤 只算我」有金額時直接存入（David：不要再吐一張卡）。
+  // 換好的草稿用新 nonce 存成 pending，再把這次 postback 當成對它按「確認存入」往下走。
+  let soloFrom: { oldNonce: string; me: string } | null = null
+
   // 撤銷存入（postback 按鈕）
   //
   // postback 只帶 eid：描述放進去的話，外文店名＋中文說明很容易讓整包
@@ -249,24 +253,29 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       },
       p: photoIds, rc: pending.rc, tid: tripIdForMe, it: pending.it,
     })
-    // 對話歷史也記一筆新的建議（帶新 nonce），之後說「改成 500」AI 才找得到這張卡
-    await supabase.from('line_chat_history').insert({
-      line_user_id: sourceId, role: 'model',
-      content: `[記帳建議] ${JSON.stringify({ ...soloExpense, photo_ids: photoIds, nonce: newNonce }, null, 2)}`,
-    })
-    await replyMessage(replyToken, [buildExpenseCard({
-      expense: soloExpense,
-      title: `👤 改成只算 ${me}`,
-      altText: `確認記帳: ${soloExpense.description}`,
-      heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], tripIdForMe) : null,
-      nonce: newNonce,
-      webUrl: `${WEBAPP_URL}/#/trip/${tripIdForMe}/dashboard`,
-      liffUrl: buildDraftLiffUrl(tripIdForMe, newNonce, sourceId),
-      // 照片記帳（還沒填金額）換出來的卡片一樣只能「✏️ 填金額」，不能直接存 0 元
-      needsAmount: amount <= 0,
-      unidentified: amount <= 0 && !String(src.d ?? '').trim(),
-    })], sourceId)
-    return
+    if (amount > 0) {
+      soloFrom = { oldNonce, me }
+      postbackData = { act: 'save', n: newNonce }
+    } else {
+      // 對話歷史也記一筆新的建議（帶新 nonce），之後說「改成 500」AI 才找得到這張卡
+      await supabase.from('line_chat_history').insert({
+        line_user_id: sourceId, role: 'model',
+        content: `[記帳建議] ${JSON.stringify({ ...soloExpense, photo_ids: photoIds, nonce: newNonce }, null, 2)}`,
+      })
+      await replyMessage(replyToken, [buildExpenseCard({
+        expense: soloExpense,
+        title: `👤 改成只算 ${me}`,
+        altText: `確認記帳: ${soloExpense.description}`,
+        heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], tripIdForMe) : null,
+        nonce: newNonce,
+        webUrl: `${WEBAPP_URL}/#/trip/${tripIdForMe}/dashboard`,
+        liffUrl: buildDraftLiffUrl(tripIdForMe, newNonce, sourceId),
+        // 照片記帳（還沒填金額）換出來的卡片一樣只能「✏️ 填金額」，不能直接存 0 元
+        needsAmount: amount <= 0,
+        unidentified: amount <= 0 && !String(src.d ?? '').trim(),
+      })], sourceId)
+      return
+    }
   }
 
   // 刪除既有支出。兩個來源：
@@ -515,6 +524,8 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       }
 
       await releaseNonce(nonce)
+      // 只算我直接存失敗：原本那張卡要能再按（「✏️ 編輯」等），不然使用者會卡住
+      if (soloFrom) await releaseNonce(soloFrom.oldNonce)
       if (saveResult.reason === 'empty_participants') {
         // 卡片產生時已經補過預設值（applyParticipantDefaults），
         // 走到這裡還是空的多半是成員在存檔前被刪掉了，只能請使用者重新編輯。
@@ -573,7 +584,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     // 群組裡標明是誰記的，一對一就不必贅述
     const savedBy = speakerLabel ? `\n（由 ${speakerLabel} 記錄）` : ''
     await replyMessage(replyToken, [{
-      type: 'text', text: `✅ 已存入：${expense.description}${savedBy}`,
+      type: 'text', text: `✅ 已存入：${expense.description}${soloFrom ? `（只算 ${soloFrom.me}）` : ''}${savedBy}`,
       quickReply: { items: [...undoItems, ...boundQR.items] }
     }], sourceId)
 

@@ -345,7 +345,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    **OCR 路徑維持 JSON mode**（`ai.generate` + `OCR_RESPONSE_SCHEMA`），不走工具迴圈
 4b. **語音訊息**：下載 m4a → Gemini 免費版逐字轉錄（不管 `AI_PROVIDER` 是什麼；中文寫繁體，英日文照原文）→ **當成使用者打的字**走上面第 3 點的流程
    （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
-5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`、`me`（「👤 只算我」：付款人與分攤都改成按的人，換一張新卡）。
+5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`、`me`（「👤 只算我」：付款人與分攤都改成按的人後**直接存入**；照片卡還沒金額時才換一張新卡，存入失敗會把原卡的鎖放掉）。
    按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
    但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著。
