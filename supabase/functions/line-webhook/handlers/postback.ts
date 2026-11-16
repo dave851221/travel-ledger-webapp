@@ -37,7 +37,7 @@ import {
   fieldLabel,
 } from "../messages.ts"
 import type { PreparedExpense, ScopedContext } from "../../_shared/tools/types.ts"
-import type { PrecisionConfig } from "../../_shared/types.ts"
+import type { PrecisionConfig, TripRow } from "../../_shared/types.ts"
 import type { DraftExpense, PostbackData, PostbackEvent } from "../types.ts"
 
 /**
@@ -46,6 +46,34 @@ import type { DraftExpense, PostbackData, PostbackEvent } from "../types.ts"
  */
 function toolScope(tripId: string | null): ScopedContext {
   return { db: supabase, trip: { id: tripId as string } }
+}
+
+type TripRecord = TripRow
+
+/**
+ * 佔用 nonce（防連點的鎖），回傳錯誤（null 代表搶到了）。
+ *
+ * ⚡ 速度：postback 幾乎每次都是冷啟動，每一趟資料庫往返要 0.3～1 秒，
+ *    所以這支常和「讀 pending」「預先查旅程」放進同一個 Promise.all。
+ */
+function lockNonce(nonce: string | undefined, sourceId: string, actionType: string): Promise<unknown> {
+  if (!nonce) return Promise.resolve(null)
+  return Promise.resolve(supabase.from('line_processed_actions')
+    .insert({ nonce, line_user_id: sourceId, action_type: actionType })
+    .then((r: { error: unknown }) => r.error))
+}
+
+/** 預先查旅程（`select('*')`）。查不到或沒有 id 時是 null。 */
+function fetchTrip(tripId: string | null | undefined): Promise<TripRecord | null> {
+  if (!tripId) return Promise.resolve(null)
+  return Promise.resolve(supabase.from('trips').select('*').eq('id', tripId).maybeSingle()
+    .then((r: { data: TripRecord | null }) => r.data))
+}
+
+/** 鎖已經被佔走時，回覆「這張卡片先前已經…」 */
+async function replyAlreadyProcessed(replyToken: string, nonce: string, sourceId: string): Promise<void> {
+  const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
+  await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
 }
 
 /** 處理一則 postback。呼叫端已經確認 ctx.isBound。 */
@@ -64,8 +92,9 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
   console.log(`[POSTBACK] Data: ${event.postback.data}`)
 
   // 「👤 只算我」有金額時直接存入（David：不要再吐一張卡）。
-  // 換好的草稿用新 nonce 存成 pending，再把這次 postback 當成對它按「確認存入」往下走。
+  // 換好的內容與已經查到的旅程直接交給下面的「確認存入」，不再另存 pending、不再重查一次。
   let soloFrom: { oldNonce: string; me: string } | null = null
+  let soloSave: { exp: DraftExpense; photoIds: string[]; receipt: boolean; tripId: string; trip: TripRecord } | null = null
 
   // 撤銷存入（postback 按鈕）
   //
@@ -107,25 +136,29 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
   if (postbackData.act === 'cur') {
     const oldNonce = postbackData.n
     const chosen = String(postbackData.c ?? '').toUpperCase()
-    const pending = oldNonce ? await getPendingExpense(sourceId, oldNonce) : null
-    if (!pending) {
+    if (!oldNonce) {
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，請重新傳送收據。' }], sourceId)
       return
     }
-
-    // 佔用舊 nonce，避免同一則訊息的按鈕被連按兩次而出兩張卡
-    const { error: lockErr } = await supabase.from('line_processed_actions')
-      .insert({ nonce: oldNonce, line_user_id: sourceId, action_type: 'superseded' })
+    // 讀草稿、佔用舊 nonce（避免同一則訊息的按鈕被連按兩次而出兩張卡）、預先查旅程，同時做
+    const [pending, lockErr, guessTrip] = await Promise.all([
+      getPendingExpense(sourceId, oldNonce),
+      lockNonce(oldNonce, sourceId, 'superseded'),
+      fetchTrip(userState.current_trip_id),
+    ])
+    if (!pending) {
+      if (!lockErr) await releaseNonce(oldNonce)
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，請重新傳送收據。' }], sourceId)
+      return
+    }
     if (lockErr) {
-      const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', oldNonce).maybeSingle()
-      await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+      await replyAlreadyProcessed(replyToken, oldNonce, sourceId)
       return
     }
 
     // isBound 是呼叫端的前提，current_trip_id 必定有值
     const tripIdForCur = pending.tid || userState.current_trip_id as string
-    const { data: curTrip } = await supabase.from('trips')
-      .select('id, rates, precision_config, base_currency, default_currency, members').eq('id', tripIdForCur).maybeSingle()
+    const curTrip = guessTrip?.id === tripIdForCur ? guessTrip : await fetchTrip(tripIdForCur)
     if (!curTrip) {
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。' }], sourceId)
       return
@@ -194,23 +227,29 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
   // 跟 cur 一樣是換一張新卡：舊卡失效、內容存成新的 pending，按「確認存入」才落地。
   if (postbackData.act === 'me') {
     const oldNonce = postbackData.n
-    const pending = oldNonce ? await getPendingExpense(sourceId, oldNonce) : null
-    if (!oldNonce || !pending) {
+    if (!oldNonce) {
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，可能已經過期了。' }], sourceId)
       return
     }
-
-    const { error: lockErr } = await supabase.from('line_processed_actions')
-      .insert({ nonce: oldNonce, line_user_id: sourceId, action_type: 'superseded' })
+    // 讀草稿、上鎖、預先查目前的旅程三件事同時做（每趟往返都要好幾百毫秒）
+    const [pending, lockErr, guessTrip] = await Promise.all([
+      getPendingExpense(sourceId, oldNonce),
+      lockNonce(oldNonce, sourceId, 'superseded'),
+      fetchTrip(userState.current_trip_id),
+    ])
+    if (!pending) {
+      // 草稿不在了：剛剛搶到的鎖要放掉，行為與以前「先查草稿、查不到就不上鎖」一樣
+      if (!lockErr) await releaseNonce(oldNonce)
+      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，可能已經過期了。' }], sourceId)
+      return
+    }
     if (lockErr) {
-      const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', oldNonce).maybeSingle()
-      await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+      await replyAlreadyProcessed(replyToken, oldNonce, sourceId)
       return
     }
 
     const tripIdForMe = pending.tid || userState.current_trip_id as string
-    const { data: meTrip } = await supabase.from('trips')
-      .select('id, members, precision_config').eq('id', tripIdForMe).maybeSingle()
+    const meTrip = guessTrip?.id === tripIdForMe ? guessTrip : await fetchTrip(tripIdForMe)
     if (!meTrip) {
       await releaseNonce(oldNonce)
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。' }], sourceId)
@@ -242,26 +281,30 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       split_details: { [me]: amount },
     }
 
-    const newNonce = Math.random().toString(36).substring(2, 10)
     const photoIds = pending.p ?? []
-    await storePendingExpense(sourceId, newNonce, {
-      kind: 'expense',
-      exp: {
-        d: soloExpense.description, a: amount, c: currency,
-        dt: soloExpense.date, cat: soloExpense.category,
-        p: soloExpense.payer_data, s: soloExpense.split_details,
-      },
-      p: photoIds, rc: pending.rc, tid: tripIdForMe, it: pending.it,
-    })
+    const soloExp: DraftExpense = {
+      d: soloExpense.description, a: amount, c: currency,
+      dt: soloExpense.date, cat: soloExpense.category,
+      p: soloExpense.payer_data, s: soloExpense.split_details,
+    }
     if (amount > 0) {
+      // 直接存：不另存 pending、不再上第二道鎖（舊卡的 nonce 剛剛已經鎖住了）
       soloFrom = { oldNonce, me }
-      postbackData = { act: 'save', n: newNonce }
+      soloSave = { exp: soloExp, photoIds, receipt: pending.rc === true, tripId: tripIdForMe, trip: meTrip }
+      postbackData = { act: 'save' }
     } else {
-      // 對話歷史也記一筆新的建議（帶新 nonce），之後說「改成 500」AI 才找得到這張卡
-      await supabase.from('line_chat_history').insert({
-        line_user_id: sourceId, role: 'model',
-        content: `[記帳建議] ${JSON.stringify({ ...soloExpense, photo_ids: photoIds, nonce: newNonce }, null, 2)}`,
-      })
+      const newNonce = Math.random().toString(36).substring(2, 10)
+      // 新卡的 pending 與對話歷史（帶新 nonce，之後說「改成 500」AI 才找得到這張卡）同時寫，
+      // 都寫好了才送卡片 —— 不然手快的人會按到一張還查不到內容的卡
+      await Promise.all([
+        storePendingExpense(sourceId, newNonce, {
+          kind: 'expense', exp: soloExp, p: photoIds, rc: pending.rc, tid: tripIdForMe, it: pending.it,
+        }),
+        supabase.from('line_chat_history').insert({
+          line_user_id: sourceId, role: 'model',
+          content: `[記帳建議] ${JSON.stringify({ ...soloExpense, photo_ids: photoIds, nonce: newNonce }, null, 2)}`,
+        }),
+      ])
       await replyMessage(replyToken, [buildExpenseCard({
         expense: soloExpense,
         title: `👤 改成只算 ${me}`,
@@ -340,15 +383,17 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     }
 
     // 先上鎖再做事（防連點）。已經套用過的話這裡就會衝突。
-    const { error: lockErr } = await supabase.from('line_processed_actions')
-      .insert({ nonce: updNonce, line_user_id: sourceId, action_type: 'update' })
+    // 讀卡片內容與預先查旅程只讀不寫，跟上鎖同時做。
+    const [lockErr, pending, guessTrip] = await Promise.all([
+      lockNonce(updNonce, sourceId, 'update'),
+      getPendingExpense(sourceId, updNonce),
+      fetchTrip(userState.current_trip_id),
+    ])
     if (lockErr) {
-      const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', updNonce).maybeSingle()
-      await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId)
+      await replyAlreadyProcessed(replyToken, updNonce, sourceId)
       return
     }
 
-    const pending = await getPendingExpense(sourceId, updNonce)
     if (!pending || pending.kind !== 'update' || !pending.eid || !pending.exp) {
       await releaseNonce(updNonce)
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這張修改卡的內容，請重新說一次要改哪一筆。' }], sourceId)
@@ -356,7 +401,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     }
 
     const updTripId = pending.tid || userState.current_trip_id as string
-    const { data: updTrip } = await supabase.from('trips').select('*').eq('id', updTripId).maybeSingle()
+    const updTrip = guessTrip?.id === updTripId ? guessTrip : await fetchTrip(updTripId)
     if (!updTrip) {
       // 旅程被後台刪掉了，這張卡再也套不上去 —— 與 save 一致，鎖不放
       await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
@@ -445,29 +490,43 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     // 舊格式的卡片（內容整包放在 postback 裡）只會來自收據辨識
     let receipt = !!(postbackData.expense || exp_new || exp_old)
 
-    if (!expenseRaw && nonce) {
-      const pending = await getPendingExpense(sourceId, nonce)
+    let trip: TripRecord | null = null
+
+    if (soloSave) {
+      // 「👤 只算我」直接存：內容與旅程上面都備好了，不必再查
+      expenseRaw = soloSave.exp
+      photo_ids = soloSave.photoIds
+      receipt = soloSave.receipt
+      trip_id = soloSave.tripId
+      trip = soloSave.trip
+    } else {
+      // 讀草稿、上鎖、預先查目前的旅程三件事同時做（每趟往返都要好幾百毫秒）
+      const needsPending = !expenseRaw && !!nonce
+      const [pending, nonceInsertError, guessTrip] = await Promise.all([
+        needsPending ? getPendingExpense(sourceId, nonce as string) : Promise.resolve(null),
+        lockNonce(nonce, sourceId, 'save'),
+        fetchTrip(trip_id),
+      ])
       if (pending) {
         expenseRaw = pending.exp
         photo_ids = pending.p || []
         receipt = pending.rc === true
         trip_id = pending.tid || trip_id
       }
-    }
 
-    if (!expenseRaw) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，請重新記帳。' }], sourceId); return
-    }
-
-    if (nonce) {
-      const { error: nonceInsertError } = await supabase
-        .from('line_processed_actions')
-        .insert({ nonce, line_user_id: sourceId, action_type: 'save' });
-      if (nonceInsertError) {
-        // 查詢 action_type，給予更明確的重複操作提示
-        const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
-        await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId); return
+      if (!expenseRaw) {
+        // 以前是先查草稿、查不到就不上鎖；現在一起做，搶到的鎖要放掉
+        if (nonce && !nonceInsertError) await releaseNonce(nonce)
+        await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到待確認的支出資料，請重新記帳。' }], sourceId); return
       }
+
+      if (nonce && nonceInsertError) {
+        // 查詢 action_type，給予更明確的重複操作提示
+        await replyAlreadyProcessed(replyToken, nonce, sourceId); return
+      }
+
+      // 草稿是在別趟旅程記的（中途切換過）才需要再查一次
+      trip = guessTrip?.id === trip_id ? guessTrip : await fetchTrip(trip_id)
     }
 
     if (!trip_id) {
@@ -485,8 +544,6 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     }
 
     const photo_urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
-
-    const { data: trip } = await supabase.from('trips').select('*').eq('id', trip_id).single()
 
     if (!trip) {
       // 旅程可能已被刪除（見 docs/DB_MAINTENANCE.md），此時舊卡片的按鈕不該讓整個函式崩掉。
@@ -564,8 +621,10 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     // 記錄 expense_id 供文字指令「取消上一筆」使用。
     // ⚠️ 必須 await：Edge Runtime 會在回應送出後中止未完成的 promise，
     //    這一列掉了就會讓「取消上一筆」撤到更早的一筆支出（H11）。
+    //    ⚡ 但不必等它寫完才回覆 —— 下面跟回覆放進同一個 Promise.all。
+    const bookkeeping: PromiseLike<unknown>[] = []
     if (savedExpense?.id) {
-      await supabase.from('line_chat_history').insert({
+      bookkeeping.push(supabase.from('line_chat_history').insert({
         line_user_id: sourceId, role: 'saved',
         content: JSON.stringify({
           expense_id: savedExpense.id,
@@ -573,7 +632,13 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
           by: speakerLabel,
         }),
         speaker_user_id: speakerUserId, speaker_name: speakerLabel,
-      })
+      }))
+    }
+    // 只算我直接存成功：舊卡的鎖從「被取代」改成「已存入」，
+    // 再按一次才會說「已存入」，而不是叫人去按一張根本沒出現的新卡
+    if (soloFrom) {
+      bookkeeping.push(supabase.from('line_processed_actions')
+        .update({ action_type: 'save' }).eq('nonce', soloFrom.oldNonce))
     }
 
     // 存入後附帶撤銷快速按鈕，讓使用者可即時反悔。
@@ -583,10 +648,13 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       : []
     // 群組裡標明是誰記的，一對一就不必贅述
     const savedBy = speakerLabel ? `\n（由 ${speakerLabel} 記錄）` : ''
-    await replyMessage(replyToken, [{
-      type: 'text', text: `✅ 已存入：${expense.description}${soloFrom ? `（只算 ${soloFrom.me}）` : ''}${savedBy}`,
-      quickReply: { items: [...undoItems, ...boundQR.items] }
-    }], sourceId)
+    await Promise.all([
+      ...bookkeeping,
+      replyMessage(replyToken, [{
+        type: 'text', text: `✅ 已存入：${expense.description}${soloFrom ? `（只算 ${soloFrom.me}）` : ''}${savedBy}`,
+        quickReply: { items: [...undoItems, ...boundQR.items] }
+      }], sourceId),
+    ])
 
   } else if (postbackData.action === 'cancel' || postbackData.act === 'cancel') {
     const nonce = postbackData.n ?? postbackData.nonce
@@ -596,30 +664,29 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     // 從 pending 取得照片資訊（用於刪除 Storage 的照片）。
     // AI 的修改／刪除提議卡（kind: 'update' / 'delete'）沒有照片，
     // 所以下面只會上鎖並回一句「已取消」，那正是我們要的行為。
-    if (photo_ids.length === 0 && nonce) {
-      const pending = await getPendingExpense(sourceId, nonce)
-      if (pending) {
-        photo_ids = pending.p || []
-        trip_id = pending.tid || trip_id
-      }
+    // 讀草稿（只讀不寫）與上鎖同時做
+    const [pending, nonceInsertError] = await Promise.all([
+      photo_ids.length === 0 && nonce ? getPendingExpense(sourceId, nonce) : Promise.resolve(null),
+      lockNonce(nonce, sourceId, 'cancel'),
+    ])
+    if (pending) {
+      photo_ids = pending.p || []
+      trip_id = pending.tid || trip_id
+    }
+    if (nonce && nonceInsertError) {
+      await replyAlreadyProcessed(replyToken, nonce, sourceId); return
     }
 
-    if (nonce) {
-      const { error: nonceInsertError } = await supabase
-        .from('line_processed_actions')
-        .insert({ nonce, line_user_id: sourceId, action_type: 'cancel' })
-      if (nonceInsertError) {
-        const { data: processed } = await supabase.from('line_processed_actions').select('action_type').eq('nonce', nonce).maybeSingle()
-        await replyMessage(replyToken, [{ type: 'text', text: describeProcessedAction(processed?.action_type) }], sourceId); return
-      }
-    }
-
-    if (photo_ids.length > 0 && trip_id) {
+    // 刪照片與回覆同時送（都 await，Edge Runtime 回應後會中止沒做完的 promise）
+    const removePhotos = async () => {
+      if (photo_ids.length === 0 || !trip_id) return
       const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
       console.log(`[PHOTO] Remove photo URL: ${urls}`)
       await supabase.storage.from(RECEIPTS_BUCKET).remove(urls)
     }
-
-    await replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }], sourceId)
+    await Promise.all([
+      removePhotos(),
+      replyMessage(replyToken, [{ type: 'text', text: photo_ids.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }], sourceId),
+    ])
   }
 }

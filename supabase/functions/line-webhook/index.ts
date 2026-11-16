@@ -42,13 +42,18 @@ serve(async (req) => {
     for (const event of events ?? []) {
       console.log(`[EVENT_RAW] Received event type: ${event.type}`)
 
-      // LINE 重送的同一個事件只處理一次
-      if (!(await claimWebhookEvent(event.webhookEventId))) {
+      // LINE 重送的同一個事件只處理一次。
+      // ⚡ 與 buildEventContext 同時做：postback 幾乎都是冷啟動，每趟資料庫往返要 0.3～1 秒。
+      //    重送時 context 白查一次無妨（它只讀狀態、補 last_active_at）。
+      const [claimed, ctx] = await Promise.all([
+        claimWebhookEvent(event.webhookEventId),
+        buildEventContext(event),
+      ])
+      if (!claimed) {
         console.log(`[EVENT_DEDUP] Skipping redelivered event ${event.webhookEventId}`)
         continue
       }
 
-      const ctx = await buildEventContext(event)
       const { boundQR, isBound, replyToken, sourceId, sourceType } = ctx
       // 回覆的最後一則沒帶按鈕時自動補上（記帳卡片之後按鈕才不會消失）
       setDefaultQuickReply(replyToken, isBound ? boundQR : getQuickReply(false))

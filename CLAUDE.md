@@ -348,6 +348,9 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
 5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`、`me`（「👤 只算我」：付款人與分攤都改成按的人後**直接存入**；照片卡還沒金額時才換一張新卡，存入失敗會把原卡的鎖放掉）。
    按鈕帶 `nonce`，寫入 `line_processed_actions` 防止重複送出。
+   ⚡ **速度**：postback 幾乎每次都是冷啟動，每趟資料庫往返 0.3～1 秒，所以「讀 pending、上鎖、預先查目前旅程」放在同一個 `Promise.all`
+   （pending 不在時要把剛搶到的鎖放掉），收尾的寫入（`saved` 列、刪照片）跟回覆一起送；`index.ts` 的去重與 `buildEventContext` 也是同時做。
+   新的 postback 分支請照這個寫法，不要再一步一步 await。
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
    但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著。
    `pending` 列以 `kind` 區分：空或 `expense` 是記帳草稿，`update`／`delete` 是 AI 的提議卡（另帶 `eid`）。
