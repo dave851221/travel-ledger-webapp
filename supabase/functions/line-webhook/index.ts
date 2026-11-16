@@ -34,7 +34,7 @@ import type {
 } from "./types.ts"
 
 serve(async (req) => {
-  // 保溫（pg_cron 每 30 秒 GET 一次，見 migrations/20261116_keep_line_webhook_warm.sql）。
+  // 保溫用的 GET。排程已關（Disk IO 額度撐不住，見 migrations/20261116_unschedule_keep_warm.sql），分支留著無害。
   // 按鈕幾乎每次都碰上冷啟動：worker 閒置約一分鐘就關，新 worker 連資料庫、LINE API 都要重新握手，
   // 光這段就多 0.5～1 秒。這裡各打一個最輕的請求，讓 worker 與兩條連線都留著。
   // LINE 的 webhook 一律是 POST，GET 不會撞到正式流程。

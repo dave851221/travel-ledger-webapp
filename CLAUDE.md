@@ -351,7 +351,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    ⚡ **速度**：postback 幾乎每次都是冷啟動，每趟資料庫往返 0.3～1 秒，所以「讀 pending、上鎖、預先查目前旅程」放在同一個 `Promise.all`
    （pending 不在時要把剛搶到的鎖放掉），收尾的寫入（`saved` 列、刪照片）跟回覆一起送；`index.ts` 的去重與 `buildEventContext` 也是同時做。
    新的 postback 分支請照這個寫法，不要再一步一步 await。
-   **保溫**：pg_cron 的 `keep-line-webhook-warm` 每 30 秒用 pg_net GET 一次函式（`index.ts` 開頭的 GET 分支只做兩個最輕的查詢），worker 與資料庫／LINE 連線一直是熱的，按鈕不必每次冷啟動。
+   ⛔ **不要做保溫**：2026-11-16 試過 pg_cron 每 30 秒用 pg_net GET 一次函式，半天就把免費方案的 **Disk IO 額度**吃到快沒了（每次都寫 `cron.job_run_details` 與 `net._http_response`），已關掉（`20261116_unschedule_keep_warm.sql`）。`index.ts` 開頭的 GET 分支留著無害。**任何分鐘級以下的排程或高頻寫入都不要加。**
    同一張表也用來讓草稿卡片失效（`action_type = 'superseded'`）——
    但**只失效 AI 用 `corrects_draft` 指名的那一張**，連續記多筆時每張卡都要留著。
    `pending` 列以 `kind` 區分：空或 `expense` 是記帳草稿，`update`／`delete` 是 AI 的提議卡（另帶 `eid`）。
