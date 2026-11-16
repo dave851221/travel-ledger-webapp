@@ -108,17 +108,26 @@ export function sanitizeReceiptItems(value: unknown): ReceiptItem[] {
 export const UNREAD_ITEM_NAME = '沒讀到的品項／差額'
 
 /**
- * 品項加總比總額少、而且不像外加消費稅（8%～10%）時，多半是辨識漏了一兩行
- * （例如同一道菜連續點了兩次，被當成同一行）。這時不要把差額按比例攤給每個人
- * —— 那會讓沒點的人也替漏掉的那一項付錢 —— 而是補一列「沒讀到的品項／差額」，
- * 讓使用者自己點是誰的（沒點就跟其他沒指定的一起平分）。
- * 比總額多（折扣）或差額像消費稅時維持原樣，交給 splitByItems 依比例攤。
+ * 讓品項對得上收據，差額才不會被算到錯的人頭上。
+ *
+ * - 有收據印的**品項小計**（外税＝稅前小計；內含稅＝合計）時以它為準：
+ *   品項加起來比小計少，就是辨識漏了一兩行（例如同一道菜連點兩次被當成一行）→ 補一列「沒讀到的品項／差額」讓人指派；
+ *   小計與總額之間的差（消費稅、服務費）一律交給 splitByItems 依每個人點的金額比例攤。
+ * - 沒有小計時退回猜測：差額像外加消費稅（8%～10%）或尾數就照比例攤，其餘補一列差額。
+ * 比總額多（折扣）時維持原樣，交給 splitByItems 依比例攤。
  */
-export function reconcileReceiptItems(items: ReceiptItem[], total: number): ReceiptItem[] {
+export function reconcileReceiptItems(items: ReceiptItem[], total: number, subtotal?: number | null): ReceiptItem[] {
   if (items.length === 0 || !(total > 0)) return items
   if (items.some(i => i.name === UNREAD_ITEM_NAME)) return items
   const sum = items.reduce((acc, i) => acc.plus(i.amount), new Decimal(0))
   if (!sum.greaterThan(0)) return items
+  const st = Number(subtotal)
+  if (Number.isFinite(st) && st > 0 && st <= total * 1.001) {
+    const missing = new Decimal(st).minus(sum)
+    // 小計本身的尾數差一點點就算了
+    if (!missing.greaterThan(new Decimal(st).times(0.005))) return items
+    return [...items, { name: UNREAD_ITEM_NAME, amount: missing.toNumber() }]
+  }
   const diff = new Decimal(total).minus(sum)
   // 尾數差一點點（四捨五入）也照比例攤就好
   if (!diff.greaterThan(new Decimal(total).times(0.005))) return items

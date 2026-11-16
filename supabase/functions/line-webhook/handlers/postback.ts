@@ -207,7 +207,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         dt: curExpense.date, cat: curExpense.category,
         p: curExpense.payer_data, s: curExpense.split_details,
       },
-      p: photoIds, rc: pending.rc, tid: tripIdForCur, it: pending.it,
+      p: photoIds, rc: pending.rc, tid: tripIdForCur, it: pending.it, st: pending.st,
     })
     await replyMessage(replyToken, [buildExpenseCard({
       expense: curExpense,
@@ -298,7 +298,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       // 都寫好了才送卡片 —— 不然手快的人會按到一張還查不到內容的卡
       await Promise.all([
         storePendingExpense(sourceId, newNonce, {
-          kind: 'expense', exp: soloExp, p: photoIds, rc: pending.rc, tid: tripIdForMe, it: pending.it,
+          kind: 'expense', exp: soloExp, p: photoIds, rc: pending.rc, tid: tripIdForMe, it: pending.it, st: pending.st,
         }),
         supabase.from('line_chat_history').insert({
           line_user_id: sourceId, role: 'model',

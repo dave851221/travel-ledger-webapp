@@ -115,10 +115,15 @@ export const OCR_RESPONSE_SCHEMA: JsonSchema = {
     // item_photo：不是收據、但拍的是可以記帳的東西（食物、商品、門票…），先記成金額 0 的草稿
     type: { type: 'string', enum: ['expense', 'item_photo', 'not_receipt'] },
     data: EXPENSE_DATA_SCHEMA,
+    // 收據上印的品項小計：外税是稅前小計，內含稅就等於合計。用來判斷品項是不是漏讀、稅與服務費有多少
+    items_subtotal: {
+      type: 'number',
+      description: '收據印的品項小計（外税＝消費稅、服務費之前的小計；內含稅或沒印小計＝合計）。type 是 expense 而且有 items 才填',
+    },
     // 🧾 逐項分：收據上每一行買的東西。卡片的「逐項分」與「雞皮是賢佑的」都靠它
     items: {
       type: 'array',
-      description: '收據上每一個購買品項（type 是 expense 才填）。不含小計、稅、合計、找零、付款方式那幾行',
+      description: '收據上每一個購買品項（type 是 expense 才填）。金額照收據印的，消費稅、服務費、小計、合計、找零、付款方式都不放進來，也不要攤進任何一項',
       items: {
         type: 'object',
         properties: {

@@ -168,7 +168,11 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
    不要寫口味、做法、數量這些補充說明 —— 品項一多，字寫長了辨識會慢好幾秒。amount 是那一行最後印的金額。
    同一行有數量（×2）就填乘完的金額；品項下面緊接的折扣（値引、割引、-50）直接從那一項扣掉，不要另列。
    ⚠️ 收據上**連續出現一模一樣的兩行**（同一道菜分兩次點）要列兩次，不能合併、不能跳過。
-   列完把 items 加起來對一下小計（税込的合計）：對不上就回頭逐行再看一次，通常是漏了一行。
+   amount 一律照那一行**印的金額**，不要為了湊總額改任何一項。
+   ⚠️ **消費稅、服務費（サービス料）、席料不是品項**，也**不要加進任何一項**（例如把稅加到燒賣上）——
+   程式會依每個人點的金額比例自動攤稅與服務費。外税的收據，items 加起來應該等於稅前的小計，不是合計。
+   items_subtotal 填收據印的品項小計（外税＝稅前小計；內含稅或沒印小計就填合計）。
+   列完把 items 加起來對一下 items_subtotal：對不上就回頭逐行再看一次，通常是漏了一行。
    0 元的行（加冰、免費附餐）不用列。
    🚫 小計、消費稅、合計、找零、點數、付款方式都不是品項。看不出明細（付款畫面、只有總額）就不要填 items。
 8. **重要限制**：若封存狀態為「已封存」，一律回傳 type: "not_receipt"，系統會另行告知使用者旅程已封存。
@@ -226,7 +230,8 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       )
       const expense = prepared.expense
       // 🧾 逐項分要用的品項明細。只有真的收據才有；照片記帳（還沒有金額）不給
-      const items = needsAmount ? [] : reconcileReceiptItems(sanitizeReceiptItems(res.items), Number(expense.amount) || 0)
+      const itemsSubtotal = Number(res.items_subtotal) > 0 ? Number(res.items_subtotal) : undefined
+      const items = needsAmount ? [] : reconcileReceiptItems(sanitizeReceiptItems(res.items), Number(expense.amount) || 0, itemsSubtotal)
 
       // 成員名稱：prepareExpense 會先嘗試對應回正式名稱（暱稱、大小寫、部分符合
       // 都能救回來），對不上的從 map 裡拿掉並補上旅程預設 —— 照片留著、卡片照出，
@@ -254,7 +259,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
             dt: expense.date, cat: expense.category,
             p: expense.payer_data, s: expense.split_details,
           },
-          p: [messageId], rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined,
+          p: [messageId], rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined, st: items.length > 0 ? itemsSubtotal : undefined,
         })
         // 幣別按鈕 + 取消。快速回覆上限 13 顆，留一顆給取消。
         const currencyItems = available.slice(0, 12).map(cur => ({
@@ -293,7 +298,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       //    第二張會讓第一張作廢，使用者只記得到最後一張（H1、H7）。
       //    卡片失效只發生在 AI 明確指出「這句是在修正某張草稿」的時候。
       await storePendingExpense(sourceId, nonce, {
-        exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined,
+        exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined, st: items.length > 0 ? itemsSubtotal : undefined,
       })
 
       // 摘要要帶 nonce：AI 才有辦法用 corrects_draft 指名它要修正哪一張卡片

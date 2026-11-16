@@ -23,6 +23,8 @@ export interface OutstandingDraft {
   tripId: string
   /** 收據品項明細（🧾 逐項分），沒有就是空陣列 */
   items: ReceiptItem[]
+  /** 收據印的品項小計（PendingDraft.st） */
+  subtotal?: number
 }
 
 /** 一次看多少張 pending 卡。修改／刪除的確認卡也佔位子，所以比原本的 5 張寬鬆。 */
@@ -60,7 +62,8 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
       if (parsed.n && kind === 'expense') {
         candidates.push({
           nonce: parsed.n, exp: parsed.exp, photoIds, receipt: parsed.rc === true, tripId: parsed.tid,
-          items: reconcileReceiptItems(sanitizeReceiptItems(parsed.it), Number(parsed.exp?.a) || 0),
+          items: reconcileReceiptItems(sanitizeReceiptItems(parsed.it), Number(parsed.exp?.a) || 0, parsed.st),
+          subtotal: typeof parsed.st === 'number' ? parsed.st : undefined,
         })
       }
     } catch { /* skip malformed */ }

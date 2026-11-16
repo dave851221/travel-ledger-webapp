@@ -616,6 +616,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
       p: photoIds, rc: photoIds.length > 0 && correctedDraft?.receipt === true, tid: tripId,
       // 品項明細跟著收據走：只有第一筆、而且是在修正那張收據時才沿用
       it: carriedItems.length > 0 ? carriedItems : undefined,
+      st: carriedItems.length > 0 ? correctedDraft?.subtotal : undefined,
     }))
     cards.push(buildExpenseCard({
       expense,

@@ -145,7 +145,7 @@ const LiffEdit: React.FC = () => {
           if (!draft) throw new Error('這張卡片已過期，請重新記帳。');
           // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, rc: 照片是收據, tid }
           decoded = { ...draft.exp, pi: draft.p, rc: draft.rc === true, n: draft.n, u: sourceId ?? undefined };
-          const receiptItems = reconcileReceiptItems(sanitizeReceiptItems(draft.it), Number(draft.exp?.a) || 0);
+          const receiptItems = reconcileReceiptItems(sanitizeReceiptItems(draft.it), Number(draft.exp?.a) || 0, draft.st);
           if (receiptItems.length > 0) {
             setItems(receiptItems);
             if (searchParams.get('mode') === 'items') setStep('items');

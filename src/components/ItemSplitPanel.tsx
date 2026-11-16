@@ -129,7 +129,7 @@ const ItemSplitPanel: React.FC<{
         </div>
         {showDiff && (
           <p className="text-xs text-muted mt-2">
-            品項合計 {money(result.itemsTotal)}，跟總額差 {money(Math.round((total - result.itemsTotal) * 100) / 100)}（稅或折扣），已依比例攤進每個人。
+            品項合計 {money(result.itemsTotal)}，跟總額差 {money(Math.round((total - result.itemsTotal) * 100) / 100)}（稅、服務費或折扣），已依每個人點的金額比例攤進去。
           </p>
         )}
         {blocked && <p className="text-xs text-neg mt-2">還有品項沒人點，請在「由誰平分」至少選一個人。</p>}

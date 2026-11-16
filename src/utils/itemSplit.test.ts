@@ -127,3 +127,32 @@ describe('reconcileReceiptItems', () => {
     }
   })
 })
+
+describe('reconcileReceiptItems：有收據小計時', () => {
+  const pig = [ // 2026-11-16 麺屋猪一本店（內含稅 10%，合計 ¥9,900）
+    { name: '出汁そば', amount: 3100 }, { name: '和牛そば', amount: 4700 }, { name: '麺大盛り', amount: 200 },
+    { name: '焼売', amount: 1200 }, { name: '炙り帆立丼', amount: 700 },
+  ]
+  it('內含稅：品項已含稅，原樣不動；每人付的就是自己點的（稅已在價格裡）', () => {
+    expect(reconcileReceiptItems(pig, 9900, 9900)).toBe(pig)
+    const r = splitByItems(9900, pig, [['家蓉', '文暄'], ['代杰', '賢佑'], ['賢佑'], [], ['賢佑']], ALL, 0, '賢佑')
+    expect(r.split).toEqual({ 代杰: 2650, 賢佑: 3550, 文暄: 1850, 家蓉: 1850 })
+  })
+  it('外税＋服務費（+21%）：不補差額列，稅與服務費依點的金額比例攤', () => {
+    const items = [{ name: 'A', amount: 6000 }, { name: 'B', amount: 3000 }]
+    expect(reconcileReceiptItems(items, 10890, 9000)).toBe(items)
+    const r = splitByItems(10890, items, [['代杰'], ['賢佑']], [], 0, '代杰')
+    expect(r.split).toEqual({ 代杰: 7260, 賢佑: 3630 })
+  })
+  it('外税但漏讀一行：差額只補「小計 − 品項」，稅照比例', () => {
+    const items = [{ name: 'A', amount: 6000 }, { name: 'B', amount: 2700 }]
+    const out = reconcileReceiptItems(items, 9900, 9000)
+    expect(out[2]).toEqual({ name: UNREAD_ITEM_NAME, amount: 300 })
+  })
+  it('兩份實作一致（含小計）', () => {
+    const items = [{ name: 'A', amount: 6000 }, { name: 'B', amount: 2700 }]
+    for (const [t, st] of [[9900, 9000], [10890, 9000], [9900, undefined], [9900, 99999]] as const) {
+      expect(botReconcile(items, t, st)).toEqual(reconcileReceiptItems(items, t, st))
+    }
+  })
+})

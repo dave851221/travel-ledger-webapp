@@ -215,6 +215,8 @@ export interface PendingDraft {
   tid?: string
   /** 收據品項明細（🧾 逐項分）。換卡（只算我、換幣別、AI 修正）時要一路帶著 */
   it?: ReceiptItem[]
+  /** 收據印的品項小計（外税＝稅前；逐項分用它分辨漏讀與稅／服務費） */
+  st?: number
 }
 
 // ============================================================
@@ -320,6 +322,7 @@ export interface OcrResponse {
   data?: AiExpenseData
   /** 收據上的品項明細（🧾 逐項分用） */
   items?: unknown
+  items_subtotal?: unknown
   /** 兩種 type 都不是時的後備說明 */
   content?: string
 }
