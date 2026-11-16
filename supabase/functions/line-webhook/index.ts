@@ -16,7 +16,8 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { buildEventContext, extendFollowup, isQuotingBot } from "./context.ts"
-import { claimWebhookEvent } from "./db.ts"
+import { LINE_CHANNEL_ACCESS_TOKEN } from "./config.ts"
+import { claimWebhookEvent, supabase } from "./db.ts"
 import { replyMessage, setDefaultQuickReply, verifySignature } from "./line-api.ts"
 import { BOT_SELF_INTRODUCTION, getQuickReply } from "./messages.ts"
 import { handleAiText } from "./handlers/ai-text.ts"
@@ -33,6 +34,18 @@ import type {
 } from "./types.ts"
 
 serve(async (req) => {
+  // 保溫（pg_cron 每 30 秒 GET 一次，見 migrations/20261116_keep_line_webhook_warm.sql）。
+  // 按鈕幾乎每次都碰上冷啟動：worker 閒置約一分鐘就關，新 worker 連資料庫、LINE API 都要重新握手，
+  // 光這段就多 0.5～1 秒。這裡各打一個最輕的請求，讓 worker 與兩條連線都留著。
+  // LINE 的 webhook 一律是 POST，GET 不會撞到正式流程。
+  if (req.method === 'GET') {
+    await Promise.allSettled([
+      supabase.from('line_user_states').select('line_user_id').limit(1),
+      fetch('https://api.line.me/v2/bot/info', { headers: { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` } })
+        .then(r => r.body?.cancel()),
+    ])
+    return new Response('warm', { status: 200 })
+  }
   try {
     const signature = req.headers.get('x-line-signature')
     const bodyText = await req.text()
