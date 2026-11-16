@@ -4,7 +4,7 @@ import type { Trip } from '../types';
 import { ui } from './ui';
 import { formatMoney } from '../utils/money';
 import { getCurrencyPrecision } from '../utils/finance';
-import { splitByItems, type ReceiptItem } from '../utils/itemSplit';
+import { splitByItems, UNREAD_ITEM_NAME, type ReceiptItem } from '../utils/itemSplit';
 
 /**
  * 🧾 逐項分：LINE 收據卡片按「逐項分」進來的第一步。
@@ -89,6 +89,9 @@ const ItemSplitPanel: React.FC<{
                   );
                 })}
               </div>
+              {item.name === UNREAD_ITEM_NAME && (
+                <p className="text-xs text-muted mt-2">讀到的品項加起來比總額少這麼多，可能有一行沒讀到。知道是誰的就點他。</p>
+              )}
               {mine.length === 0 && <p className="text-xs text-muted mt-2">還沒點 → 由下面的人平分</p>}
             </li>
           );

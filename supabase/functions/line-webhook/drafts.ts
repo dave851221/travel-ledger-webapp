@@ -8,7 +8,7 @@
 // import config.ts（bucket 名稱）與 db.ts。
 // ============================================================
 
-import { type ReceiptItem, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
+import { type ReceiptItem, reconcileReceiptItems, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
 import { RECEIPTS_BUCKET } from "./config.ts"
 import { supabase } from "./db.ts"
 import type { DraftExpense, PendingDraft } from "./types.ts"
@@ -60,7 +60,7 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
       if (parsed.n && kind === 'expense') {
         candidates.push({
           nonce: parsed.n, exp: parsed.exp, photoIds, receipt: parsed.rc === true, tripId: parsed.tid,
-          items: sanitizeReceiptItems(parsed.it),
+          items: reconcileReceiptItems(sanitizeReceiptItems(parsed.it), Number(parsed.exp?.a) || 0),
         })
       }
     } catch { /* skip malformed */ }

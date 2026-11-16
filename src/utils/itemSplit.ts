@@ -96,9 +96,34 @@ export function sanitizeReceiptItems(value: unknown): ReceiptItem[] {
     const o = v as Record<string, unknown>
     const name = String(o.name ?? '').trim().slice(0, 40)
     const amount = Number(o.amount)
-    if (!name || !Number.isFinite(amount)) continue
+    // 0 元的（加冰、免費的附餐）點了也沒差，不列出來
+    if (!name || !Number.isFinite(amount) || amount === 0) continue
     out.push({ name, amount })
-    if (out.length >= 40) break
+    if (out.length >= 60) break
   }
   return out.length >= 2 ? out : []
+}
+
+/** 對不上總額時補上的那一列 */
+export const UNREAD_ITEM_NAME = '沒讀到的品項／差額'
+
+/**
+ * 品項加總比總額少、而且不像外加消費稅（8%～10%）時，多半是辨識漏了一兩行
+ * （例如同一道菜連續點了兩次，被當成同一行）。這時不要把差額按比例攤給每個人
+ * —— 那會讓沒點的人也替漏掉的那一項付錢 —— 而是補一列「沒讀到的品項／差額」，
+ * 讓使用者自己點是誰的（沒點就跟其他沒指定的一起平分）。
+ * 比總額多（折扣）或差額像消費稅時維持原樣，交給 splitByItems 依比例攤。
+ */
+export function reconcileReceiptItems(items: ReceiptItem[], total: number): ReceiptItem[] {
+  if (items.length === 0 || !(total > 0)) return items
+  if (items.some(i => i.name === UNREAD_ITEM_NAME)) return items
+  const sum = items.reduce((acc, i) => acc.plus(i.amount), new Decimal(0))
+  if (!sum.greaterThan(0)) return items
+  const diff = new Decimal(total).minus(sum)
+  // 尾數差一點點（四捨五入）也照比例攤就好
+  if (!diff.greaterThan(new Decimal(total).times(0.005))) return items
+  const ratio = new Decimal(total).div(sum)
+  // 外税 8%／10%（或兩種混在一起）：差額本來就該照每項金額比例分
+  if (ratio.greaterThanOrEqualTo(1.075) && ratio.lessThanOrEqualTo(1.105)) return items
+  return [...items, { name: UNREAD_ITEM_NAME, amount: diff.toNumber() }]
 }

@@ -7,7 +7,7 @@ import ExpenseModal from '../components/ExpenseModal';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import { getLocalDateString } from '../utils/date';
 import ItemSplitPanel from '../components/ItemSplitPanel';
-import { sanitizeReceiptItems, type ReceiptItem } from '../utils/itemSplit';
+import { reconcileReceiptItems, sanitizeReceiptItems, type ReceiptItem } from '../utils/itemSplit';
 
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -145,7 +145,7 @@ const LiffEdit: React.FC = () => {
           if (!draft) throw new Error('這張卡片已過期，請重新記帳。');
           // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, rc: 照片是收據, tid }
           decoded = { ...draft.exp, pi: draft.p, rc: draft.rc === true, n: draft.n, u: sourceId ?? undefined };
-          const receiptItems = sanitizeReceiptItems(draft.it);
+          const receiptItems = reconcileReceiptItems(sanitizeReceiptItems(draft.it), Number(draft.exp?.a) || 0);
           if (receiptItems.length > 0) {
             setItems(receiptItems);
             if (searchParams.get('mode') === 'items') setStep('items');

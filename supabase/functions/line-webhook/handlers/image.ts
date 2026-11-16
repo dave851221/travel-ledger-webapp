@@ -25,7 +25,7 @@ import { storePendingExpense } from "../drafts.ts"
 import { ai, OCR_RESPONSE_SCHEMA } from "../ai.ts"
 import { downloadLineContent, replyMessage, showLoading } from "../line-api.ts"
 import { buildDraftLiffUrl, buildExpenseCard, buildItemsLiffUrl, canGoSolo, canSplitByItems } from "../messages.ts"
-import { sanitizeReceiptItems } from "../../_shared/itemSplit.ts"
+import { reconcileReceiptItems, sanitizeReceiptItems } from "../../_shared/itemSplit.ts"
 import { runInBackground } from "../util.ts"
 import type { ExpenseInput } from "../../_shared/tools/types.ts"
 import type { ImageMessageEvent, OcrResponse } from "../types.ts"
@@ -166,6 +166,9 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
 7b. **品項明細（items）**：type 是 expense 而且收據上有逐項列出買了什麼時，把每一行都放進 items：
    name 照抄品名（外文保留原文，可在括號補兩三個字的中文），amount 是那一行最後印的金額。
    同一行有數量（×2）就填乘完的金額；品項下面緊接的折扣（値引、割引、-50）直接從那一項扣掉，不要另列。
+   ⚠️ 收據上**連續出現一模一樣的兩行**（同一道菜分兩次點）要列兩次，不能合併、不能跳過。
+   列完把 items 加起來對一下小計（税込的合計）：對不上就回頭逐行再看一次，通常是漏了一行。
+   0 元的行（加冰、免費附餐）不用列。
    🚫 小計、消費稅、合計、找零、點數、付款方式都不是品項。看不出明細（付款畫面、只有總額）就不要填 items。
 8. **重要限制**：若封存狀態為「已封存」，一律回傳 type: "not_receipt"，系統會另行告知使用者旅程已封存。
 `
@@ -222,7 +225,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       )
       const expense = prepared.expense
       // 🧾 逐項分要用的品項明細。只有真的收據才有；照片記帳（還沒有金額）不給
-      const items = needsAmount ? [] : sanitizeReceiptItems(res.items)
+      const items = needsAmount ? [] : reconcileReceiptItems(sanitizeReceiptItems(res.items), Number(expense.amount) || 0)
 
       // 成員名稱：prepareExpense 會先嘗試對應回正式名稱（暱稱、大小寫、部分符合
       // 都能救回來），對不上的從 map 裡拿掉並補上旅程預設 —— 照片留著、卡片照出，

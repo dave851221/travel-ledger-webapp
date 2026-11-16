@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { splitByItems, sanitizeReceiptItems } from './itemSplit';
-import { splitByItems as botSplit } from '../../supabase/functions/_shared/itemSplit';
+import { splitByItems, sanitizeReceiptItems, reconcileReceiptItems, UNREAD_ITEM_NAME } from './itemSplit';
+import { splitByItems as botSplit, reconcileReceiptItems as botReconcile } from '../../supabase/functions/_shared/itemSplit';
 
 const sum = (m: Record<string, number>) => Object.values(m).reduce<number>((a, b) => a + (Number(b) || 0), 0);
 const ALL = ['代杰', '賢佑', '文暄', '家蓉'];
@@ -97,3 +97,33 @@ describe('網頁與機器人兩份實作一致（契約測試）', () => {
     }
   });
 });
+
+describe('reconcileReceiptItems', () => {
+  it('漏讀一行（2026-11-16 居酒屋，差 ¥300）補一列差額，不按比例攤', () => {
+    const items = [{ name: 'A', amount: 14190 - 300 }, { name: 'B', amount: 300 }]
+    const out = reconcileReceiptItems(items, 14490)
+    expect(out).toHaveLength(3)
+    expect(out[2]).toEqual({ name: UNREAD_ITEM_NAME, amount: 300 })
+    expect(reconcileReceiptItems(out, 14490)).toBe(out)
+    // 差額這一列沒點 → 跟其他沒指定的一起平分；A 是代杰的就不會多付
+    const r = splitByItems(14490, out, [['代杰'], ['賢佑'], []], ['代杰', '賢佑'], 0, '代杰')
+    expect(r.split).toEqual({ 代杰: 13890 + 150, 賢佑: 300 + 150 })
+  })
+  it('外税 10%／8% 與尾數差不補，交給比例攤', () => {
+    const items = [{ name: 'A', amount: 1000 }, { name: 'B', amount: 1000 }]
+    expect(reconcileReceiptItems(items, 2200)).toBe(items)
+    expect(reconcileReceiptItems(items, 2160)).toBe(items)
+    expect(reconcileReceiptItems(items, 2005)).toBe(items)
+    expect(reconcileReceiptItems(items, 1800)).toBe(items)
+  })
+  it('0 元的品項不列', () => {
+    expect(sanitizeReceiptItems([{ name: 'ロック', amount: 0 }, { name: 'A', amount: 1 }, { name: 'B', amount: 2 }]))
+      .toEqual([{ name: 'A', amount: 1 }, { name: 'B', amount: 2 }])
+  })
+  it('兩份實作一致', () => {
+    for (const total of [2200, 2300, 2005, 1800, 0]) {
+      const items = [{ name: 'A', amount: 1000 }, { name: 'B', amount: 1000 }]
+      expect(botReconcile(items, total)).toEqual(reconcileReceiptItems(items, total))
+    }
+  })
+})

@@ -120,6 +120,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   LiffEdit 先顯示 `components/ItemSplitPanel.tsx` 讓人點每個品項是誰的，再把算好的 `split_data` 帶進一般表單確認。
   打字也行（「雞皮、啤酒是賢佑的，其他平分」）：`propose_expenses` 的 `item_assignments`／`others`，**金額由程式算**不讓模型算。
   計算在 `utils/itemSplit.ts` 與 `_shared/itemSplit.ts` 各一份（稅、折扣依比例攤，尾差給付款人），`itemSplit.test.ts` 做契約比對。
+  0 元品項不列；品項加總比總額少、又不像外加消費稅（8～10%）時，`reconcileReceiptItems` 補一列「沒讀到的品項／差額」讓人指派，不按比例攤（OCR 常把連續兩行一樣的菜當成一行）。
 - **`LiffPreference.tsx`**：同樣走 LIFF，編輯 `trips.ai_preference`
   （LINE Bot 解析文字與收據時參考的自由文字偏好，整趟旅程共用一份）。
   只覆寫單一欄位，不需要 nonce／postback。
