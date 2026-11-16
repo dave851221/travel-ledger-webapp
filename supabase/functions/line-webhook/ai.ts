@@ -122,7 +122,7 @@ export const OCR_RESPONSE_SCHEMA: JsonSchema = {
       items: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: '品名，外文照抄原文，括號補最多 4 個字的中文' },
+          name: { type: 'string', description: '品名，外文照抄原文，括號補看得懂是什麼的簡短中文（約 6 字內）' },
           amount: { type: 'number', description: '這一行的金額（數量 × 單價，該品項的折扣直接扣掉）' },
         },
         required: ['name', 'amount'],
