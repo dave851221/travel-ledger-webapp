@@ -1,8 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { buildSavedText } from "./format.ts"
-import { sanitizeReceiptItems } from "../_shared/itemSplit.ts"
-import { sanitizeItemOwners } from "../_shared/savedText.ts"
 
 const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
@@ -21,10 +19,7 @@ serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   try {
-    const { line_user_id, expense_id, description, amount, currency, mode, items: rawItems, item_owners } = await req.json()
-    // 🧾 收據品項（LIFF 草稿有讀到品項時才帶）與「每個品項是誰的」（逐項分過、而且分帳沒再改過才帶）
-    const items = sanitizeReceiptItems(rawItems)
-    const itemOwners = sanitizeItemOwners(item_owners)
+    const { line_user_id, expense_id, description, amount, currency, mode } = await req.json()
     // mode: 'insert'（新增）或 'update'（編輯既有支出）。
     // 舊版前端不會帶，沒帶時視為 insert —— 那是加上 mode 之前的行為。
     const isUpdate = mode === 'update'
@@ -84,7 +79,7 @@ serve(async (req) => {
       if (readErr) console.error('[LIFF_NOTIFY] read saved expense failed:', readErr)
       if (saved) {
         const trip = (Array.isArray(saved.trips) ? saved.trips[0] : saved.trips) as { precision_config?: Record<string, number> } | null
-        text = buildSavedText(saved, isUpdate, trip?.precision_config ?? {}, { items, itemOwners })
+        text = buildSavedText(saved, isUpdate, trip?.precision_config ?? {})
       }
     }
 

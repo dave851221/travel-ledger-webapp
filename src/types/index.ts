@@ -50,18 +50,3 @@ export interface Expense {
   /** 只存在前端：離線時記的、還在這支手機上等著上傳（utils/offlineQueue.ts） */
   pending_sync?: boolean;
 }
-
-/**
- * 只存在 LIFF 編輯頁：草稿從 LINE 帶來、存檔後要交給 liff-notify 的資訊。
- * ExpenseModal 收到的 editData 可能多帶這幾欄。
- */
-export interface LiffExpenseMeta {
-  nonce?: string;
-  line_user_id?: string;
-  /** 收據品項（🧾 逐項分讀到的），推播「已存入」時列出來 */
-  receipt_items?: { name: string; amount: number }[];
-  /** 每個品項是誰的（與 receipt_items 同長度） */
-  item_owners?: string[][];
-  /** item_owners 算出來的分帳；表單裡又改過分攤就對不上，推播不再寫「誰點了什麼」 */
-  item_split?: Record<string, number>;
-}

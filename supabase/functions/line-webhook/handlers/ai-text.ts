@@ -531,8 +531,6 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
   // 模型只負責說「哪幾項是誰的」，每個人該付多少由程式依品項金額算（含稅與折扣的比例），
   // 不靠模型心算 —— 結果加總一定等於總額。
   const assignments = Array.isArray(args.item_assignments) ? args.item_assignments as ToolArgs[] : []
-  // 每個品項最後由誰分（沒指定的填入平分名單）。存進 pending 的 io，存入後的回覆才寫得出「誰點了什麼」
-  let itemOwners: string[][] | undefined
   if (correctedDraft && correctedDraft.items.length > 0 && assignments.length > 0 && prepared[0]) {
     const items = correctedDraft.items
     const owners: string[][] = items.map(() => [])
@@ -566,8 +564,6 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
     console.log(`[ITEMS] Split ${items.length} items by text: ${JSON.stringify(result.split)}`)
     target.split_details = result.split
     target.adjustment_member = result.adjustment
-    const fallbackOwners = others.length > 0 ? others : trip.members
-    itemOwners = owners.map((o) => o.length > 0 ? o : fallbackOwners)
   }
 
   // 這趟旅程沒有這個幣別的匯率 —— 存下去統計會以 1:1 換算而失真。
@@ -621,7 +617,6 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
       // 品項明細跟著收據走：只有第一筆、而且是在修正那張收據時才沿用
       it: carriedItems.length > 0 ? carriedItems : undefined,
       st: carriedItems.length > 0 ? correctedDraft?.subtotal : undefined,
-      io: idx === 0 && carriedItems.length > 0 ? itemOwners : undefined,
     }))
     cards.push(buildExpenseCard({
       expense,
