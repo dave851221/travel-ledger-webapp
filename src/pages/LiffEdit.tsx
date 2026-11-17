@@ -8,13 +8,23 @@ import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import { getLocalDateString } from '../utils/date';
 import ItemSplitPanel from '../components/ItemSplitPanel';
 import { reconcileReceiptItems, sanitizeReceiptItems, type ReceiptItem } from '../utils/itemSplit';
+import type { LiffExpenseMeta } from '../types';
+
+type LiffDraft = Expense & LiffExpenseMeta;
+
+/** pending 列的 io（每個品項是誰的）收斂成 string[][]；長度對不上品項就當作沒有 */
+function toItemOwners(value: unknown, count: number): string[][] | undefined {
+  if (!Array.isArray(value) || value.length !== count) return undefined;
+  const out = value.map(list => Array.isArray(list) ? list.map(m => String(m ?? '')).filter(Boolean) : []);
+  return out.every(list => list.length > 0) ? out : undefined;
+}
 
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [trip, setTrip] = useState<Trip | null>(null);
-  const [initialData, setInitialData] = useState<Expense | null>(null);
+  const [initialData, setInitialData] = useState<LiffDraft | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   // 🧾 逐項分：卡片帶 mode=items 而且草稿有品項時，先指派品項再進表單
   const [items, setItems] = useState<ReceiptItem[]>([]);
@@ -112,6 +122,8 @@ const LiffEdit: React.FC = () => {
         // 下面的欄位對應對三種來源共用
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let decoded: any;
+        // 草稿的收據品項（存檔後 liff-notify 要列出來）
+        let draftItemMeta: LiffExpenseMeta = {};
 
         if (expenseId) {
           const { data: row, error: expErr } = await supabase.from('expenses')
@@ -148,6 +160,12 @@ const LiffEdit: React.FC = () => {
           const receiptItems = reconcileReceiptItems(sanitizeReceiptItems(draft.it), Number(draft.exp?.a) || 0, draft.st);
           if (receiptItems.length > 0) {
             setItems(receiptItems);
+            // 存檔後 liff-notify 的推播要列品項；打字逐項分過的草稿還知道每個品項是誰的
+            draftItemMeta = {
+              receipt_items: receiptItems,
+              item_owners: toItemOwners(draft.io, receiptItems.length),
+              item_split: draft.exp?.s,
+            };
             if (searchParams.get('mode') === 'items') setStep('items');
           }
         } else {
@@ -174,7 +192,7 @@ const LiffEdit: React.FC = () => {
         });
 
         // 5. 準備 InitialData (草稿資料；created_at 由 DB 寫入時補上)
-        const finalData: Expense & { nonce?: string; line_user_id?: string } = {
+        const finalData: LiffDraft = {
           created_at: '',
           id: decoded.id || '',
           trip_id: tripId,
@@ -194,7 +212,8 @@ const LiffEdit: React.FC = () => {
           is_settlement: !!(decoded.is_settlement),
           deleted_at: null,
           nonce: decoded.n || decoded.nonce,
-          line_user_id: decoded.u || decoded.line_user_id
+          line_user_id: decoded.u || decoded.line_user_id,
+          ...draftItemMeta,
         };
 
         setInitialData(finalData);
@@ -246,8 +265,11 @@ const LiffEdit: React.FC = () => {
           items={items}
           initialOthers={Object.keys(initialData.split_data)}
           payer={Object.keys(initialData.payer_data)[0] ?? null}
-          onDone={(split, adjustment) => {
-            setInitialData({ ...initialData, split_data: split, adjustment_member: adjustment });
+          onDone={(split, adjustment, owners) => {
+            setInitialData({
+              ...initialData, split_data: split, adjustment_member: adjustment,
+              receipt_items: items, item_owners: owners, item_split: split,
+            });
             setStep('form');
           }}
           onSkip={() => setStep('form')}

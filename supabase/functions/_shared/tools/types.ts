@@ -160,6 +160,10 @@ export type CommitExpenseResult =
      */
     id: string | null
     adjustment_member: string | null
+    /** 實際寫進去的金額、付款人與分攤（依成員與精度重算過），回覆明細用 */
+    amount: number
+    payer_data: Record<string, number>
+    split_data: Record<string, number>
   }
   | { ok: false; reason: CommitFailureReason; dropped?: string[] }
 

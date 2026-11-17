@@ -21,7 +21,7 @@ import {
 import Modal from './Modal';
 import { ui } from './ui';
 import { supabase } from '../api/supabase';
-import type { Trip, Expense } from '../types';
+import type { Trip, Expense, LiffExpenseMeta } from '../types';
 import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
 import { getDefaultCategory, getDefaultCurrency } from '../utils/tripDefaults';
@@ -29,6 +29,17 @@ import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
 import { insertExpenseOrQueue } from '../utils/offlineQueue';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
+
+/** 兩份 { 成員: 金額 } 是不是一樣（0 元的不算） */
+function sameAmounts(a: Record<string, number> | undefined, b: Record<string, number>): boolean {
+  if (!a) return false;
+  const norm = (m: Record<string, number>) => Object.entries(m)
+    .filter(([, v]) => Number(v) !== 0)
+    .map(([k, v]) => `${k}:${new Decimal(Number(v) || 0).toString()}`)
+    .sort()
+    .join('|');
+  return norm(a) === norm(b);
+}
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -439,7 +450,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     // 描述留空時用分類名代入，讓「只打金額」也能成立
     const finalDescription = description.trim() || category;
 
-    const liffMeta = editData as (Expense & { nonce?: string; line_user_id?: string }) | null;
+    const liffMeta = editData as (Expense & LiffExpenseMeta) | null;
     // 離線時只能新增（排進 offlineQueue）。照片要上傳、修改要對照資料庫，都得等連線
     if (!navigator.onLine) {
       if (editData?.id || liffMeta?.nonce) {
@@ -556,6 +567,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             amount: numAmount,
             currency,
             mode: editData?.id ? 'update' : 'insert',
+            // 推播要列收據品項；「誰點了什麼」只在分帳跟逐項分算出來的一樣時才帶
+            // （在表單裡又改過分攤的話，那份對照就不準了）
+            ...(liffMeta.receipt_items && liffMeta.receipt_items.length > 0 ? {
+              items: liffMeta.receipt_items,
+              item_owners: liffMeta.item_owners && sameAmounts(liffMeta.item_split, finalSplitData)
+                ? liffMeta.item_owners : undefined,
+            } : {}),
           }
         });
         if (invokeErr) console.error('[LIFF] notify error:', invokeErr);

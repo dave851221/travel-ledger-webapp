@@ -279,7 +279,10 @@ export async function commitExpense(
     return { ok: false, reason: 'insert_failed' }
   }
 
-  return { ok: true, id: saved?.id ?? null, adjustment_member: adjustMember }
+  return {
+    ok: true, id: saved?.id ?? null, adjustment_member: adjustMember,
+    amount: numAmount, payer_data: finalPayerData, split_data: finalSplitData,
+  }
 }
 
 /**

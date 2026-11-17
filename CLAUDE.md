@@ -358,6 +358,9 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    ⚠️ **只有 `expense` 算草稿** —— `getOutstandingDrafts()` 濾掉其餘的，
    否則使用者打「取消」會取消到一張修改卡，AI 也會拿它的 nonce 去填 `corrects_draft`。
    `upd` 不寫 `saved` 列（與 `liff-notify` 的 `mode === 'update'` 一致，見 J11）
+   **存完的回覆一律列完整明細**（`_shared/savedText.ts` 的 `buildSavedText`）：`save`（含只算我直接存，仍是「✅ 已存入 + ↩️ 撤銷」一則，不另出卡）、`upd`、`liff-notify` 共用同一份格式 ——
+   標題、金額、日期分類、付款人、分帳明細（用 `commitExpense` 回傳的實際寫入值），有收據品項時列「🛒 品項」；
+   知道每個品項是誰的（pending 的 `io`，打字逐項分時寫入；LIFF 逐項分由前端帶 `item_owners`，表單又改過分攤就不帶）就寫在每個人後面。
 6. **群組**：三種模式（`GroupMode`，`mention_required` + `photos_muted` 由 `groupModeOf()` 合成）：
    提及模式（預設，照片都處理、文字要 @ 或「耀西」開頭）、全回應模式（全部處理）、
    靜音模式（照片不處理、文字同提及模式）。群組訊息的 AI context 帶一行【群組模式】，

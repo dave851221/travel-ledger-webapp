@@ -22,7 +22,8 @@ const ItemSplitPanel: React.FC<{
   initialOthers: string[];
   /** 付款人：尾差優先給他 */
   payer: string | null;
-  onDone: (split: Record<string, number>, adjustment: string) => void;
+  /** owners：每個品項最後由誰分（沒點的已填入平分名單），存入後 LINE 的回覆用它寫「誰點了什麼」 */
+  onDone: (split: Record<string, number>, adjustment: string, owners: string[][]) => void;
   onSkip: () => void;
 }> = ({ trip, currency, total, items, initialOthers, payer, onDone, onSkip }) => {
   const members = trip.members;
@@ -138,7 +139,7 @@ const ItemSplitPanel: React.FC<{
           <button
             type="button"
             disabled={blocked}
-            onClick={() => onDone(result.split, result.adjustment)}
+            onClick={() => onDone(result.split, result.adjustment, owners.map(o => o.length > 0 ? o : others))}
             className={`${ui.btnPrimary} flex-[2] py-3 text-base`}
           >
             下一步：確認

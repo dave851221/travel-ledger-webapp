@@ -17,6 +17,8 @@ import {
   resolveExpenseRef,
 } from "../../_shared/tools/expenses.ts"
 import { resolveMember } from "../../_shared/validate.ts"
+import { type ReceiptItem, reconcileReceiptItems, sanitizeReceiptItems } from "../../_shared/itemSplit.ts"
+import { buildSavedText, sanitizeItemOwners } from "../../_shared/savedText.ts"
 import { RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
@@ -49,6 +51,12 @@ function toolScope(tripId: string | null): ScopedContext {
 }
 
 type TripRecord = TripRow
+
+/** pending 列帶的收據品項，收斂成跟卡片、LIFF 看到的同一份（含「沒讀到的品項／差額」那一列） */
+function pendingItems(pending: { exp?: DraftExpense; it?: unknown; st?: number } | null | undefined): ReceiptItem[] {
+  if (!pending) return []
+  return reconcileReceiptItems(sanitizeReceiptItems(pending.it), Number(pending.exp?.a) || 0, pending.st)
+}
 
 /**
  * 佔用 nonce（防連點的鎖），回傳錯誤（null 代表搶到了）。
@@ -94,7 +102,9 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
   // 「👤 只算我」有金額時直接存入（David：不要再吐一張卡）。
   // 換好的內容與已經查到的旅程直接交給下面的「確認存入」，不再另存 pending、不再重查一次。
   let soloFrom: { oldNonce: string; me: string } | null = null
-  let soloSave: { exp: DraftExpense; photoIds: string[]; receipt: boolean; tripId: string; trip: TripRecord } | null = null
+  let soloSave: {
+    exp: DraftExpense; photoIds: string[]; receipt: boolean; tripId: string; trip: TripRecord; items: ReceiptItem[]
+  } | null = null
 
   // 撤銷存入（postback 按鈕）
   //
@@ -207,7 +217,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         dt: curExpense.date, cat: curExpense.category,
         p: curExpense.payer_data, s: curExpense.split_details,
       },
-      p: photoIds, rc: pending.rc, tid: tripIdForCur, it: pending.it, st: pending.st,
+      p: photoIds, rc: pending.rc, tid: tripIdForCur, it: pending.it, st: pending.st, io: pending.io,
     })
     await replyMessage(replyToken, [buildExpenseCard({
       expense: curExpense,
@@ -290,7 +300,8 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     if (amount > 0) {
       // 直接存：不另存 pending、不再上第二道鎖（舊卡的 nonce 剛剛已經鎖住了）
       soloFrom = { oldNonce, me }
-      soloSave = { exp: soloExp, photoIds, receipt: pending.rc === true, tripId: tripIdForMe, trip: meTrip }
+      // 只算我：品項照樣列出來，但不帶「誰點了什麼」（整筆都是他的）
+      soloSave = { exp: soloExp, photoIds, receipt: pending.rc === true, tripId: tripIdForMe, trip: meTrip, items: pendingItems(pending) }
       postbackData = { act: 'save' }
     } else {
       const newNonce = Math.random().toString(36).substring(2, 10)
@@ -470,10 +481,24 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       .map(([field]) => fieldLabel(field))
 
     const by = speakerLabel ? `（由 ${speakerLabel} 修改）` : ''
-    const changedText = changed.length > 0 ? `\n改了：${changed.join('、')}` : '\n（內容與原本相同）'
+    const changedText = changed.length > 0 ? `改了：${changed.join('、')}` : '（內容與原本相同）'
+    // 改完的完整內容也列出來（commitExpenseUpdate 照 prepared 原樣寫入）
+    const updText = buildSavedText({
+      description: prepared.description,
+      amount: prepared.amount,
+      currency: prepared.currency,
+      date: prepared.date,
+      category: prepared.category,
+      payer_data: prepared.payer_data,
+      split_data: prepared.split_details,
+    }, {
+      header: '✏️ 已修改',
+      titleSuffix: by,
+      note: changedText,
+    }, (updTrip.precision_config as PrecisionConfig | null) ?? {})
     await replyMessage(replyToken, [{
       type: 'text',
-      text: `✏️ 已修改：${prepared.description}${by}${changedText}`,
+      text: updText,
       quickReply: boundQR,
     }], sourceId)
     return
@@ -491,6 +516,9 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     let receipt = !!(postbackData.expense || exp_new || exp_old)
 
     let trip: TripRecord | null = null
+    // 回覆「已存入」時要列的收據品項，與「每個品項是誰的」（打字逐項分過才有）
+    let savedItems: ReceiptItem[] = []
+    let savedOwners: string[][] | undefined
 
     if (soloSave) {
       // 「👤 只算我」直接存：內容與旅程上面都備好了，不必再查
@@ -499,6 +527,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       receipt = soloSave.receipt
       trip_id = soloSave.tripId
       trip = soloSave.trip
+      savedItems = soloSave.items
     } else {
       // 讀草稿、上鎖、預先查目前的旅程三件事同時做（每趟往返都要好幾百毫秒）
       const needsPending = !expenseRaw && !!nonce
@@ -512,6 +541,8 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         photo_ids = pending.p || []
         receipt = pending.rc === true
         trip_id = pending.tid || trip_id
+        savedItems = pendingItems(pending)
+        savedOwners = sanitizeItemOwners(pending.io)
       }
 
       if (!expenseRaw) {
@@ -646,12 +677,28 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     const undoItems = savedExpense?.id
       ? [{ type: "action", action: { type: "postback", label: "↩️ 撤銷", data: JSON.stringify({ act: "undo", eid: savedExpense.id }) } }]
       : []
-    // 群組裡標明是誰記的，一對一就不必贅述
-    const savedBy = speakerLabel ? `\n（由 ${speakerLabel} 記錄）` : ''
+    // 回覆列出真正寫進去的內容（commitExpense 依成員與精度重算過的付款人與分攤），
+    // 只算我也是這一則 —— 不另外再吐一張卡（David）
+    const savedText = buildSavedText({
+      description: expense.description,
+      amount: saveResult.amount,
+      currency: String(expense.currency ?? ''),
+      date: expense.date,
+      category: expense.category,
+      payer_data: saveResult.payer_data,
+      split_data: saveResult.split_data,
+    }, {
+      header: '✅ 已存入',
+      titleSuffix: soloFrom ? `（只算 ${soloFrom.me}）` : '',
+      items: savedItems,
+      itemOwners: soloFrom ? undefined : savedOwners,
+      // 群組裡標明是誰記的，一對一就不必贅述
+      footer: speakerLabel ? `（由 ${speakerLabel} 記錄）` : undefined,
+    }, (trip.precision_config as PrecisionConfig | null) ?? {})
     await Promise.all([
       ...bookkeeping,
       replyMessage(replyToken, [{
-        type: 'text', text: `✅ 已存入：${expense.description}${soloFrom ? `（只算 ${soloFrom.me}）` : ''}${savedBy}`,
+        type: 'text', text: savedText,
         quickReply: { items: [...undoItems, ...boundQR.items] }
       }], sourceId),
     ])
