@@ -7,7 +7,8 @@
 // import config.ts、db.ts、line-api.ts 與 _shared/finance.ts。
 // ============================================================
 
-import { WEBAPP_URL } from "./config.ts"
+import { LIFF_ID, WEBAPP_URL } from "./config.ts"
+import { buildLiffPageUrl } from "../_shared/liffEcho.ts"
 import { supabase } from "./db.ts"
 import { replyMessage } from "./line-api.ts"
 import { formatAmount, sumByCurrency } from "../_shared/finance.ts"
@@ -17,9 +18,14 @@ import type { ExpenseCardData, GroupMode, OutgoingMessage, QuickReply } from "./
 /** replyEditPicker 那份清單每一列讀得到的欄位 */
 type PickerRow = Pick<ExpenseRow, "id" | "description" | "amount" | "currency" | "date">
 
+/** LIFF 頁的網址（有 LIFF ID 時走 liff.line.me，見 _shared/liffEcho.ts 的 buildLiffPageUrl） */
+function liffPageUrl(route: string, query: string): string {
+  return buildLiffPageUrl(route, query, LIFF_ID, WEBAPP_URL)
+}
+
 /** 編輯「旅程 AI 記帳偏好」的 LIFF 頁網址（Feature F） */
 export function preferenceLiffUrl(tripId: string): string {
-  return `${WEBAPP_URL}/#/liff/preference?tripId=${tripId}`
+  return liffPageUrl('/liff/preference', `tripId=${tripId}`)
 }
 
 /**
@@ -107,7 +113,7 @@ export function getQuickReply(
  *    舊格式 LiffEdit 仍然看得懂，已發出去的卡片不會壞。
  */
 export function buildEditLiffUrl(expense: { id: string }, tripId: string, sourceId: string): string {
-  return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&id=${expense.id}&u=${encodeURIComponent(sourceId)}`
+  return liffPageUrl('/liff/edit', `tripId=${tripId}&id=${expense.id}&u=${encodeURIComponent(sourceId)}`)
 }
 
 /**
@@ -116,7 +122,7 @@ export function buildEditLiffUrl(expense: { id: string }, tripId: string, source
  * LiffEdit 自己去撈（順便就能發現這張卡片已經被確認或取消過了）。
  */
 export function buildDraftLiffUrl(tripId: string, nonce: string, sourceId: string): string {
-  return `${WEBAPP_URL}/#/liff/edit?tripId=${tripId}&n=${nonce}&u=${encodeURIComponent(sourceId)}`
+  return liffPageUrl('/liff/edit', `tripId=${tripId}&n=${nonce}&u=${encodeURIComponent(sourceId)}`)
 }
 
 /** 🧾 逐項分：同一個 LIFF 編輯頁，先開品項清單點「這是誰的」，再進表單確認 */

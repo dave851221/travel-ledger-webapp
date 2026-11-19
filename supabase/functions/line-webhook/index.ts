@@ -24,6 +24,7 @@ import { handleAiText } from "./handlers/ai-text.ts"
 import { handleAudio } from "./handlers/audio.ts"
 import { handleCommands, routeTextMessage } from "./handlers/commands.ts"
 import { handleImage } from "./handlers/image.ts"
+import { handleLiffEcho } from "./handlers/liff-echo.ts"
 import { handlePostback } from "./handlers/postback.ts"
 import type {
   AudioMessageEvent,
@@ -117,6 +118,9 @@ serve(async (req) => {
       const mentionees: Mentionee[] | undefined = transcript === null
         ? textEvent.message.mention?.mentionees
         : undefined
+
+      // LIFF 存檔後以使用者名義送出的「✅ 已記帳：…」：回完整確認，不進 AI、不看群組模式
+      if (transcript === null && await handleLiffEcho(ctx, rawText)) continue
 
       // 引用回覆只有打字的訊息才有；有引用才查資料庫
       const quotingBot = transcript === null && await isQuotingBot(ctx, textEvent.message.quotedMessageId)

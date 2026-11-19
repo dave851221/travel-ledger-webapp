@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { buildSavedText } from "./format.ts"
+import { buildLiffEchoMarker, LIFF_NOTICE_ROLE, type LiffNotice } from "../_shared/liffEcho.ts"
 
 const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
@@ -19,7 +20,11 @@ serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   try {
-    const { line_user_id, expense_id, description, amount, currency, mode } = await req.json()
+    const { line_user_id, expense_id, description, amount, currency, mode, deliver, record } = await req.json()
+    // deliver: 'client'＝LIFF 自己用 liff.sendMessages 送暗號，機器人收到再用免費的 reply 回完整確認（見 _shared/liffEcho.ts）；
+    //          其他（舊前端沒帶）＝照舊用推播送。
+    // record: false＝前一次 client 呼叫已經寫過 saved 列，這次只是 LIFF 送不出去改用推播補送。
+    const viaClient = deliver === 'client'
     // mode: 'insert'（新增）或 'update'（編輯既有支出）。
     // 舊版前端不會帶，沒帶時視為 insert —— 那是加上 mode 之前的行為。
     const isUpdate = mode === 'update'
@@ -35,7 +40,7 @@ serve(async (req) => {
     // ⚠️ 只有「新增」才寫（M11）。編輯既有支出也寫一筆 `saved` 的話，
     //    使用者接著說「取消上一筆」撤掉的會是那筆剛編輯好的舊支出
     //    —— 他要的是撤銷最近**新增**的那一筆。
-    if (!isUpdate) {
+    if (!isUpdate && record !== false) {
       await supabase.from('line_chat_history').insert({
         line_user_id,
         role: 'saved',
@@ -81,6 +86,23 @@ serve(async (req) => {
         const trip = (Array.isArray(saved.trips) ? saved.trips[0] : saved.trips) as { precision_config?: Record<string, number> } | null
         text = buildSavedText(saved, isUpdate, trip?.precision_config ?? {})
       }
+    }
+
+    if (viaClient) {
+      const marker = buildLiffEchoMarker(isUpdate, description, amount, currency)
+      const notice: LiffNotice = { marker, text, quickReply: { items: quickReplyItems } }
+      const { error: noticeErr } = await supabase.from('line_chat_history').insert({
+        line_user_id, role: LIFF_NOTICE_ROLE, content: JSON.stringify(notice),
+      })
+      if (noticeErr) {
+        console.error('[LIFF_NOTIFY] notice insert failed:', noticeErr)
+        return new Response(JSON.stringify({ ok: false, reason: 'notice_failed' }), {
+          headers: { ...CORS, 'Content-Type': 'application/json' }
+        })
+      }
+      return new Response(JSON.stringify({ ok: true, marker }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' }
+      })
     }
 
     // LINE push 推播確認訊息

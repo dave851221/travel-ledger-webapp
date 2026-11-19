@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { initLiff } from '../utils/liff';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import { ui } from '../components/ui';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
@@ -51,28 +52,11 @@ const LiffPreference: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        // --- 0. 動態載入 LIFF SDK（若尚未注入）---
-        if (!window.liff) {
-          await new Promise<void>((resolve) => {
-            const script = document.createElement('script');
-            script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
-            script.onload = () => resolve();
-            script.onerror = () => resolve(); // 載入失敗也繼續，後續以 window.close() 補底
-            document.head.appendChild(script);
-          });
-        }
-
-        // --- 1. 初始化 LIFF ---
-        const liff = window.liff;
-        const liffId = import.meta.env.VITE_LIFF_ID;
-        if (liff && liffId) {
-          await liff.init({ liffId });
+        // --- 1. 初始化 LIFF（沒設 LIFF ID、或不在 LINE 裡時回 null，頁面照常能用）---
+        const liff = await initLiff();
+        if (liff) {
           liffRef.current = liff;
           setCanCloseWindow(typeof liff.closeWindow === 'function');
-          if (!liff.isLoggedIn()) {
-            liff.login();
-            return;
-          }
         }
 
         const tripId = searchParams.get('tripId');
