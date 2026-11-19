@@ -548,7 +548,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       //    一筆 `saved`，使用者接著說「取消上一筆」就會刪掉那筆剛編輯好的舊支出，
       //    而不是最近新增的那一筆；推播文字也會謊稱「已存入」。
       if (liffMeta?.line_user_id) {
-        const { error: invokeErr } = await supabase.functions.invoke('liff-notify', {
+        const { data: notifyRes, error: invokeErr } = await supabase.functions.invoke('liff-notify', {
           body: {
             line_user_id: liffMeta.line_user_id,
             expense_id: savedExpenseId,
@@ -559,6 +559,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           }
         });
         if (invokeErr) console.error('[LIFF] notify error:', invokeErr);
+        // 支出已經存好，只是 LINE 聊天室收不到確認訊息 —— 要講清楚，不然看起來像沒存到
+        if (notifyRes?.reason === 'line_quota') {
+          showToast('已存好！但 LINE 本月推播額度用完，聊天室這次不會有確認訊息');
+        } else if (invokeErr) {
+          showToast('已存好！但 LINE 確認訊息沒送出');
+        }
       }
 
       onSuccess();

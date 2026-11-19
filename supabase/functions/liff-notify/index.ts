@@ -100,6 +100,13 @@ serve(async (req) => {
     if (!pushRes.ok) {
       const errText = await pushRes.text()
       console.error('[LIFF_NOTIFY] LINE push error:', errText)
+      // 免費方案每月推播額度用完（推給群組時每位成員各算一則）。支出已經存好了，
+      // 回 200 讓 LIFF 頁面在畫面上說明聊天室這次不會有確認訊息，而不是默默失敗。
+      if (pushRes.status === 429 && /monthly limit/i.test(errText)) {
+        return new Response(JSON.stringify({ ok: false, reason: 'line_quota' }), {
+          headers: { ...CORS, 'Content-Type': 'application/json' }
+        })
+      }
       return new Response(JSON.stringify({ error: 'LINE push failed', detail: errText }), {
         status: 502, headers: { ...CORS, 'Content-Type': 'application/json' }
       })
