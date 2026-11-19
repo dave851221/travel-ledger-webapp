@@ -129,6 +129,7 @@ export const OCR_RESPONSE_SCHEMA: JsonSchema = {
         properties: {
           name: { type: 'string', description: '品名，外文照抄原文，括號補看得懂是什麼的簡短中文（通常 2～6 字，必要時可長一點）' },
           amount: { type: 'number', description: '這一行的金額（數量 × 單價，該品項的折扣直接扣掉）' },
+          qty: { type: 'integer', description: '這一行印的數量（×5、5個、数量 5）。2 以上才填，1 或沒印就不填' },
         },
         required: ['name', 'amount'],
       },

@@ -66,7 +66,40 @@ describe('splitByItems：稅、折扣與尾差', () => {
   });
 });
 
+describe('splitByItems：按份數分（×5 啤酒 2 瓶給 A、3 瓶給 B）', () => {
+  it('份數分完：依份數比例分', () => {
+    const items = [{ name: '啤酒', amount: 1000, qty: 5 }, { name: '毛豆', amount: 300 }];
+    const r = splitByItems(1300, items, [[], ['文暄']], ALL, 0, '代杰', [{ 代杰: 2, 賢佑: 3 }, null]);
+    expect(r.split).toEqual({ 代杰: 400, 賢佑: 600, 文暄: 300 });
+  });
+
+  it('份數沒分完：剩下的由 others 平分', () => {
+    const items = [{ name: '啤酒', amount: 1000, qty: 5 }, { name: '毛豆', amount: 300 }];
+    // 代杰 2 瓶 = 400；剩 3 瓶 600 由代杰、賢佑平分各 300；毛豆是文暄的
+    const r = splitByItems(1300, items, [[], ['文暄']], ['代杰', '賢佑'], 0, '代杰', [{ 代杰: 2 }, null]);
+    expect(r.split).toEqual({ 代杰: 700, 賢佑: 300, 文暄: 300 });
+  });
+
+  it('沒有 qty 的品項按份數：純比例', () => {
+    const r = splitByItems(900, [{ name: 'A', amount: 900 }, { name: 'B', amount: 0.0001 }],
+      [[], ['代杰']], ALL, 0, '代杰', [{ 賢佑: 1, 文暄: 2 }]);
+    expect(r.split.賢佑).toBe(300);
+    expect(r.split.文暄).toBe(600);
+  });
+
+  it('全是 0 份就退回 assignments／others，外税依比例攤', () => {
+    const items = [{ name: '啤酒', amount: 1000, qty: 5 }];
+    const r = splitByItems(1100, items, [['代杰']], ALL, 0, '代杰', [{ 賢佑: 0 }]);
+    expect(r.split).toEqual({ 代杰: 1100 });
+  });
+});
+
 describe('sanitizeReceiptItems', () => {
+  it('數量只收 2～999 的整數', () => {
+    expect(sanitizeReceiptItems([{ name: 'A', amount: 100, qty: 5 }, { name: 'B', amount: 200, qty: 1 }, { name: 'C', amount: 1, qty: 'x' }]))
+      .toEqual([{ name: 'A', amount: 100, qty: 5 }, { name: 'B', amount: 200 }, { name: 'C', amount: 1 }]);
+  });
+
   it('丟掉壞掉的品項、少於兩項就不給逐項分', () => {
     expect(sanitizeReceiptItems([{ name: 'A', amount: 100 }, { name: '', amount: 5 }, { name: 'B', amount: 'x' }])).toEqual([]);
     expect(sanitizeReceiptItems([{ name: 'A', amount: 100 }, { name: 'B', amount: '200' }])).toHaveLength(2);
@@ -92,6 +125,15 @@ describe('網頁與機器人兩份實作一致（契約測試）', () => {
       const prefer = ALL[Math.floor(r() * 4)];
       const web = splitByItems(total, items, assignments, others, precision, prefer);
       const bot = botSplit(total, items, assignments, others, precision, prefer);
+      expect(bot).toEqual(web);
+      // 按份數分：隨機給 qty 與份數（可能沒分完）
+      const qItems = items.map(it => (r() < 0.5 ? { ...it, qty: 2 + Math.floor(r() * 8) } : it));
+      const units = qItems.map(it => (r() < 0.5 ? null : Object.fromEntries(ALL.filter(() => r() < 0.5)
+        .map(m => [m, Math.floor(r() * ((it as { qty?: number }).qty ?? 4) / 2)]))));
+      const webU = splitByItems(total, qItems, assignments, others, precision, prefer, units);
+      const botU = botSplit(total, qItems, assignments, others, precision, prefer, units);
+      expect(botU).toEqual(webU);
+      if (Object.keys(webU.split).length > 0) expect(Math.round(sum(webU.split) * 100)).toBe(Math.round(total * 100));
       expect(bot).toEqual(web);
       if (Object.keys(web.split).length > 0) expect(Math.round(sum(web.split) * 100)).toBe(Math.round(total * 100));
     }

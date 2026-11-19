@@ -242,7 +242,7 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
     const photo = d.photoIds.length > 0 ? '（附收據照片）' : ''
     // 有品項明細的收據：列出編號，使用者說「雞皮是賢佑的」時 AI 才填得出 item_assignments
     const items = d.items.length > 0
-      ? `\n  品項：${d.items.map((it, i) => `#${i} ${it.name} ${it.amount}`).join('、')}`
+      ? `\n  品項：${d.items.map((it, i) => `#${i} ${it.name}${it.qty ? ` ×${it.qty}` : ''} ${it.amount}`).join('、')}`
       : ''
     return `- nonce=${d.nonce}：${e.d ?? ''} ${e.a ?? ''} ${e.c ?? ''}${photo}（付款：${payers}；分攤：${splits}）${items}`
   }).join('\n')

@@ -11,7 +11,12 @@ import { Decimal } from './deps.ts'
 export interface ReceiptItem {
   name: string
   amount: number
+  /** 收據印的數量（×5）。只有 ≥2 才會出現；可以按份數分給不同人 */
+  qty?: number
 }
+
+/** 一個品項按份數分：{ 成員: 拿了幾份 }。沒人拿的份數由 others 平分 */
+export type ItemUnits = Record<string, number>
 
 export interface ItemSplitResult {
   /** { 成員: 應付金額 }，已依精度四捨五入，加總**一定**等於 total */
@@ -26,6 +31,8 @@ export interface ItemSplitResult {
  * 依「每個品項是誰的」算出每個人該付多少。
  *
  * - 一個品項有好幾個人：那幾個人平分。
+ * - 有 `units[i]`（按份數分，例如 ×5 的啤酒 2 瓶給 A、3 瓶給 B）：依份數比例分；
+ *   份數加起來比 qty 少，剩下的份數由 `others` 平分。units 有值時優先於 assignments。
  * - 沒指定的品項：由 `others` 平分（通常是這張卡原本的分攤名單）。
  * - 稅、服務費、整張收據的折扣：品項加總跟總額不一樣時，依每個人分到的品項金額**按比例**攤，
  *   所以外税 8%、10% 或整單打折都不必另外處理。
@@ -39,6 +46,7 @@ export function splitByItems(
   others: string[],
   precision: number,
   preferAdjust?: string | null,
+  units?: (ItemUnits | null | undefined)[],
 ): ItemSplitResult {
   const raw = new Map<string, Decimal>()
   const add = (m: string, v: Decimal) => raw.set(m, (raw.get(m) ?? new Decimal(0)).plus(v))
@@ -47,6 +55,18 @@ export function splitByItems(
   items.forEach((item, i) => {
     const amt = new Decimal(Number(item.amount) || 0)
     itemsTotal = itemsTotal.plus(amt)
+    const u = cleanUnits(units?.[i])
+    if (u) {
+      const taken = Object.values(u).reduce((a, b) => a + b, 0)
+      const qty = Math.max(taken, Math.floor(Number(item.qty) || 0))
+      Object.entries(u).forEach(([m, n]) => add(m, amt.times(n).div(qty)))
+      const pool = [...new Set(others.filter(Boolean))]
+      if (qty > taken && pool.length > 0) {
+        const each = amt.times(qty - taken).div(qty).div(pool.length)
+        pool.forEach(m => add(m, each))
+      }
+      return
+    }
     const owners = [...new Set((assignments[i] ?? []).filter(Boolean))]
     const who = owners.length > 0 ? owners : [...new Set(others.filter(Boolean))]
     if (who.length === 0) return
@@ -84,6 +104,17 @@ export function splitByItems(
   return { split, adjustment, itemsTotal: itemsTotal.toNumber() }
 }
 
+/** 只留正整數份數；全是 0 就當沒按份數分 */
+function cleanUnits(u: ItemUnits | null | undefined): ItemUnits | null {
+  if (!u || typeof u !== 'object') return null
+  const out: ItemUnits = {}
+  for (const [m, v] of Object.entries(u)) {
+    const n = Math.floor(Number(v))
+    if (m && Number.isFinite(n) && n > 0) out[m] = n
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
 /**
  * 把 AI 讀到的品項收斂成安全的形狀：名稱是字串、金額是有限數字、最多 40 項。
  * 少於 2 項就沒有「逐項分」的意義，回傳空陣列。
@@ -98,7 +129,9 @@ export function sanitizeReceiptItems(value: unknown): ReceiptItem[] {
     const amount = Number(o.amount)
     // 0 元的（加冰、免費的附餐）點了也沒差，不列出來
     if (!name || !Number.isFinite(amount) || amount === 0) continue
-    out.push({ name, amount })
+    // 數量只收 2～999 的整數；1 或讀不到就不帶，維持舊的形狀
+    const qty = Math.floor(Number(o.qty))
+    out.push(Number.isFinite(qty) && qty >= 2 && qty <= 999 ? { name, amount, qty } : { name, amount })
     if (out.length >= 60) break
   }
   return out.length >= 2 ? out : []
