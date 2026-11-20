@@ -53,6 +53,18 @@ export async function initLiff(): Promise<LiffSDK | null> {
   return liff;
 }
 
+/** 打開這個 LIFF 頁的人的 LINE 名稱。拿不到（不在 LINE 裡、沒開 profile scope）就回 null */
+export async function getLiffDisplayName(liff: LiffSDK | null): Promise<string | null> {
+  if (!liff || !liff.isInClient()) return null;
+  try {
+    const profile = await liff.getProfile();
+    return profile?.displayName?.trim() || null;
+  } catch (e) {
+    console.warn('[LIFF] getProfile failed:', e);
+    return null;
+  }
+}
+
 /** 這個頁面能不能用 sendMessages 把話送進開啟它的那個聊天室 */
 function canSendMessages(liff: LiffSDK | null): liff is LiffSDK {
   if (!liff) return false;

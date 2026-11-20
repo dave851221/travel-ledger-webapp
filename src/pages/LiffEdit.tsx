@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { initLiff } from '../utils/liff';
+import { getLiffDisplayName, initLiff } from '../utils/liff';
+import { resolveMember } from '../utils/member';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import ExpenseModal from '../components/ExpenseModal';
@@ -21,6 +22,8 @@ const LiffEdit: React.FC = () => {
   const [items, setItems] = useState<ReceiptItem[]>([]);
   const [step, setStep] = useState<'items' | 'form'>('form');
   const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
+  // 打開這一頁的人對應到的成員（LINE 名稱 → 成員）。拿不到就是 null
+  const [opener, setOpener] = useState<string | null>(null);
 
   // 儲存 init 完成後的 liff 實例
   const liffRef = useRef<LiffSDK | null>(null);
@@ -64,6 +67,8 @@ const LiffEdit: React.FC = () => {
           liffRef.current = liff;
           setCanCloseWindow(typeof liff.closeWindow === 'function');
         }
+        // 跟查旅程同時進行，不拖慢開啟
+        const openerNamePromise = getLiffDisplayName(liff);
 
         // --- 2. 決定資料來源 ---
         // 三種進入方式，優先序 id > n > data：
@@ -89,6 +94,8 @@ const LiffEdit: React.FC = () => {
         if (tripErr) throw tripErr;
         if (!tripData.precision_config) tripData.precision_config = {};
         setTrip(tripData);
+        const openerMember = resolveMember(await openerNamePromise, tripData.members ?? []);
+        setOpener(openerMember);
 
         // 把各種來源整理成同一份 payload（欄位縮寫與草稿卡片一致），
         // 下面的欄位對應對三種來源共用
@@ -127,6 +134,12 @@ const LiffEdit: React.FC = () => {
           if (!draft) throw new Error('這張卡片已過期，請重新記帳。');
           // pending 列的結構是 { n, exp: {d,a,c,dt,cat,p,s}, p: 照片, rc: 照片是收據, tid }
           decoded = { ...draft.exp, pi: draft.p, rc: draft.rc === true, n: draft.n, u: sourceId ?? undefined };
+          // 還沒有金額的照片卡，付款人只是預設的「傳照片的人」（pd）：
+          // 打開來填金額的人才是付錢的人，改成他（對不到成員就照舊）
+          const noAmount = !(Number(draft.exp?.a) > 0);
+          if (draft.pd === true && noAmount && openerMember) {
+            decoded.p = { [openerMember]: 0 };
+          }
           const receiptItems = reconcileReceiptItems(sanitizeReceiptItems(draft.it), Number(draft.exp?.a) || 0, draft.st);
           if (receiptItems.length > 0) {
             setItems(receiptItems);
@@ -241,7 +254,7 @@ const LiffEdit: React.FC = () => {
           // 沒有 LIFF ID 時頁面關不掉：✕ 與其沒反應，不如告訴使用者怎麼回去
           onClose={canCloseWindow ? closeLiffWindow : () => showToast('可以直接關閉這個頁面回到 LINE')}
           trip={trip}
-          currentUser={trip.members[0]}
+          currentUser={opener ?? trip.members[0]}
           onSuccess={handleSuccess}
           showToast={showToast}
           editData={initialData}

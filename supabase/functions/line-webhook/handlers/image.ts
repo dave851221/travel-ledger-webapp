@@ -139,8 +139,10 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
         收款方、店家、服務人員的名字不算；看到的名字對不上任何成員就跳過這一條。
      1. 旅程預設付款人（若有設定）
      2. 記帳偏好內所提及的預設付款人
-     3. 根據上述的「使用者名稱」，判斷是否可對應到某一名成員，即該成員擔任付款人。(對應關係可能會在記帳偏好中提及，但請注意務必要用「成員清單」內定義的名字)
-     4. 由成員中第一位擔任付款人
+     3. 都沒有 → 就是傳照片的人（上面的「使用者名稱」），系統會自動對應到成員。
+        🚫 **不要**因為沒線索就填成員清單的第一位。
+   - payer_source 照實回報付款人是哪裡來的：符合 0 填 "photo"、符合 1 或 2 填 "preference"、
+     符合 3 填 "sender"（這時 payer_data 填什麼都會被系統換成傳照片的人）。
    - 金額分攤邏輯的優先權(split_details):
      1. 旅程預設分攤成員（若有設定）
      2. 記帳偏好所提及的分攤方式
@@ -223,6 +225,13 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       // 驗證與分帳整段走共用工具層（_shared/tools/expenses.ts），與文字路徑、
       // 「確認存入」用的是同一份實作 —— 以前這段在三個地方各寫一次。
       // OCR 沒有使用者文字可以驗證 stated，sourceText 傳 null 代表直接採信（T3）。
+      // 付款人沒有照片或偏好當根據時，一律交給 applyParticipantDefaults 補成傳照片的人
+      // （旅程預設付款人優先）。以前直接採用模型填的，它常挑成員第一位 ——
+      // 群組裡誰傳的收據都變成同一個人付的（2026-11-20）。
+      const payerDefaulted = res.payer_source !== 'photo' && res.payer_source !== 'preference'
+      if (payerDefaulted && res.data) {
+        res.data = { ...res.data, payer_data: [] } as typeof res.data
+      }
       const prepared = prepareExpense(
         (res.data ?? {}) as unknown as ExpenseInput,
         trip,
@@ -298,7 +307,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       //    第二張會讓第一張作廢，使用者只記得到最後一張（H1、H7）。
       //    卡片失效只發生在 AI 明確指出「這句是在修正某張草稿」的時候。
       await storePendingExpense(sourceId, nonce, {
-        exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId, it: items.length > 0 ? items : undefined, st: items.length > 0 ? itemsSubtotal : undefined,
+        exp: exp_short, p: photo_ids, rc: !needsAmount, tid: tripId, pd: payerDefaulted || undefined, it: items.length > 0 ? items : undefined, st: items.length > 0 ? itemsSubtotal : undefined,
       })
 
       // 摘要要帶 nonce：AI 才有辦法用 corrects_draft 指名它要修正哪一張卡片

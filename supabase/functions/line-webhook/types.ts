@@ -217,6 +217,11 @@ export interface PendingDraft {
   it?: ReceiptItem[]
   /** 收據印的品項小計（外税＝稅前；逐項分用它分辨漏讀與稅／服務費） */
   st?: number
+  /**
+   * 付款人只是預設值（傳照片的人），不是照片或偏好看出來的。
+   * 還沒有金額的照片卡在 LIFF 打開時，付款人改成打開的那個人（LiffEdit.tsx）。
+   */
+  pd?: boolean
 }
 
 // ============================================================
@@ -323,6 +328,8 @@ export interface OcrResponse {
   /** 收據上的品項明細（🧾 逐項分用） */
   items?: unknown
   items_subtotal?: unknown
+  /** 付款人的來源：photo／preference 才採用模型的 payer_data，其餘改用傳照片的人 */
+  payer_source?: unknown
   /** 兩種 type 都不是時的後備說明 */
   content?: string
 }

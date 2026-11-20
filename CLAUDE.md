@@ -346,6 +346,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
    細節與踩過的限制見上面的 `_shared/ai/` 段落與 [`docs/LINE_SCENARIOS.md`](docs/LINE_SCENARIOS.md) 第 14 章。
 4. **圖片訊息**：從 LINE CDN 下載 → 上傳 Storage → AI OCR → Flex Message 預覽卡片。
    **OCR 路徑維持 JSON mode**（`ai.generate` + `OCR_RESPONSE_SCHEMA`），不走工具迴圈
+   **付款人由程式決定**：OCR 另回 `payer_source`，只有 `photo`（照片上看得到誰付）或 `preference`（預設付款人／記帳偏好）才採用模型填的 `payer_data`，其餘清空交給 `applyParticipantDefaults` 補成**傳照片的人**（模型以前常直接挑成員第一位，群組裡誰傳的都變成代杰，2026-11-20）。這種草稿帶 `pd`，還沒有金額時在 LIFF 打開，付款人改成打開的那個人（`liff.getProfile()` 的名稱對應成員，`src/utils/member.ts`）。
 4b. **語音訊息**：下載 m4a → Gemini 免費版逐字轉錄（不管 `AI_PROVIDER` 是什麼；中文寫繁體，英日文照原文）→ **當成使用者打的字**走上面第 3 點的流程
    （所以快捷指令、草稿修正也能用講的）。群組的提及模式不處理語音。
 5. **Postback**：`save`（存入）、`upd`（套用修改）、`del`（刪除）、`cancel`、`undo`、`cur`、`me`（「👤 只算我」：付款人與分攤都改成按的人後**直接存入**；照片卡還沒金額時才換一張新卡，存入失敗會把原卡的鎖放掉）。

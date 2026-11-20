@@ -8,7 +8,9 @@ declare global {
     isInClient(): boolean;
     login(): void;
     closeWindow(): void;
-    getContext(): { type?: string } | null;
+    getContext(): { type?: string; userId?: string } | null;
+    /** 需要 LIFF app 開 profile scope；沒開或不在 LINE 裡會丟錯 */
+    getProfile(): Promise<{ userId: string; displayName: string }>;
     sendMessages(messages: { type: 'text'; text: string }[]): Promise<void>;
   }
 

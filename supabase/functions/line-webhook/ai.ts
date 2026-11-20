@@ -115,6 +115,14 @@ export const OCR_RESPONSE_SCHEMA: JsonSchema = {
     // item_photo：不是收據、但拍的是可以記帳的東西（食物、商品、門票…），先記成金額 0 的草稿
     type: { type: 'string', enum: ['expense', 'item_photo', 'not_receipt'] },
     data: EXPENSE_DATA_SCHEMA,
+    // 付款人是哪裡來的。只有 photo／preference 才採用模型填的 payer_data，
+    // 其餘一律由程式改成「傳照片的人」（applyParticipantDefaults）——
+    // 模型常常直接挑成員第一位，群組裡誰傳的照片都變成同一個人付的。
+    payer_source: {
+      type: 'string',
+      enum: ['photo', 'preference', 'sender'],
+      description: 'photo＝照片上看得到付款的成員；preference＝旅程預設付款人或記帳偏好指定了付款人；sender＝都沒有（系統改用傳照片的人）',
+    },
     // 收據上印的品項小計：外税是稅前小計，內含稅就等於合計。用來判斷品項是不是漏讀、稅與服務費有多少
     items_subtotal: {
       type: 'number',
