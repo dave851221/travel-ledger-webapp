@@ -506,7 +506,7 @@ LINE Bot 的對話歷史曾因此永遠停在最早的六筆，AI 完全看不�
 
 - **前端**：推送到 `main` 觸發 `.github/workflows/deploy.yml`，自動部署到 GitHub Pages。
   Repo Secrets 需要 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`。
-  （`VITE_LIFF_ID` 目前未設定，因此 LIFF 存檔後無法自動關閉視窗 —— 見 `.env.example`。）
+  LIFF ID 預設寫在程式裡（`src/utils/liff.ts` 與 `line-webhook/config.ts`，`2012713943-msELyw4c`），卡片按鈕開 liff.line.me，存檔後由 LIFF 代送「✅ 已記帳」、機器人免費 reply；在 LIFF 外開啟時退回推播。
 - **Edge Function**：`supabase functions deploy line-webhook --no-verify-jwt`，
   Webhook URL 須在 LINE Developer Console 登錄。
 - **環境變數**：本機 `.env`（見 `.env.example`）；Edge Function 密鑰用 `supabase secrets set`。

@@ -31,9 +31,9 @@ export const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.gith
 /**
  * LIFF app 的 ID（不是密鑰）。有值時卡片按鈕改開 https://liff.line.me/<ID>，
  * LIFF 頁面才能用 liff.sendMessages 代送「✅ 已記帳」換機器人的免費回覆（_shared/liffEcho.ts）。
- * 空字串＝照舊直接開網頁。要跟前端 src/utils/liff.ts 的 LIFF_ID 一致。
+ * 預設是正式的 LIFF app（Endpoint = GitHub Pages）；secret LIFF_ID 設成空字串＝照舊直接開網頁。要跟前端 src/utils/liff.ts 的 LIFF_ID 一致。
  */
-export const LIFF_ID = Deno.env.get('LIFF_ID') ?? ''
+export const LIFF_ID = Deno.env.get('LIFF_ID') ?? '2012713943-msELyw4c'
 
 
 // 收據照片的 bucket。路徑慣例 expenses/{tripId}/{檔名}，

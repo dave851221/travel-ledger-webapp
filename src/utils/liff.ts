@@ -10,7 +10,7 @@
 import { supabase } from '../api/supabase';
 
 /** LIFF app 的 ID（不是密鑰，LINE Developers → LINE Login channel → LIFF）。可用 VITE_LIFF_ID 覆寫 */
-export const LIFF_ID: string = import.meta.env.VITE_LIFF_ID || '';
+export const LIFF_ID: string = import.meta.env.VITE_LIFF_ID || '2012713943-msELyw4c';
 
 const SDK_URL = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
 

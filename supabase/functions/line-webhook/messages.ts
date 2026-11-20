@@ -436,7 +436,7 @@ export function buildUpdatePreviewCard(opts: {
           { type: 'separator', margin: 'lg' },
           {
             type: 'text',
-            text: '按「確認修改」才會真的改到帳本；「網頁編輯」開的是修改前的原內容。',
+            text: '按「確認修改」才會真的改到帳本；「編輯」開的是修改前的原內容。',
             size: 'xxs', color: '#aaaaaa', margin: 'md', wrap: true,
           },
         ],
@@ -447,7 +447,7 @@ export function buildUpdatePreviewCard(opts: {
           { type: 'button', style: 'primary', color: '#E08A00', action: { type: 'postback', label: '✅ 確認修改', data: JSON.stringify({ act: 'upd', n: nonce }) } },
           {
             type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
-              { type: 'button', style: 'primary', color: '#5AC8FA', action: { type: 'uri', label: '🌐 網頁編輯', uri: editUrl } },
+              { type: 'button', style: 'primary', color: '#5AC8FA', action: { type: 'uri', label: '✏️ 編輯', uri: editUrl } },
               { type: 'button', style: 'secondary', action: { type: 'postback', label: '❌ 取消', data: JSON.stringify({ act: 'cancel', n: nonce }) } },
             ],
           },
