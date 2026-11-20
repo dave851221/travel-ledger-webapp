@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { buildLiffEchoMarker, buildLiffPageUrl as liffPageUrl, looksLikeLiffEcho, pickLiffNotice, LIFF_NOTICE_TTL_MS } from './liffEcho';
 
 describe('liffEcho', () => {
-  it('暗號像人話，機器人認得出來', () => {
-    const m = buildLiffEchoMarker(false, ' 拉麵  一蘭 ', 1200, 'JPY');
-    expect(m).toBe('✅ 已記帳：拉麵 一蘭 1200 JPY');
+  it('暗號只有簡短一句，機器人認得出來', () => {
+    const m = buildLiffEchoMarker(false);
+    expect(m).toBe('✅ 已記帳');
     expect(looksLikeLiffEcho(m)).toBe(true);
-    expect(looksLikeLiffEcho(buildLiffEchoMarker(true, '拉麵', 1, 'JPY'))).toBe(true);
+    expect(buildLiffEchoMarker(true)).toBe('✏️ 已修改');
+    expect(looksLikeLiffEcho(buildLiffEchoMarker(true))).toBe(true);
     expect(looksLikeLiffEcho('拉麵 1200')).toBe(false);
   });
 

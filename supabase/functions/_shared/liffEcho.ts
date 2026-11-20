@@ -26,14 +26,16 @@ export interface LiffNotice {
 /** 暗號超過 10 分鐘就不認了（replyToken 本身也只能用一分鐘，這只是防舊列誤配） */
 export const LIFF_NOTICE_TTL_MS = 10 * 60 * 1000
 
-const PREFIX_INSERT = '✅ 已記帳：'
-const PREFIX_UPDATE = '✏️ 已修改：'
+const PREFIX_INSERT = '✅ 已記帳'
+const PREFIX_UPDATE = '✏️ 已修改'
 
-/** 使用者會在聊天室看到自己送出這一句，所以要像人話：「✅ 已記帳：拉麵 1200 JPY」 */
-export function buildLiffEchoMarker(isUpdate: boolean, description: string, amount: unknown, currency: unknown): string {
-  const desc = String(description ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
-  const amt = [amount, currency].filter(v => v !== undefined && v !== null && String(v) !== '').join(' ')
-  return `${isUpdate ? PREFIX_UPDATE : PREFIX_INSERT}${desc}${amt ? ` ${amt}` : ''}`
+/**
+ * 使用者會在聊天室看到自己送出這一句，只留簡短的「✅ 已記帳」／「✏️ 已修改」，
+ * 明細由機器人回覆補上（David 2026-11-20：額度恢復後也維持這個做法，不改回推播）。
+ * 同一人短時間存好幾筆時，暗號都一樣，pickLiffNotice 依序配最新的那一列。
+ */
+export function buildLiffEchoMarker(isUpdate: boolean): string {
+  return isUpdate ? PREFIX_UPDATE : PREFIX_INSERT
 }
 
 /** 只用開頭判斷，一般訊息不必為了這個多查一次資料庫 */

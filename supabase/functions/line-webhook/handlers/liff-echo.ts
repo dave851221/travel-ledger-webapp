@@ -1,5 +1,5 @@
 // ============================================================
-// handlers/liff-echo.ts —— LIFF 存檔後，使用者聊天室送出的那句「✅ 已記帳：…」
+// handlers/liff-echo.ts —— LIFF 存檔後，使用者聊天室送出的那句「✅ 已記帳」
 //
 // LIFF 頁面用 liff.sendMessages() 以使用者名義送出暗號（不算推播額度），
 // 這裡找到 liff-notify 先存好的 `liff_notice` 列，用這則事件的 replyToken 回完整確認（含 ↩️ 撤銷）。

@@ -3,7 +3,7 @@
  *
  * 為什麼要真的走 LIFF（2026-11-19）：存檔後的確認訊息以前一律由 liff-notify 推播，
  * 免費方案每月推播有上限（推給群組時每位成員各算一則），很快就用完。
- * 走 LIFF 開啟時可以用 liff.sendMessages() 以使用者名義送一句「✅ 已記帳：…」，
+ * 走 LIFF 開啟時可以用 liff.sendMessages() 以使用者名義送一句「✅ 已記帳」，
  * 機器人收到再用免費的 reply 回完整確認（流程見 supabase/functions/_shared/liffEcho.ts）。
  * 送不出去時退回推播，跟以前一樣。
  */

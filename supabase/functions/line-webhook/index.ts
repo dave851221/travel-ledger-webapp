@@ -119,7 +119,7 @@ serve(async (req) => {
         ? textEvent.message.mention?.mentionees
         : undefined
 
-      // LIFF 存檔後以使用者名義送出的「✅ 已記帳：…」：回完整確認，不進 AI、不看群組模式
+      // LIFF 存檔後以使用者名義送出的「✅ 已記帳」：回完整確認，不進 AI、不看群組模式
       if (transcript === null && await handleLiffEcho(ctx, rawText)) continue
 
       // 引用回覆只有打字的訊息才有；有引用才查資料庫

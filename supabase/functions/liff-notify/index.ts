@@ -89,7 +89,7 @@ serve(async (req) => {
     }
 
     if (viaClient) {
-      const marker = buildLiffEchoMarker(isUpdate, description, amount, currency)
+      const marker = buildLiffEchoMarker(isUpdate)
       const notice: LiffNotice = { marker, text, quickReply: { items: quickReplyItems } }
       const { error: noticeErr } = await supabase.from('line_chat_history').insert({
         line_user_id, role: LIFF_NOTICE_ROLE, content: JSON.stringify(notice),
