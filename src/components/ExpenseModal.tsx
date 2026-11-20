@@ -16,9 +16,11 @@ import {
   GripVertical,
   Star,
   Receipt,
-  ShoppingBag
+  ShoppingBag,
+  Calculator
 } from 'lucide-react';
 import Modal from './Modal';
+import AmountCalculator from './AmountCalculator';
 import { ui } from './ui';
 import { notifyLineAfterSave } from '../utils/liff';
 import { supabase } from '../api/supabase';
@@ -50,6 +52,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   // Form State
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState<string>('');
+  const [showCalc, setShowCalc] = useState(false);
   const [currency, setCurrency] = useState(trip.base_currency);
   const [date, setDate] = useState(getLocalDateString());
   const [category, setCategory] = useState(trip.categories[0] || '其他');
@@ -165,6 +168,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     setError(null);
     setLoading(false);
     setCompressing(false);
+    setShowCalc(false);
     if (editData) {
       // --- Edit Mode ---
       // LINE 的照片記帳草稿還沒有金額（以 0 占位）：金額欄留空讓人直接輸入，
@@ -714,7 +718,27 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             value={amount}
             onChange={e => setAmount(e.target.value)}
           />
+          <button
+            type="button"
+            aria-label={showCalc ? '收起計算機' : '打開計算機'}
+            aria-expanded={showCalc}
+            title="計算機"
+            onClick={() => setShowCalc(v => !v)}
+            className={`shrink-0 w-[52px] rounded-xl border inline-flex items-center justify-center transition active:scale-95 ${showCalc ? 'bg-primary border-primary text-on-primary' : 'bg-surface border-line text-ink-2 hover:text-ink hover:bg-sunk'}`}
+          >
+            <Calculator size={22} />
+          </button>
         </div>
+        {showCalc && (
+          <AmountCalculator
+            initial={amount}
+            currency={currency}
+            precisionConfig={trip.precision_config}
+            decimals={getCurrencyPrecision(currency, trip.precision_config)}
+            onApply={v => { setAmount(v); setShowCalc(false); }}
+            onClose={() => setShowCalc(false)}
+          />
+        )}
 
         <div>
           <label htmlFor="exp-desc" className={ui.label}>項目 <span className="text-muted font-normal">· 選填，留空會記成「{category}」</span></label>

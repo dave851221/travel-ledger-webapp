@@ -220,7 +220,12 @@ select,
 }
 .anim-sheet { animation: sheet-up 0.22s ease-out; }
 .anim-fade { animation: fade-in 0.18s ease-out; }
+@keyframes calc-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.anim-calc { animation: calc-in 0.16s ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
-  .anim-sheet, .anim-fade { animation: none; }
+  .anim-sheet, .anim-fade, .anim-calc { animation: none; }
 }
