@@ -104,7 +104,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   `App.tsx` 在回到前景與每小時主動檢查一次。
 - **`ExpenseModal.tsx`**：支出新增與編輯。付款人/分攤的鎖定機制、多幣別、
   瀏覽器端圖片壓縮上傳。網頁與 LIFF 共用同一個元件。
-  金額欄右邊的計算機鈕開 `components/AmountCalculator.tsx`（表單內展開、全是按鈕所以手機鍵盤不會跳出；＋−×÷ 與括號，運算在 `utils/calc.ts` 走 decimal.js，「帶入金額」依幣別精度四捨五入）。誰付錢／怎麼分的標題列右邊也有一顆「計算機」（收合時也看得到，按了會展開；面板畫在表格下方，`renderMemberCalc`），用「帶入給誰」挑人（預設最後點過的那格），帶入等於手動輸入該人金額（會鎖定）；每列不另放按鈕，手機上名字已經很擠。
+  金額欄右邊的計算機鈕開 `components/AmountCalculator.tsx`（表單內展開、全是按鈕所以手機鍵盤不會跳出；＋−×÷ 與括號，運算在 `utils/calc.ts` 走 decimal.js，「帶入金額」依幣別精度四捨五入）。誰付錢／怎麼分的標題列右邊也有一顆計算機（手機上只有圖示，加字會把「金額相符」擠到換行；收合時也看得到，按了會展開；面板畫在表格下方，`renderMemberCalc`），用「帶入給誰」挑人（預設最後點過的那格），帶入等於手動輸入該人金額（會鎖定）；每列不另放按鈕，手機上名字已經很擠。
   ⚠️ 表單只在「開啟的那一刻」或 `editData` 換了才灌初始值（`initializedFor` ref）——
   Dashboard 回到前景就會重抓 trip，跟著 `trip.members` 重設會把填到一半的內容清掉。
 - **`SettingsModal.tsx`**：旅程設定（成員、匯率、精度、分類、預設值、CSV 匯出、LINE 短碼）。

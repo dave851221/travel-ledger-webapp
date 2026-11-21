@@ -590,7 +590,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   };
 
   const ValidationBadge = ({ isValid, current, target }: { isValid: boolean, current: number, target: number }) => (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium ${isValid ? 'bg-pos/10 text-pos' : 'bg-neg/10 text-neg'}`}>
+    <span className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium ${isValid ? 'bg-pos/10 text-pos' : 'bg-neg/10 text-neg'}`}>
       {isValid ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
       <span className="num">{isValid ? '金額相符' : `${current.toFixed(precision)} / ${target}`}</span>
     </span>
@@ -746,10 +746,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           }}
           aria-expanded={calcOpen}
           aria-label={calcOpen ? `收起${title}的計算機` : `用計算機算${title}的各人金額`}
-          className={`shrink-0 inline-flex items-center gap-1 rounded-full pl-2.5 pr-3 py-1.5 text-xs font-bold transition active:scale-95 ${calcOpen ? 'bg-primary text-on-primary' : 'bg-accent/15 text-accent hover:bg-accent/25'}`}
+          title="計算機"
+          // 手機上只放圖示：加了字會把「金額相符」與摘要擠到換行
+          className={`shrink-0 inline-flex items-center justify-center gap-1 rounded-full w-8 h-8 sm:w-auto sm:pl-2.5 sm:pr-3 text-xs font-bold transition active:scale-95 ${calcOpen ? 'bg-primary text-on-primary' : 'bg-accent/15 text-accent hover:bg-accent/25'}`}
         >
-          <Calculator size={14} />
-          計算機
+          <Calculator size={16} className="sm:w-3.5 sm:h-3.5" />
+          <span className="hidden sm:inline">計算機</span>
         </button>
       </div>
     );
