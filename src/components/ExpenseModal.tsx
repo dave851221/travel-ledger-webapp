@@ -690,7 +690,6 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   };
 
   const openMemberCalc = (type: 'payer' | 'split') => {
-    if (memberCalc?.type === type) { setMemberCalc(null); return; }
     const active = type === 'payer' ? payerActive : splitActive;
     const locked = type === 'payer' ? payerLocked : splitLocked;
     const last = lastMemberField.current[type];
@@ -703,22 +702,13 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     setMemberCalc({ type, member });
   };
 
-  // 成員金額的計算機：表格下方一顆按鈕，展開後用「帶入給誰」挑人，表格每列不必再塞一顆鈕
+  // 成員金額的計算機：標題列的「計算機」打開，畫在表格下方，用「帶入給誰」挑人，表格每列不必再塞一顆鈕
   const renderMemberCalc = (type: 'payer' | 'split') => {
     const open = memberCalc?.type === type;
     const data = type === 'payer' ? payerData : splitData;
     const active = type === 'payer' ? payerActive : splitActive;
     return (
       <>
-        <button
-          type="button"
-          onClick={() => openMemberCalc(type)}
-          aria-expanded={open}
-          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition active:scale-[.98] ${open ? 'bg-primary text-on-primary' : 'bg-sunk text-ink-2 hover:text-ink'}`}
-        >
-          <Calculator size={14} />
-          {open ? '收起計算機' : `用計算機算${type === 'payer' ? '各人付的' : '各人的份'}`}
-        </button>
         {open && memberCalc && (
           <AmountCalculator
             initial={String(data[memberCalc.member] ?? '')}
@@ -737,14 +727,33 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     );
   };
 
-  const sectionHeader = (title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => (
-    <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-2 py-1 text-left">
-      <span className="text-sm font-bold text-ink shrink-0">{title}</span>
-      {numAmount !== 0 && <ValidationBadge isValid={valid} current={sum} target={numAmount} />}
-      {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
-      <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
-    </button>
-  );
+  const sectionHeader = (type: 'payer' | 'split', title: string, open: boolean, toggle: () => void, valid: boolean, sum: number, summary: string) => {
+    const calcOpen = open && memberCalc?.type === type;
+    return (
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={toggle} aria-expanded={open} className="flex-1 min-w-0 flex items-center gap-2 py-1 text-left">
+          <span className="text-sm font-bold text-ink shrink-0">{title}</span>
+          {numAmount !== 0 && <ValidationBadge isValid={valid} current={sum} target={numAmount} />}
+          {!open && <span className="text-sm text-ink-2 truncate min-w-0">{summary}</span>}
+          <ChevronDown size={16} className={`ml-auto shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {/* 計算機放在標題列，收合時也看得到；按了順便展開表格 */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!open) (type === 'payer' ? setShowPayerDetail : setShowSplitDetail)(true);
+            if (calcOpen) setMemberCalc(null); else openMemberCalc(type);
+          }}
+          aria-expanded={calcOpen}
+          aria-label={calcOpen ? `收起${title}的計算機` : `用計算機算${title}的各人金額`}
+          className={`shrink-0 inline-flex items-center gap-1 rounded-full pl-2.5 pr-3 py-1.5 text-xs font-bold transition active:scale-95 ${calcOpen ? 'bg-primary text-on-primary' : 'bg-accent/15 text-accent hover:bg-accent/25'}`}
+        >
+          <Calculator size={14} />
+          計算機
+        </button>
+      </div>
+    );
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={editData?.id ? '編輯支出' : '新增支出'} maxWidth="sm:max-w-lg" dirty={dirty} standalone={standalone}>
@@ -815,7 +824,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         </div>
 
         <section className="space-y-2">
-          {sectionHeader('誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
+          {sectionHeader('payer', '誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
           {showPayerDetail && (
             <>
               {renderMemberRows('payer')}
@@ -825,7 +834,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         </section>
 
         <section className="space-y-2">
-          {sectionHeader('怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
+          {sectionHeader('split', '怎麼分', showSplitDetail, () => setShowSplitDetail(v => !v), isSplitValid, splitSum, splitSummary)}
           {showSplitDetail && (
             <>
               {renderMemberRows('split')}

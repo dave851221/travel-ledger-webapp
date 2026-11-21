@@ -74,7 +74,7 @@ const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, 
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Dismiss the phone keyboard the amount field may have raised, then take focus for hardware keys
+    // scroll-mb-24 keeps 帶入 clear of the sticky submit bar. Dismiss the phone keyboard the amount field may have raised, then take focus for hardware keys
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     panelRef.current?.focus({ preventScroll: true });
     panelRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -137,7 +137,7 @@ const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, 
       onKeyDown={onKeyDown}
       role="group"
       aria-label="計算機"
-      className="rounded-2xl bg-sunk/60 border border-line p-3 outline-none anim-calc select-none"
+      className="rounded-2xl bg-sunk/60 border border-line p-3 outline-none anim-calc select-none scroll-mb-24"
     >
       {targets && targets.length > 0 && (
         <div className="mb-2.5">
