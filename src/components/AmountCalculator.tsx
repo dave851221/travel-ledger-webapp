@@ -12,6 +12,15 @@ interface AmountCalculatorProps {
   /** Called with the rounded result when the user taps 帶入 */
   onApply: (value: string) => void;
   onClose: () => void;
+  /**
+   * Member mode: chips above the keypad pick whose amount the result goes to.
+   * Switching chips before typing anything reloads that member's amount.
+   */
+  targets?: { id: string; label: string; muted?: boolean }[];
+  target?: string;
+  onTargetChange?: (id: string) => void;
+  /** Accept 0 as a result (a member can owe nothing); the total must stay above 0 */
+  allowZero?: boolean;
 }
 
 type KeyDef = { label: React.ReactNode; key: string; tone?: 'op' | 'fn' | 'eq'; aria?: string };
@@ -38,16 +47,29 @@ const toneClass: Record<string, string> = {
   eq: 'bg-primary text-on-primary hover:opacity-90 text-2xl',
 };
 
+/** Starting expression: the field's current amount, or empty when there is none */
+const seedOf = (value: string) => {
+  const v = evaluateExpression(value);
+  return v && v.greaterThan(0) ? v.toFixed() : '';
+};
+
 /**
  * Inline four-function calculator under the amount field. Built from buttons
  * (never an <input>) so the phone's own keyboard stays down while tapping.
  * A physical keyboard works too once the panel has focus.
  */
-const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, precisionConfig, decimals, onApply, onClose }) => {
-  const [expr, setExpr] = useState(() => {
-    const v = evaluateExpression(initial);
-    return v && v.greaterThan(0) ? v.toFixed() : '';
-  });
+const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, precisionConfig, decimals, onApply, onClose, targets, target, onTargetChange, allowZero = false }) => {
+  const [expr, setExpr] = useState(() => seedOf(initial));
+  // While the display still shows the seeded value, a new `initial` (another member picked) replaces it
+  const seededRef = useRef(expr);
+  useEffect(() => {
+    const next = seedOf(initial);
+    setExpr(prev => {
+      if (prev !== seededRef.current) return prev;
+      seededRef.current = next;
+      return next;
+    });
+  }, [initial]);
   const [flash, setFlash] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +82,7 @@ const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, 
 
   const result = useMemo(() => evaluateExpression(expr), [expr]);
   const rounded = result ? formatCalcResult(result, decimals) : null;
-  const canApply = rounded !== null && Number(rounded) > 0;
+  const canApply = rounded !== null && (allowZero ? Number(rounded) >= 0 : Number(rounded) > 0);
   const invalid = expr !== '' && result === null && !/[+−×÷(]$/.test(expr);
 
   const press = (key: string) => {
@@ -117,6 +139,25 @@ const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, 
       aria-label="計算機"
       className="rounded-2xl bg-sunk/60 border border-line p-3 outline-none anim-calc select-none"
     >
+      {targets && targets.length > 0 && (
+        <div className="mb-2.5">
+          <div className="text-xs text-muted mb-1.5">帶入給誰</div>
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="帶入給誰">
+            {targets.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={target === t.id}
+                onClick={() => onTargetChange?.(t.id)}
+                className={`px-3 py-1.5 rounded-full text-sm border transition-colors max-w-[9rem] truncate touch-manipulation ${target === t.id ? 'bg-primary border-primary text-on-primary font-medium' : `bg-surface border-line hover:text-ink ${t.muted ? 'text-muted' : 'text-ink-2'}`}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="rounded-xl bg-surface border border-line px-3.5 py-2.5 mb-3 text-right min-h-[74px] flex flex-col justify-end">
         <div className={`num text-sm break-all leading-snug ${invalid ? 'text-neg' : 'text-muted'}`} aria-live="polite">
           {expr ? expr : <span className="opacity-70">輸入算式，例如 1200×3+500</span>}
@@ -151,7 +192,7 @@ const AmountCalculator: React.FC<AmountCalculatorProps> = ({ initial, currency, 
           className="flex-[2] inline-flex items-center justify-center gap-1.5 rounded-xl bg-accent text-on-accent font-bold h-12 sm:h-11 text-sm transition hover:brightness-105 active:scale-[.98] disabled:opacity-40 disabled:active:scale-100 touch-manipulation min-w-0"
         >
           <Check size={16} className="shrink-0" />
-          <span className="truncate">帶入金額{canApply && rounded !== null ? ` ${formatMoney(Number(rounded), currency, precisionConfig)}` : ''}</span>
+          <span className="truncate">{targets && target ? `帶入 ${targets.find(t => t.id === target)?.label ?? ''}` : '帶入金額'}{canApply && rounded !== null ? ` ${formatMoney(Number(rounded), currency, precisionConfig)}` : ''}</span>
         </button>
       </div>
     </div>

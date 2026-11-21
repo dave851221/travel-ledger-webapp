@@ -53,6 +53,10 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState<string>('');
   const [showCalc, setShowCalc] = useState(false);
+  // Calculator for one member's amount in 誰付錢／怎麼分 (null = closed)
+  const [memberCalc, setMemberCalc] = useState<{ type: 'payer' | 'split'; member: string } | null>(null);
+  // The member amount field touched last in each table: the calculator starts on that person
+  const lastMemberField = useRef<{ payer?: string; split?: string }>({});
   const [currency, setCurrency] = useState(trip.base_currency);
   const [date, setDate] = useState(getLocalDateString());
   const [category, setCategory] = useState(trip.categories[0] || '其他');
@@ -169,6 +173,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
     setLoading(false);
     setCompressing(false);
     setShowCalc(false);
+    setMemberCalc(null);
+    lastMemberField.current = {};
     if (editData) {
       // --- Edit Mode ---
       // LINE 的照片記帳草稿還沒有金額（以 0 占位）：金額欄留空讓人直接輸入，
@@ -663,6 +669,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
                 disabled={!on}
                 className={`num w-[86px] sm:w-28 text-right rounded-lg border px-2 py-1.5 text-base sm:text-sm font-bold outline-none transition disabled:opacity-40 shrink-0 ${isLocked ? 'bg-accent/10 border-accent/40 text-ink' : 'bg-transparent border-transparent text-ink-2'}`}
                 value={data[member] ?? ''}
+                onFocus={() => { lastMemberField.current[type] = member; }}
                 onChange={e => handleManualEdit(member, e.target.value, type)}
               />
               <button
@@ -679,6 +686,54 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           );
         })}
       </ul>
+    );
+  };
+
+  const openMemberCalc = (type: 'payer' | 'split') => {
+    if (memberCalc?.type === type) { setMemberCalc(null); return; }
+    const active = type === 'payer' ? payerActive : splitActive;
+    const locked = type === 'payer' ? payerLocked : splitLocked;
+    const last = lastMemberField.current[type];
+    const member = (last && trip.members.includes(last) ? last : undefined)
+      ?? trip.members.find(m => active.has(m) && !locked.has(m))
+      ?? trip.members.find(m => active.has(m))
+      ?? trip.members[0];
+    if (!member) return;
+    setShowCalc(false);
+    setMemberCalc({ type, member });
+  };
+
+  // 成員金額的計算機：表格下方一顆按鈕，展開後用「帶入給誰」挑人，表格每列不必再塞一顆鈕
+  const renderMemberCalc = (type: 'payer' | 'split') => {
+    const open = memberCalc?.type === type;
+    const data = type === 'payer' ? payerData : splitData;
+    const active = type === 'payer' ? payerActive : splitActive;
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => openMemberCalc(type)}
+          aria-expanded={open}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition active:scale-[.98] ${open ? 'bg-primary text-on-primary' : 'bg-sunk text-ink-2 hover:text-ink'}`}
+        >
+          <Calculator size={14} />
+          {open ? '收起計算機' : `用計算機算${type === 'payer' ? '各人付的' : '各人的份'}`}
+        </button>
+        {open && memberCalc && (
+          <AmountCalculator
+            initial={String(data[memberCalc.member] ?? '')}
+            currency={currency}
+            precisionConfig={trip.precision_config}
+            decimals={getCurrencyPrecision(currency, trip.precision_config)}
+            allowZero
+            targets={trip.members.map(m => ({ id: m, label: m, muted: !active.has(m) }))}
+            target={memberCalc.member}
+            onTargetChange={m => setMemberCalc({ type, member: m })}
+            onApply={v => { handleManualEdit(memberCalc.member, v, type); setMemberCalc(null); }}
+            onClose={() => setMemberCalc(null)}
+          />
+        )}
+      </>
     );
   };
 
@@ -723,7 +778,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             aria-label={showCalc ? '收起計算機' : '打開計算機'}
             aria-expanded={showCalc}
             title="計算機"
-            onClick={() => setShowCalc(v => !v)}
+            onClick={() => { setMemberCalc(null); setShowCalc(v => !v); }}
             className={`shrink-0 w-[52px] rounded-xl border inline-flex items-center justify-center transition active:scale-95 ${showCalc ? 'bg-primary border-primary text-on-primary' : 'bg-surface border-line text-ink-2 hover:text-ink hover:bg-sunk'}`}
           >
             <Calculator size={22} />
@@ -761,7 +816,12 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
         <section className="space-y-2">
           {sectionHeader('誰付錢', showPayerDetail, () => setShowPayerDetail(v => !v), isPayerValid, payerSum, payerSummary)}
-          {showPayerDetail && renderMemberRows('payer')}
+          {showPayerDetail && (
+            <>
+              {renderMemberRows('payer')}
+              {renderMemberCalc('payer')}
+            </>
+          )}
         </section>
 
         <section className="space-y-2">
@@ -770,6 +830,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
             <>
               {renderMemberRows('split')}
               <p className={ui.hint}>除不盡的尾差由 <Star size={11} className="inline fill-accent text-accent -mt-0.5" /> 標記的人吸收；鎖定的金額不會被重新分配。</p>
+              {renderMemberCalc('split')}
             </>
           )}
         </section>
