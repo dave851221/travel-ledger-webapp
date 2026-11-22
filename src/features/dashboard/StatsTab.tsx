@@ -12,26 +12,42 @@ interface Props {
   expenses: Expense[];
   stats: TripStats;
   currentUser: string | null;
+  /** Opens the shared ExpenseDetailModal (same as the ledger list). */
+  onOpenExpense?: (exp: Expense) => void;
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
 
-const DetailLines: React.FC<{ rows: { id: string; date: string; description: string; amount: number; currency: string }[]; trip: Trip }> = ({ rows, trip }) => (
+type DetailRow = { exp: Expense; amount: number };
+
+const DetailLines: React.FC<{ rows: DetailRow[]; trip: Trip; onOpen?: (exp: Expense) => void }> = ({ rows, trip, onOpen }) => (
   <ul className="ml-7 mb-2 mt-0.5 space-y-0.5 min-w-0">
     {rows.length === 0 ? (
       <li className="text-xs text-muted px-2 py-1">沒有資料</li>
-    ) : rows.map(r => (
-      <li key={r.id} className="flex items-center gap-2 min-w-0 text-xs py-1 px-2.5 rounded-lg bg-sunk">
-        <span className="num text-muted shrink-0">{r.date.slice(5).replace('-', '/')}</span>
-        {/* min-w-0：flex 子項目預設不會比內容窄，少了它長品名會把整頁撐寬 */}
-        <span className="text-ink-2 truncate flex-1 min-w-0">{r.description}</span>
-        <span className="num font-bold text-ink shrink-0">{formatMoney(r.amount, r.currency, trip.precision_config)}</span>
-      </li>
-    ))}
+    ) : rows.map(({ exp, amount }) => {
+      const content = (
+        <>
+          <span className="num text-muted shrink-0">{exp.date.slice(5).replace('-', '/')}</span>
+          {/* min-w-0：flex 子項目預設不會比內容窄，少了它長品名會把整頁撐寬 */}
+          <span className="text-ink-2 truncate flex-1 min-w-0">{exp.description}</span>
+          <span className="num font-bold text-ink shrink-0">{formatMoney(amount, exp.currency, trip.precision_config)}</span>
+        </>
+      );
+      const cls = 'w-full flex items-center gap-2 min-w-0 text-xs py-1 px-2.5 rounded-lg bg-sunk text-left';
+      return (
+        <li key={exp.id}>
+          {onOpen ? (
+            <button type="button" onClick={() => onOpen(exp)} className={`${cls} hover:bg-line transition-colors`}>{content}</button>
+          ) : (
+            <div className={cls}>{content}</div>
+          )}
+        </li>
+      );
+    })}
   </ul>
 );
 
-const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
+const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser, onOpenExpense }) => {
   const [openCats, setOpenCats] = useState<Set<string>>(new Set());
   const [openMemberCats, setOpenMemberCats] = useState<Set<string>>(new Set());
   const base = trip.base_currency;
@@ -93,7 +109,7 @@ const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
                 {stats.categoryData.map(cat => {
                   const open = openCats.has(cat.name);
                   const color = getCategoryVisual(cat.name, trip.categories).color;
-                  const rows = spending.filter(e => e.category === cat.name).sort((a, b) => b.date.localeCompare(a.date));
+                  const rows = spending.filter(e => e.category === cat.name).sort((a, b) => b.date.localeCompare(a.date)).map(e => ({ exp: e, amount: e.amount }));
                   return (
                     <li key={cat.name}>
                       <button onClick={() => setOpenCats(s => toggle(s, cat.name))} aria-expanded={open} className="w-full grid grid-cols-[12px_minmax(0,1fr)_auto_44px_14px] items-center gap-2.5 py-2.5 text-sm text-left">
@@ -103,7 +119,7 @@ const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
                         <span className="num text-xs text-muted text-right">{pct(cat.value, total).toFixed(1)}%</span>
                         <ChevronRight size={14} className={`text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
                       </button>
-                      {open && <DetailLines rows={rows} trip={trip} />}
+                      {open && <DetailLines rows={rows} trip={trip} onOpen={onOpenExpense} />}
                     </li>
                   );
                 })}
@@ -136,7 +152,7 @@ const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
                       const rows = spending
                         .filter(e => e.category === cat && (Number(e.split_data[name]) || 0) > 0)
                         .sort((a, b) => b.date.localeCompare(a.date))
-                        .map(e => ({ ...e, amount: Number(e.split_data[name]) || 0 }));
+                        .map(e => ({ exp: e, amount: Number(e.split_data[name]) || 0 }));
                       return (
                         <div key={cat}>
                           <button onClick={() => setOpenMemberCats(s => toggle(s, key))} aria-expanded={open} className="w-full grid grid-cols-[minmax(0,1fr)_auto_40px_14px] items-center gap-2 py-1 text-xs text-ink-2 text-left">
@@ -145,7 +161,7 @@ const StatsTab: React.FC<Props> = ({ trip, expenses, stats, currentUser }) => {
                             <span className="num text-muted text-right">{pct(val, data.totalOwed).toFixed(0)}%</span>
                             <ChevronRight size={12} className={`text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
                           </button>
-                          {open && <DetailLines rows={rows} trip={trip} />}
+                          {open && <DetailLines rows={rows} trip={trip} onOpen={onOpenExpense} />}
                         </div>
                       );
                     })}

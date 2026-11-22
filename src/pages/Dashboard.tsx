@@ -395,7 +395,7 @@ const Dashboard: React.FC = () => {
 
           {activeTab === 'stats' && (
             <Suspense fallback={<TabLoading />}>
-              <StatsTab trip={trip} expenses={allExpenses} stats={stats} currentUser={currentUser} />
+              <StatsTab trip={trip} expenses={allExpenses} stats={stats} currentUser={currentUser} onOpenExpense={setDetailExpense} />
             </Suspense>
           )}
 
