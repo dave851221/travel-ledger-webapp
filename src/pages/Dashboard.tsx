@@ -36,6 +36,8 @@ import MemberAvatar from '../features/dashboard/MemberAvatar';
 // 統計分頁帶著圖表套件（recharts，壓縮前 300 KB），行程分頁帶著版面元件，都等點到才下載
 const StatsTab = lazy(() => import('../features/dashboard/StatsTab'));
 const TripItinerary = lazy(() => import('../features/itinerary/TripItinerary'));
+// 回顧影片帶著影片編碼器（mediabunny），只有封存的旅程按了才下載
+const RecapVideoModal = lazy(() => import('../features/recap/RecapVideoModal'));
 
 const TabLoading = () => (
   <div className="flex justify-center py-20 text-muted"><Loader2 className="animate-spin" size={24} /></div>
@@ -64,6 +66,7 @@ const Dashboard: React.FC = () => {
     : defaultTab;
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [recapOpen, setRecapOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // 「我是誰」由資料推導，不另外存一份會過期的 state。
@@ -324,6 +327,7 @@ const Dashboard: React.FC = () => {
   const tabs = primaryTabs(showItineraryTab);
   const readOnly = trip.is_archived;
   const goHome = () => navigate('/');
+  const openRecap = readOnly ? () => setRecapOpen(true) : undefined;
   const goCategory = () => { if (trip.category) navigate(`/#cat-${encodeURIComponent(trip.category)}`); };
 
   const chromeProps = {
@@ -336,6 +340,7 @@ const Dashboard: React.FC = () => {
     trashCount: deletedExpenses.length,
     onBack: goHome,
     onOpenSettings: () => setIsSettingsModalOpen(true),
+    onOpenRecap: openRecap,
   };
 
   const ticket = (notchBg: string) => (
@@ -362,6 +367,7 @@ const Dashboard: React.FC = () => {
             onPick={handleSetCurrentUser}
             onAdd={readOnly ? undefined : openNewExpense}
             onCategory={goCategory}
+            onOpenRecap={openRecap}
           />
 
           {/* 缺少匯率警告：避免統計數字默默算錯 */}
@@ -428,7 +434,7 @@ const Dashboard: React.FC = () => {
             </Suspense>
           )}
 
-          {activeTab === 'album' && <AlbumTab trip={trip} expenses={allExpenses} onOpenExpense={setDetailExpense} />}
+          {activeTab === 'album' && <AlbumTab trip={trip} expenses={allExpenses} onOpenExpense={setDetailExpense} onOpenRecap={openRecap} />}
 
           {activeTab === 'siblings' && (
             <SiblingsTab
@@ -545,6 +551,12 @@ const Dashboard: React.FC = () => {
       )}
 
       <ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { refetchExpenses(); }} showToast={showToast} editData={editingExpense} />
+      {recapOpen && (
+        <Suspense fallback={null}>
+          <RecapVideoModal trip={trip} expenses={allExpenses} stats={stats} onClose={() => setRecapOpen(false)} />
+        </Suspense>
+      )}
+
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} trip={trip} onSuccess={() => { refetchTrip(); showToast('設定已更新'); }} expenses={expenses} />
 
       {deleteConfirmId && (

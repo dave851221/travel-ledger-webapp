@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { CalendarDays, Images, LayoutGrid, Receipt, ShoppingBag, ZoomIn, ZoomOut } from 'lucide-react';
+import { CalendarDays, ChevronRight, Clapperboard, Images, LayoutGrid, Receipt, ShoppingBag, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import { albumCounts, albumDays, type AlbumPhoto, type PhotoKind } from '../../utils/album';
 import { photoUrl } from '../../utils/storage';
@@ -12,6 +12,8 @@ interface Props {
   trip: Trip;
   expenses: Expense[];
   onOpenExpense: (exp: Expense) => void;
+  /** Archived trips can turn their photos into a recap video */
+  onOpenRecap?: () => void;
 }
 
 const KINDS: { key: PhotoKind; label: string; icon: typeof Receipt }[] = [
@@ -54,7 +56,7 @@ const readLayout = (): AlbumLayout => {
  * 「緊密格子」拿掉日期分段與文字，一天只有一兩張時才不會空一大塊；日期在放大後看得到。
  * 格子的大小可以縮放（手機雙指、電腦觸控板或 Ctrl＋滾輪、＋／－ 按鈕），見 `useGridZoom`。
  */
-const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
+const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense, onOpenRecap }) => {
   const [kind, setKind] = useState<PhotoKind>('item');
   const [layout, setLayout] = useState<AlbumLayout>(readLayout);
   const [openAt, setOpenAt] = useState<number | null>(null);
@@ -155,6 +157,20 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense }) => {
           </div>
         </div>
       </div>
+
+      {onOpenRecap && counts.item > 0 && (
+        <button
+          onClick={onOpenRecap}
+          className="w-full flex items-center gap-3.5 rounded-2xl bg-navy text-navy-fg px-4 py-3.5 text-left transition hover:opacity-95 active:scale-[.99]"
+        >
+          <span className="w-11 h-11 shrink-0 rounded-xl bg-accent text-on-accent flex items-center justify-center"><Clapperboard size={21} /></span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-bold">產生回顧影片</span>
+            <span className="block text-xs text-navy-sub mt-0.5">把這趟的照片配上音樂，做成 IG Reels 用的直式短片</span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-navy-sub" />
+        </button>
+      )}
 
       {days.length === 0 ? (
         <div className="bg-surface border border-line rounded-2xl px-6 py-12 text-center">

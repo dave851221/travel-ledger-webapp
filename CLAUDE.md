@@ -94,6 +94,13 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   **載入**：`Dashboard`、兩個 LIFF 頁、統計分頁（recharts）、行程分頁都是 `React.lazy`，首頁不必先下載它們。
   `vite.config.ts` 的 `manualChunks` 比對**套件目錄**，不要改回 `id.includes('react')`（會把 lucide-react、react-redux 拉進首頁）。
   **「我是誰」**（`currentUser`）由 `localStorage` 的 `me_{id}` 推導、只認還在成員清單裡的名字，不另外存 state。
+- **回顧影片**（`src/features/recap/`，封存旅程才有入口：相簿分頁頂端的卡片、手機 ⋯ 選單、電腦版標題列）：在瀏覽器裡產生 30～45 秒、1080×1920 的 MP4，可直接上傳 IG Reels。
+  **全程前端運算，不寫資料庫**（挑選的照片、結尾合照、音樂、是否顯示金額記在 `localStorage` 的 `recap_{tripId}`）。
+  `plan.ts`（純函式，`plan.test.ts`）決定日期範圍（有行程表用行程表，沒有就取支出最密集的一段，避開幾個月前訂的機票）、每天平均挑 2～4 張商品照片、以「拍」為單位排時間軸（每一刀落在拍點，統計段從新的小節開始）；
+  `music.ts` 用 `OfflineAudioContext` **現場合成原創配樂**（輕快 118 BPM／溫暖 92 BPM，不放任何音檔 → 沒有版權問題，IG 不會消音）；
+  `render.ts` 依時間 t 畫一格（Ken Burns、Day N・地點標籤、轉場、統計數字動畫），**不用 `ctx.filter`**（Safari 舊版沒有），模糊一律「縮小再放大」；文字避開 IG 介面（上 220px、下 440px）；
+  `images.ts` 把原圖縮到剛好夠用的大小存成小 JPEG、只解碼目前前後幾張（iPhone 記憶體）；載圖用 `onload` 不用 `img.decode()`（有的 WebView 永遠不 resolve）；
+  `encode.ts` 用 mediabunny（WebCodecs H.264 + AAC，沒有 AAC 編碼器時載入 `@mediabunny/aac-encoder` 的 WASM）封裝 MP4，整個 `RecapVideoModal` 是 lazy chunk。iOS 要 16.4 以上；不支援 1080p 編碼的裝置退回 720p。
 - **離線記帳**（`utils/offlineQueue.ts` + `hooks/useOfflineQueue.ts`）：連不上時，新增的支出與結清排進 localStorage，
   帳目標「待上傳」並先算進餘額；恢復連線、回到前景、打開 Dashboard 時上傳。每筆排隊時就配好 id、
   上傳用 upsert + `ignoreDuplicates`，重送不會變兩筆。**新增支出的寫入一律走 `insertExpenseOrQueue()`**

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronDown, ChevronLeft, Compass, Ellipsis, House, Images, Lock, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Images, Lock, Plus, Settings, Trash2, UserRound } from 'lucide-react';
 import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
 import { ui } from '../../components/ui';
@@ -38,11 +38,13 @@ interface ChromeProps extends IdentityProps {
   trashCount: number;
   onBack: () => void;
   onOpenSettings: () => void;
+  /** Archived trips only: open the recap video maker */
+  onOpenRecap?: () => void;
 }
 
 /** 手機頂列：返回、旅程名稱、我是誰、⋯ 選單（設定、其他旅程、垃圾桶）。 */
 export const MobileTopBar: React.FC<ChromeProps> = ({
-  trip, currentUser, onPick, onChange, trashCount, onBack, onOpenSettings,
+  trip, currentUser, onPick, onChange, trashCount, onBack, onOpenSettings, onOpenRecap,
 }) => {
   const [whoOpen, setWhoOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -81,6 +83,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
         >
           <MenuItem icon={<Settings size={17} />} onClick={() => { setMoreOpen(false); onOpenSettings(); }}>旅程設定</MenuItem>
           <MenuItem icon={<Images size={17} />} onClick={() => { setMoreOpen(false); onChange(TAB_ALBUM.key); }}>相簿</MenuItem>
+          {onOpenRecap && <MenuItem icon={<Clapperboard size={17} />} onClick={() => { setMoreOpen(false); onOpenRecap(); }}>回顧影片</MenuItem>}
           <MenuItem icon={<Compass size={17} />} onClick={() => { setMoreOpen(false); onChange(TAB_SIBLINGS.key); }}>其他旅程</MenuItem>
           <MenuItem
             icon={<Trash2 size={17} />}
@@ -136,8 +139,8 @@ export const SideNav: React.FC<ChromeProps> = ({
 };
 
 /** 電腦版內容區的標題列：旅程名稱、成員、我是誰、新增支出。 */
-export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCategory?: () => void }> = ({
-  trip, currentUser, onPick, onAdd, onCategory,
+export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCategory?: () => void; onOpenRecap?: () => void }> = ({
+  trip, currentUser, onPick, onAdd, onCategory, onOpenRecap,
 }) => {
   const [whoOpen, setWhoOpen] = useState(false);
   return (
@@ -168,6 +171,9 @@ export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCat
       </Dropdown>
       {onAdd && (
         <button onClick={onAdd} className={`${ui.btnPrimary} py-2`}><Plus size={16} strokeWidth={2.6} />新增支出</button>
+      )}
+      {onOpenRecap && (
+        <button onClick={onOpenRecap} className={`${ui.btnAccent} py-2`}><Clapperboard size={16} />回顧影片</button>
       )}
     </header>
   );
