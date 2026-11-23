@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clapperboard, Download, Loader2, Pause, Play, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
+import { Check, Clapperboard, Download, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import type { TripStats } from '../../hooks/useTripStats';
 import Modal from '../../components/Modal';
@@ -9,8 +9,9 @@ import { formatMoney } from '../../utils/money';
 import { getItinerary, isPlan } from '../itinerary/registry';
 import {
   MAX_PHOTOS, autoPick, buildTimeline, daysBetween, recapDays, shotsFromPicks, tripDateRange,
-  type DayMeta, type RecapDay, type RecapPhoto,
+  type DayMeta, type ExtraSection, type RecapDay, type RecapPhoto,
 } from './plan';
+import { recapFacts, spendingRace, visitedCities } from './facts';
 import { MUSIC_STYLES, renderMusic, styleBpm, type MusicStyle } from './music';
 import { PhotoStore } from './images';
 import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, type RecapContent, type RecapScene, type RecapStat } from './render';
@@ -28,6 +29,7 @@ interface Saved {
   outro?: string | null;
   music?: MusicStyle;
   showMoney?: boolean;
+  sections?: ExtraSection[];
 }
 
 const storageKey = (tripId: string) => `recap_${tripId}`;
@@ -40,6 +42,12 @@ const readSaved = (tripId: string): Saved => {
 };
 
 const PREVIEW_W = 360;
+
+const SECTION_OPTIONS: { key: ExtraSection; label: string; hint: string }[] = [
+  { key: 'stats', label: '統計數字', hint: '天數、筆數、照片數、總花費' },
+  { key: 'facts', label: '旅途小彩蛋', hint: '最貴的一筆、誰最常掏錢、拍最多照片的一天…' },
+  { key: 'race', label: '花費賽跑', hint: '每個人的累積花費一天天長出來' },
+];
 
 type Phase =
   | { kind: 'setup' }
@@ -57,13 +65,19 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
   const saved = useMemo(() => readSaved(trip.id), [trip.id]);
 
   // --- Story data ---
-  const { days, range } = useMemo(() => {
+  const { days, range, cities } = useMemo(() => {
     const entry = getItinerary(trip.id);
     const meta: DayMeta[] = entry && isPlan(entry) ? entry.days.map(d => ({ date: d.date, city: d.city, title: d.title })) : [];
     const r = tripDateRange(expenses, meta.map(m => m.date));
-    return { days: r ? recapDays(expenses, r, meta) : [], range: r };
+    return { days: r ? recapDays(expenses, r, meta) : [], range: r, cities: visitedCities(meta.map(m => m.city)) };
   }, [trip.id, expenses]);
   const allPhotos = useMemo(() => days.flatMap(d => d.photos), [days]);
+  // Counts and fun facts are about the trip's photos, not its receipts
+  const itemDays = useMemo(
+    () => days.map(d => ({ ...d, photos: d.photos.filter(p => p.kind === 'item') })).filter(d => d.photos.length > 0),
+    [days],
+  );
+  const itemCount = useMemo(() => itemDays.reduce<number>((n, d) => n + d.photos.length, 0), [itemDays]);
   const known = useMemo(() => new Set(allPhotos.map(p => p.path)), [allPhotos]);
 
   const [picks, setPicks] = useState<string[]>(() => {
@@ -73,15 +87,18 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
   const [outro, setOutro] = useState<string | null>(() => (saved.outro && known.has(saved.outro) ? saved.outro : null));
   const [music, setMusic] = useState<MusicStyle>(saved.music ?? 'bright');
   const [showMoney, setShowMoney] = useState(saved.showMoney ?? true);
+  const [sections, setSections] = useState<ExtraSection[]>(saved.sections ?? ['stats', 'facts']);
+  const toggleSection = (key: ExtraSection) =>
+    setSections(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
   const [pickerMode, setPickerMode] = useState<'photos' | 'outro' | null>(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey(trip.id), JSON.stringify({ picks, outro, music, showMoney } satisfies Saved));
+      localStorage.setItem(storageKey(trip.id), JSON.stringify({ picks, outro, music, showMoney, sections } satisfies Saved));
     } catch {
       // Private mode: the choices last only this visit
     }
-  }, [trip.id, picks, outro, music, showMoney]);
+  }, [trip.id, picks, outro, music, showMoney, sections]);
 
   // The closing photo is saved for the end, not shown twice
   const shots = useMemo(() => shotsFromPicks(days, picks.filter(p => p !== outro)), [days, picks, outro]);
@@ -90,7 +107,28 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
     return chosen ?? shots[shots.length - 1]?.photo ?? null;
   }, [allPhotos, outro, shots]);
 
-  const timeline = useMemo(() => buildTimeline(shots, styleBpm(music), outroPhoto), [shots, music, outroPhoto]);
+  // A video doesn't need "¥8,850.00": whole amounts drop their zero decimals
+  const money = useMemo(
+    () => (showMoney ? (amount: number, currency: string) => formatMoney(amount, currency, trip.precision_config).replace(/\.0+$/, '') : null),
+    [showMoney, trip.precision_config],
+  );
+
+  const facts = useMemo(() => (range ? recapFacts({
+    expenses, range, days: itemDays, members: trip.members, baseCurrency: trip.base_currency, rates: trip.rates, money, cities,
+  }) : []), [expenses, range, itemDays, trip, money, cities]);
+
+  const race = useMemo(
+    () => (range ? spendingRace(expenses, range, trip.members, trip.rates, trip.base_currency) : null),
+    [expenses, range, trip],
+  );
+  // Only pages that have something to show
+  const available = useMemo(() => SECTION_OPTIONS.filter(o => (o.key === 'facts' ? facts.length > 0 : o.key === 'race' ? !!race : true)), [facts.length, race]);
+  const activeSections = useMemo(() => sections.filter(k => available.some(o => o.key === k)), [sections, available]);
+
+  const timeline = useMemo(
+    () => buildTimeline(shots, styleBpm(music), outroPhoto, activeSections),
+    [shots, music, outroPhoto, activeSections],
+  );
 
   const content: RecapContent = useMemo(() => {
     const from = range?.from ?? '';
@@ -102,15 +140,19 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
     const list: RecapStat[] = [];
     if (range) list.push({ label: '旅行天數', value: daysBetween(range.from, range.to) + 1, suffix: '天' });
     list.push({ label: '一起記下的消費', value: spent.length, suffix: '筆' });
-    if (allPhotos.length > 0) list.push({ label: '拍下的照片', value: allPhotos.length, suffix: '張' });
+    if (itemCount > 0) list.push({ label: '拍下的照片', value: itemCount, suffix: '張' });
     if (showMoney && stats.grandBase.total > 0) {
       const symbol = formatMoney(0, trip.base_currency, trip.precision_config).replace(/[\d.,\s-]/g, '');
       list.push({ label: '總花費', value: Math.round(stats.grandBase.total), prefix: symbol || trip.base_currency });
     }
     const top = stats.categoryData[0];
-    if (top) list.push({ label: '花最多的分類', value: top.name });
-    return { tripName: trip.name, dateLabel, members: trip.members, stats: list };
-  }, [range, expenses, allPhotos.length, showMoney, stats, trip]);
+    if (top && showMoney) list.push({ label: '花最多錢在', value: top.name });
+    return {
+      tripName: trip.name, dateLabel, members: trip.members, stats: list, facts, race,
+      raceMoney: money ? (n: number) => money(n, trip.base_currency) : undefined,
+      amountLabel: money ? (p: RecapPhoto) => (p.amount > 0 ? money(p.amount, p.currency) : null) : undefined,
+    };
+  }, [range, expenses, itemCount, showMoney, stats, trip, facts, race, money]);
 
   // --- Photo store and preview ---
   const storeRef = useRef<PhotoStore | null>(null);
@@ -407,7 +449,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
                   </button>
                 </div>
                 <p className={ui.hint}>
-                  預設每天平均挑 2～4 張。結尾那張建議選大家的合照{outro ? '' : '（還沒選，先用最後一張）'}。
+                  預設從整趟照片裡平均挑，照片多的日子多挑一些；每張會配上日期、品名與地點。收據也能勾進來。結尾那張建議選大家的合照{outro ? '' : '（還沒選，先用最後一張）'}。
                 </p>
                 {pickerMode && (
                   <PhotoPicker
@@ -441,10 +483,36 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
                 <p className={ui.hint}>音樂是這台裝置現場合成的原創曲，沒有版權問題，上傳 IG 不會被消音。</p>
               </section>
 
+              <section className="space-y-2">
+                <p className={ui.label}>照片之後放哪些段落</p>
+                <div className="space-y-1.5">
+                  {available.map(o => {
+                    const on = sections.includes(o.key);
+                    return (
+                      <button
+                        key={o.key}
+                        onClick={() => toggleSection(o.key)}
+                        disabled={rendering}
+                        aria-pressed={on}
+                        className={`w-full flex items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-colors ${on ? 'border-accent bg-accent/10' : 'border-line bg-surface hover:bg-sunk'}`}
+                      >
+                        <span className={`w-5 h-5 shrink-0 rounded-md border flex items-center justify-center ${on ? 'bg-accent border-accent text-on-accent' : 'border-line'}`}>
+                          {on && <Check size={13} strokeWidth={3} />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold">{o.label}</span>
+                          <span className="block text-xs text-muted mt-0.5 truncate">{o.hint}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
               <label className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-3 cursor-pointer">
                 <span>
-                  <span className="block text-sm font-bold">顯示總花費</span>
-                  <span className="block text-xs text-muted mt-0.5">關掉的話統計只顯示天數、筆數與照片數</span>
+                  <span className="block text-sm font-bold">顯示金額</span>
+                  <span className="block text-xs text-muted mt-0.5">照片旁的價格、總花費、小彩蛋與賽跑的金額；關掉就都不顯示</span>
                 </span>
                 <input type="checkbox" className="w-5 h-5 accent-[var(--app-accent)]" checked={showMoney} onChange={e => setShowMoney(e.target.checked)} disabled={rendering} />
               </label>
@@ -488,17 +556,32 @@ interface PickerProps {
 
 const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, onToggle, onOutro, onAuto, onClear }) => {
   const picked = new Set(picks);
+  const receiptCount = days.reduce<number>((n, d) => n + d.photos.filter(p => p.kind === 'receipt').length, 0);
+  // Receipts can go in too, but there are usually many: hidden until asked for (or one is already picked)
+  const [withReceipts, setWithReceipts] = useState(() => days.some(d => d.photos.some(p => p.kind === 'receipt' && picked.has(p.path))));
+  const shown = days
+    .map(d => ({ ...d, photos: d.photos.filter(p => withReceipts || p.kind === 'item') }))
+    .filter(d => d.photos.length > 0);
   return (
     <div className="rounded-xl border border-line bg-sunk p-3 space-y-3 max-h-[46dvh] overflow-y-auto overscroll-contain">
       {mode === 'photos' ? (
         <div className="flex gap-2">
           <button onClick={onAuto} className={`${ui.chip} ${ui.chipOff}`}><Sparkles size={12} className="inline -mt-0.5 mr-1" />自動挑選</button>
           <button onClick={onClear} className={`${ui.chip} ${ui.chipOff}`}>全部取消</button>
+          {receiptCount > 0 && (
+            <button
+              onClick={() => setWithReceipts(v => !v)}
+              aria-pressed={withReceipts}
+              className={`${ui.chip} ${withReceipts ? ui.chipOn : ui.chipOff} ml-auto`}
+            >
+              <Receipt size={12} className="inline -mt-0.5 mr-1" />收據 <span className="num">{receiptCount}</span>
+            </button>
+          )}
         </div>
       ) : (
         <p className="text-xs text-ink-2">點一張當作影片最後一幕。</p>
       )}
-      {days.map(day => (
+      {shown.map(day => (
         <div key={day.date}>
           <p className="text-xs font-medium text-ink-2 mb-1.5">
             <span className="num">Day {day.dayNumber}</span>・<span className="num">{day.date.slice(5).replace('-', '/')}</span>
@@ -521,6 +604,9 @@ const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, onToggle
                     <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-accent text-on-accent flex items-center justify-center">
                       {mode === 'outro' ? <Star size={11} fill="currentColor" /> : <Check size={12} strokeWidth={3} />}
                     </span>
+                  )}
+                  {p.kind === 'receipt' && (
+                    <span className="absolute bottom-1 left-1 text-[10px] leading-none text-white bg-black/60 rounded px-1 py-0.5">收據</span>
                   )}
                   {order >= 0 && <span className="sr-only">第 {order + 1} 張</span>}
                 </button>

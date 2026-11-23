@@ -27,9 +27,11 @@ export const checkSupport = async (): Promise<EncodeSupport> => {
   return { ok: false, width: 0, height: 0, reason: '這台裝置沒有可用的 H.264 編碼器，無法產生 MP4。' };
 };
 
-/** Day labels need their glyphs too */
+/** Photo labels need their glyphs too */
 export const dayTexts = (scene: RecapScene): string[] =>
-  scene.timeline.segments.flatMap(s => (s.kind === 'shot' ? [s.day.city ?? '', s.day.title ?? ''] : []));
+  scene.timeline.segments.flatMap(s => (s.kind === 'shot'
+    ? [s.day.city ?? '', s.photo.caption, scene.content.amountLabel?.(s.photo) ?? '']
+    : []));
 
 export interface EncodeOptions {
   scene: RecapScene;

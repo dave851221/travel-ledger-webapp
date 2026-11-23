@@ -1,5 +1,5 @@
 import type { Expense } from '../../types';
-import { photoKind } from '../../utils/album';
+import { photoKind, type PhotoKind } from '../../utils/album';
 
 /**
  * 回顧影片的「劇本」：挑哪些照片、每一段在第幾秒、跟音樂的第幾拍對齊。
@@ -10,9 +10,24 @@ export interface RecapPhoto {
   /** Storage path, unique across the trip */
   path: string;
   date: string;
-  /** The expense's own description, used as a hint in the picker */
+  /** What it was: the expense's description without the bot's explanation in brackets */
   caption: string;
+  /** The expense's total, shown beside the caption when amounts are on */
+  amount: number;
+  currency: string;
+  /** Receipts can go in the video too, but are never picked automatically */
+  kind: PhotoKind;
 }
+
+/**
+ * 「關東煮 (日式燉煮小吃)」→「關東煮」。LINE 機器人記帳時常在後面補一段括號說明，放在影片裡太囉嗦。
+ * 整句都是括號、或去掉後是空的，就保留原文。
+ */
+export const photoCaption = (description: string): string => {
+  const text = (description ?? '').trim();
+  const short = text.replace(/\s*[（(][^（）()]*[)）]\s*$/u, '').trim();
+  return short || text;
+};
 
 export interface RecapDay {
   date: string;
@@ -66,8 +81,8 @@ export const tripDateRange = (expenses: Expense[], itineraryDates: string[] = []
 };
 
 /**
- * 範圍內每一天的商品照片（收據不放），舊到新。同一天裡依支出建立時間排。
- * 沒有照片的日子不列 —— 影片裡不會有一段空白的 Day。
+ * 範圍內每一天的照片（商品照片與收據都列，收據只在使用者勾選時才進影片），舊到新。
+ * 同一天裡依支出建立時間排。沒有照片的日子不列。
  */
 export const recapDays = (
   expenses: Expense[],
@@ -81,10 +96,10 @@ export const recapDays = (
     .sort((a, b) => a.date.localeCompare(b.date) || (a.created_at ?? '').localeCompare(b.created_at ?? ''));
   for (const e of sorted) {
     for (const path of e.photo_urls ?? []) {
-      if (!path || seen.has(path) || photoKind(e, path) !== 'item') continue;
+      if (!path || seen.has(path)) continue;
       seen.add(path);
       const list = byDate.get(e.date) ?? [];
-      list.push({ path, date: e.date, caption: e.description ?? '' });
+      list.push({ path, date: e.date, caption: photoCaption(e.description ?? ''), amount: Number(e.amount) || 0, currency: e.currency, kind: photoKind(e, path) });
       byDate.set(e.date, list);
     }
   }
@@ -107,29 +122,34 @@ export const evenlySpaced = (n: number, k: number): number[] => {
   return Array.from({ length: k }, (_, i) => Math.min(n - 1, Math.floor(((i + 0.5) * n) / k)));
 };
 
-export const AUTO_TOTAL = 22;
-export const PER_DAY_MIN = 2;
-export const PER_DAY_MAX = 4;
+export const AUTO_TOTAL = 18;
+/** Even a day full of photos shouldn't take over the video */
+export const PER_DAY_MAX = 6;
 /** More than this and even two beats a photo runs past 45 seconds */
-export const MAX_PHOTOS = 30;
+export const MAX_PHOTOS = 26;
 
 /**
- * 自動挑照片：每天 2～4 張、平均分散在那天的照片裡，總數不超過 `total`。
- * 天數太多放不下每天 2 張時，每天至少 1 張。照片少的日子用不完的名額給照片多的日子。
+ * 自動挑照片：**照片本身為主，不硬照日子平均**（David 2026-11-24：有些日子照片少，硬塞一張很勉強）。
+ * 每天分到的張數跟那天的照片數成正比（最大餘數法），照片少的日子可能一張都不挑；
+ * 同一天裡平均分散，避免連續幾張都是同一頓飯。
  */
-export const autoPick = (days: RecapDay[], total = AUTO_TOTAL): string[] => {
-  if (days.length === 0) return [];
-  const floor = Math.max(1, Math.min(PER_DAY_MIN, Math.floor(total / days.length)));
-  const quota = days.map(d => Math.min(d.photos.length, floor));
-  let left = total - quota.reduce<number>((a, b) => a + b, 0);
-  // Hand out the rest one at a time, to the day with the most photos still unpicked
+export const autoPick = (allDays: RecapDay[], total = AUTO_TOTAL): string[] => {
+  const days = allDays.map(d => ({ ...d, photos: d.photos.filter(p => p.kind === 'item') }));
+  const all = days.reduce<number>((n, d) => n + d.photos.length, 0);
+  if (all === 0) return [];
+  const want = Math.min(total, all);
+  const cap = (d: RecapDay) => Math.min(d.photos.length, PER_DAY_MAX);
+  const share = days.map(d => (want * d.photos.length) / all);
+  const quota = days.map((d, i) => Math.min(cap(d), Math.floor(share[i])));
+  let left = want - quota.reduce<number>((a, b) => a + b, 0);
+  // Largest remainder first; a day at its cap passes its turn on
   while (left > 0) {
     let best = -1;
-    let bestSpare = 0;
+    let bestScore = -Infinity;
     days.forEach((d, i) => {
-      const spare = Math.min(d.photos.length, PER_DAY_MAX) - quota[i];
-      const unpicked = d.photos.length - quota[i];
-      if (spare > 0 && unpicked > bestSpare) { best = i; bestSpare = unpicked; }
+      if (quota[i] >= cap(d)) return;
+      const score = share[i] - quota[i];
+      if (score > bestScore) { best = i; bestScore = score; }
     });
     if (best < 0) break;
     quota[best] += 1;
@@ -150,14 +170,18 @@ export interface ShotSegment {
   end: number;
   photo: RecapPhoto;
   day: RecapDay;
-  /** First photo of its day: the big day number shows and the label animates in */
+  /** First photo of its day: gets the stronger cut */
   dayStart: boolean;
   /** Index among the shots, picks the Ken Burns direction */
   index: number;
 }
 export interface StatsSegment { kind: 'stats'; start: number; end: number }
+/** The fun-facts page after the numbers */
+export interface FactsSegment { kind: 'facts'; start: number; end: number }
+/** Everyone's running total, racing day by day */
+export interface RaceSegment { kind: 'race'; start: number; end: number }
 export interface OutroSegment { kind: 'outro'; start: number; end: number; photo: RecapPhoto | null }
-export type Segment = IntroSegment | ShotSegment | StatsSegment | OutroSegment;
+export type Segment = IntroSegment | ShotSegment | StatsSegment | FactsSegment | RaceSegment | OutroSegment;
 
 export interface Timeline {
   bpm: number;
@@ -166,13 +190,17 @@ export interface Timeline {
   segments: Segment[];
   /** How the cut into segment i (i ≥ 1) looks */
   transitions: TransitionKind[];
-  /** Beat index where the photos start (the drop) and where the stats start (the breakdown) */
+  /** Beat index where the photos start (the drop) and where the pages after them start (the breakdown) */
   marks: { drop: number; stats: number; outro: number; end: number };
 }
 
 export const INTRO_BEATS = 8;
-export const STATS_BEATS = 12;
-export const OUTRO_BEATS = 10;
+
+/** The optional pages after the photos, in the order they play */
+export type ExtraSection = 'stats' | 'facts' | 'race';
+const EXTRA_BEATS: Record<ExtraSection, number> = { stats: 12, facts: 12, race: 16 };
+const EXTRA_ORDER: ExtraSection[] = ['stats', 'facts', 'race'];
+export const OUTRO_BEATS = 8;
 const MIN_SECONDS = 30;
 const MAX_SECONDS = 45;
 /** Even with very few photos, no single photo stays longer than this */
@@ -183,31 +211,35 @@ const IN_DAY: TransitionKind[] = ['whip', 'rise', 'shutter', 'reveal', 'whip', '
 
 /**
  * 依照片數與速度排出整支影片。全部以「拍」為單位，所以每一刀都落在拍點上。
- * 平均每張約 2.6 拍、每天第一張多 1 拍讓大字的日期看得清楚；照片多時壓縮、少時拉長，總長落在 30～45 秒。
+ * 平均每張約 2.6 拍（多出來的拍先給每天的第一張）；照片多時壓縮、少時拉長，總長落在 30～45 秒。
  * 照片段結束時補到整小節（4 拍），統計段才會正好在新的一小節開始。
  */
 export const buildTimeline = (
   shots: { photo: RecapPhoto; day: RecapDay }[],
   bpm: number,
   outroPhoto: RecapPhoto | null,
+  sections: ExtraSection[] = ['stats'],
 ): Timeline => {
   const beat = 60 / bpm;
-  const fixed = INTRO_BEATS + STATS_BEATS + OUTRO_BEATS;
+  const extras = EXTRA_ORDER.filter(k => sections.includes(k));
+  const extraBeats = extras.reduce<number>((n, k) => n + EXTRA_BEATS[k], 0);
+  const fixed = INTRO_BEATS + extraBeats + OUTRO_BEATS;
+  // Every extra page is worth a few more seconds; Reels allow up to 90
+  const maxSeconds = MAX_SECONDS + Math.max(0, extras.length - 1) * 5;
   const n = shots.length;
   const dayStarts = shots.map((s, i) => i === 0 || s.day.date !== shots[i - 1].day.date);
-  const dayCount = dayStarts.filter(Boolean).length;
-  const maxBeats = Math.floor(MAX_SECONDS / beat - fixed - 3); // leave room for rounding up to a bar
+  const maxBeats = Math.floor(maxSeconds / beat - fixed - 3); // leave room for rounding up to a bar
   const minBeats = Math.ceil(MIN_SECONDS / beat - fixed);
 
-  // A relaxed pace is ~2.6 beats a photo plus one for each new day; squeeze or stretch to fit 30–45 s
-  const natural = Math.round(n * 2.6 + dayCount);
+  // A relaxed pace is ~2.6 beats a photo; squeeze or stretch to fit 30–45 s
+  const natural = Math.round(n * 2.6);
   const budget = Math.min(n * MAX_SHOT_BEATS, Math.max(n, Math.min(maxBeats, Math.max(minBeats, natural))));
   const lens = shots.map(() => Math.floor(budget / Math.max(1, n)));
   let extra = budget - lens.reduce<number>((a, x) => a + x, 0);
-  // Spare beats go to the day openers first (the big day number needs time), then spread out
+  // Spare beats go to the first photo of each day (a new place to take in), then the rest
   const order = [
     ...shots.map((_, i) => i).filter(i => dayStarts[i]),
-    ...evenlySpaced(n, n).filter(i => !dayStarts[i]),
+    ...shots.map((_, i) => i).filter(i => !dayStarts[i]),
   ];
   for (let k = 0; extra > 0 && order.length > 0; k = (k + 1) % order.length, extra--) lens[order[k]] += 1;
 
@@ -223,8 +255,10 @@ export const buildTimeline = (
     at += lens[i];
   });
   const stats = at;
-  segments.push({ kind: 'stats', start: at * beat, end: (at + STATS_BEATS) * beat });
-  at += STATS_BEATS;
+  for (const kind of extras) {
+    segments.push({ kind, start: at * beat, end: (at + EXTRA_BEATS[kind]) * beat });
+    at += EXTRA_BEATS[kind];
+  }
   const outro = at;
   segments.push({ kind: 'outro', start: at * beat, end: (at + OUTRO_BEATS) * beat, photo: outroPhoto });
   at += OUTRO_BEATS;
@@ -234,6 +268,8 @@ export const buildTimeline = (
     if (seg.kind === 'shot' && seg.index === 0) return 'zoom';
     if (seg.kind === 'shot') return seg.dayStart ? 'zoom' : IN_DAY[seg.index % IN_DAY.length];
     if (seg.kind === 'stats') return 'shutter';
+    if (seg.kind === 'facts') return 'rise';
+    if (seg.kind === 'race') return 'reveal';
     return 'zoom';
   });
 

@@ -1,5 +1,6 @@
 import type { PhotoAsset } from './images';
-import type { OutroSegment, RecapDay, Segment, ShotSegment, Timeline, TransitionKind } from './plan';
+import type { RecapFact, SpendingRace } from './facts';
+import type { OutroSegment, RecapPhoto, Segment, ShotSegment, Timeline, TransitionKind } from './plan';
 
 /**
  * 回顧影片的畫面：給一個時間 t（秒），畫出那一格。
@@ -39,6 +40,14 @@ export interface RecapContent {
   dateLabel: string;
   members: string[];
   stats: RecapStat[];
+  /** 趣味統計 (fun facts), shown on their own page after the numbers */
+  facts?: RecapFact[];
+  /** 花費賽跑: everyone's running total by day */
+  race?: SpendingRace | null;
+  /** Formats a base-currency amount for the race; leave out to hide the numbers */
+  raceMoney?: (amount: number) => string;
+  /** e.g. ¥8,850 for a photo's expense; leave out to hide amounts */
+  amountLabel?: (photo: RecapPhoto) => string | null;
 }
 
 export interface RecapScene {
@@ -55,7 +64,8 @@ export const ensureFonts = async (content: RecapContent, extra: string[] = []): 
   if (typeof document === 'undefined' || !document.fonts) return;
   const text = [
     content.tripName, content.dateLabel, ...content.members, '旅行回顧這趟旅程旅遊小本本週日一二三四五六…·',
-    ...content.stats.flatMap(s => [s.label, s.prefix ?? '', s.suffix ?? '', String(s.value)]), ...extra,
+    ...content.stats.flatMap(s => [s.label, s.prefix ?? '', s.suffix ?? '', String(s.value)]),
+    ...(content.facts ?? []).flatMap(f => [f.label, f.value, f.detail]), '旅途小彩蛋誰花得最多', ...extra,
   ].join('');
   const jobs = [
     ...['500', '700'].map(w => document.fonts.load(`${w} 40px 'Noto Sans TC'`, text)),
@@ -313,16 +323,14 @@ const formatStat = (stat: RecapStat, x: number): string => {
   return n.toLocaleString('en-US');
 };
 
-const drawStats = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
-  const { timeline, content } = scene;
-  const b = timeline.beat;
-  const local = t - seg.start;
+/** The trip's own colours, blurred, drifting behind the numbers; `which` picks other photos for another page */
+const drawTripBlur = (ctx: Ctx, scene: RecapScene, local: number, which: number) => {
   ctx.fillStyle = NAVY_DEEP;
   ctx.fillRect(0, 0, W, H);
-  // The trip's own colours, blurred, drifting behind the numbers
-  const shots = timeline.segments.filter((s): s is ShotSegment => s.kind === 'shot');
-  const bgA = shots[0] ? scene.photo(shots[0].photo.path) : null;
-  const bgB = shots.length > 1 ? scene.photo(shots[Math.floor(shots.length / 2)].photo.path) : null;
+  const shots = scene.timeline.segments.filter((s): s is ShotSegment => s.kind === 'shot');
+  const pick = (k: number) => (shots.length > 0 ? scene.photo(shots[Math.floor(k * shots.length) % shots.length].photo.path) : null);
+  const bgA = pick(which ? 0.3 : 0);
+  const bgB = shots.length > 1 ? pick(which ? 0.8 : 0.5) : null;
   if (bgA) drawBlurCover(ctx, bgA, 1.3 + local * 0.02, 0);
   if (bgB) {
     ctx.globalAlpha = 0.5 + 0.5 * Math.sin(local * 0.5);
@@ -334,12 +342,146 @@ const drawStats = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
   tint.addColorStop(1, 'rgba(10,17,34,0.88)');
   ctx.fillStyle = tint;
   ctx.fillRect(0, 0, W, H);
+};
 
-  const top = 500;
+const kickerLine = (ctx: Ctx, text: string, y: number, local: number, b: number) => {
   ctx.font = `500 34px ${SANS}`;
   ctx.fillStyle = ACCENT;
-  riseText(ctx, () => spacedText(ctx, '這趟旅程', MARGIN, top, 10), MARGIN, top, 50, span(local, b * 0.25, 0.8));
-  ctx.fillRect(MARGIN + 196, top - 12, 120 * easeOutExpo(span(local, b * 0.5, 1)), 3);
+  let width = 0;
+  riseText(ctx, () => { width = spacedText(ctx, text, MARGIN, y, 10); }, MARGIN, y, 50, span(local, b * 0.25, 0.8));
+  if (!width) width = [...text].length * 44;
+  ctx.fillRect(MARGIN + width + 22, y - 12, 120 * easeOutExpo(span(local, b * 0.5, 1)), 3);
+};
+
+/** 趣味統計：一行小標、一個大答案、一行補充，一拍一拍升上來 */
+const drawFacts = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
+  const { timeline, content } = scene;
+  const b = timeline.beat;
+  const local = t - seg.start;
+  drawTripBlur(ctx, scene, local, 1);
+  const top = 470;
+  kickerLine(ctx, '旅途小彩蛋', top, local, b);
+  const facts = content.facts ?? [];
+  const rowH = Math.min(210, 1000 / Math.max(1, facts.length));
+  facts.forEach((fact, i) => {
+    const y = top + 110 + i * rowH;
+    const appear = b * (0.75 + i * 1.5);
+    const p = span(local, appear, 0.9);
+    if (p <= 0) return;
+    ctx.save();
+    ctx.font = `500 32px ${SANS}`;
+    ctx.fillStyle = 'rgba(255,255,255,0.62)';
+    riseText(ctx, () => ctx.fillText(fact.label, MARGIN, y), MARGIN, y, 44, p);
+    const vy = y + Math.min(78, rowH * 0.4);
+    let size = Math.min(66, rowH * 0.34);
+    ctx.font = `700 ${size}px ${SANS}`;
+    while (size > 40 && ctx.measureText(fact.value).width > W - MARGIN * 2) {
+      size -= 3;
+      ctx.font = `700 ${size}px ${SANS}`;
+    }
+    ctx.fillStyle = '#ffffff';
+    riseText(ctx, () => ctx.fillText(fitText(ctx, fact.value, W - MARGIN * 2), MARGIN, vy), MARGIN, vy, size * 1.2, span(local, appear + 0.08, 0.9));
+    ctx.font = `500 32px ${SANS}`;
+    ctx.fillStyle = ACCENT;
+    ctx.globalAlpha = clamp01((local - appear - 0.3) / 0.5);
+    ctx.fillText(fitText(ctx, fact.detail, W - MARGIN * 2), MARGIN, vy + 50);
+    ctx.restore();
+  });
+};
+
+const RACE_COLORS = ['#f2a93b', '#4fc1b0', '#ef7a6b', '#8e8cf0', '#5aa9e6', '#a6d16b', '#f28fb8', '#c9a26b'];
+
+/**
+ * 花費賽跑：每人累積花費一天一天長出來，名次交換時長條平滑地換位置
+ * （每半天定一次名次，中間滑過去，不會一格一格跳，也不會因為金額接近而疊在一起）。
+ */
+const drawRace = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
+  const { timeline, content } = scene;
+  const race = content.race;
+  const b = timeline.beat;
+  const local = t - seg.start;
+  drawTripBlur(ctx, scene, local, 1);
+  const top = 470;
+  kickerLine(ctx, '誰花得最多', top, local, b);
+  if (!race) return;
+
+  const members = Object.keys(race.totals);
+  const days = race.dates.length;
+  const run = Math.max(1, seg.end - seg.start - 0.6 - 1.8);
+  const f = clamp01((local - 0.6) / run) * days;
+  const k = Math.min(days - 1, Math.floor(f));
+  const valuesAt = (x: number) => {
+    const day = Math.min(days - 1, Math.floor(x));
+    const frac = x >= days ? 1 : easeInOutCubic(x - Math.floor(x));
+    return members.map(m => lerp(day === 0 ? 0 : race.totals[m][day - 1], race.totals[m][day], frac));
+  };
+  const ranksAt = (x: number) => {
+    const v = valuesAt(x);
+    const order = members.map((_, i) => i).sort((a, c) => v[c] - v[a] || a - c);
+    const rank: number[] = [];
+    order.forEach((idx, r) => { rank[idx] = r; });
+    return rank;
+  };
+  const values = valuesAt(f);
+  const max = Math.max(1, ...values);
+  // Places are decided every half day and slide over, so close totals never sit on top of each other
+  const STEP = 0.5;
+  const g = f / STEP;
+  const r0 = ranksAt(Math.floor(g) * STEP);
+  const r1 = ranksAt(Math.min(days, Math.ceil(g) * STEP));
+  const slide = easeInOutCubic(g - Math.floor(g));
+
+  // Which day the race is on
+  const date = race.dates[k];
+  const dayP = span(local, b * 0.5, 0.8);
+  ctx.save();
+  ctx.globalAlpha = easeOutCubic(dayP);
+  ctx.font = `800 120px ${NUM}`;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(`DAY ${String(k + 1).padStart(2, '0')}`, MARGIN, top + 150);
+  ctx.font = `600 40px ${NUM}`;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillText(shortDate(date), MARGIN + 6, top + 210);
+  ctx.restore();
+
+  const areaTop = top + 290;
+  const slot = Math.min(118, 700 / Math.max(1, members.length));
+  const barH = slot * 0.62;
+  const nameW = 190;
+  const barX = MARGIN + nameW;
+  const barMax = W - MARGIN - barX - 210;
+  const appear = span(local, b * 0.75, 0.8);
+  members.forEach((m, i) => {
+    const v = values[i];
+    const rank = lerp(r0[i], r1[i], slide);
+    const y = areaTop + rank * slot;
+    const color = RACE_COLORS[i % RACE_COLORS.length];
+    ctx.save();
+    ctx.globalAlpha = easeOutCubic(clamp01(appear * 1.6 - i * 0.12));
+    ctx.font = `700 40px ${SANS}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(fitText(ctx, m, nameW - 20), MARGIN, y + barH * 0.72);
+    const w = Math.max(barH * 0.3, (barMax * v) / max);
+    ctx.fillStyle = color;
+    roundRect(ctx, barX, y, w, barH, barH / 2);
+    ctx.fill();
+    if (content.raceMoney) {
+      ctx.font = `700 36px ${NUM}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(content.raceMoney(Math.round(v)), barX + w + 18, y + barH * 0.7);
+    }
+    ctx.restore();
+  });
+};
+
+const drawStats = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
+  const { timeline, content } = scene;
+  const b = timeline.beat;
+  const local = t - seg.start;
+  drawTripBlur(ctx, scene, local, 0);
+
+  const top = 500;
+  kickerLine(ctx, '這趟旅程', top, local, b);
 
   const rowH = Math.min(230, 980 / Math.max(1, content.stats.length));
   const numSize = Math.min(140, rowH * 0.64);
@@ -472,6 +614,8 @@ const drawSegment = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number, T: nu
   if (seg.kind === 'intro') drawIntro(ctx, scene, t);
   else if (seg.kind === 'shot') drawShot(ctx, scene, seg, t, T);
   else if (seg.kind === 'stats') drawStats(ctx, scene, seg, t);
+  else if (seg.kind === 'facts') drawFacts(ctx, scene, seg, t);
+  else if (seg.kind === 'race') drawRace(ctx, scene, seg, t);
   else drawOutro(ctx, scene, seg, t, T);
   ctx.restore();
 };
@@ -484,111 +628,82 @@ const shortDate = (date: string) => {
   return `${date.slice(5, 7)}.${date.slice(8, 10)}  ${WEEKDAYS[d.getUTCDay()]}`;
 };
 
-/** How long the big day number stays up on a day's first photo */
-const dayIntroHold = (seg: ShotSegment) => Math.min(1.1, (seg.end - seg.start) * 0.55);
+/** The three lines under each photo: when, what, where (and how much, if amounts are on) */
+const labelLines = (scene: RecapScene, seg: ShotSegment): [string, string, string] => {
+  const { day, photo } = seg;
+  const kicker = `DAY ${String(day.dayNumber).padStart(2, '0')}   ${shortDate(day.date)}`;
+  const amount = scene.content.amountLabel?.(photo) ?? '';
+  const where = day.city ?? '';
+  const main = photo.caption || where || shortDate(day.date);
+  const sub = [main === where ? '' : where, amount].filter(Boolean).join('  ·  ');
+  return [kicker, main, sub];
+};
 
-/** The day's corner label stays put while photos change underneath it */
-const drawDayLabel = (ctx: Ctx, scene: RecapScene, t: number, T: number) => {
+/**
+ * 每張照片自己的說明（第幾天、日期、這是什麼、在哪裡）。
+ * 跟上一張一樣的那一行留在原地，換了內容的那一行才淡出、再從遮罩裡升上來，換張時字不會整塊跳動。
+ */
+const drawPhotoLabel = (ctx: Ctx, scene: RecapScene, t: number, T: number) => {
   const segs = scene.timeline.segments;
   const idx = segs.findIndex(s => s.kind === 'shot' && t >= s.start && t < s.end);
   if (idx < 0) return;
-  const day = (segs[idx] as ShotSegment).day;
-  const sameDay = (k: number) => segs[k]?.kind === 'shot' && (segs[k] as ShotSegment).day.date === day.date;
-  let first = idx;
-  while (sameDay(first - 1)) first--;
-  let last = idx;
-  while (sameDay(last + 1)) last++;
-  const opener = segs[first] as ShotSegment;
-  // Comes in once the big number has gone, leaves during the first half of the cut out of the day
-  const since = t - opener.start - (opener.dayStart ? dayIntroHold(opener) + 0.15 : 0);
-  const exit = clamp01((t - (segs[last].end - T / 2)) / (T / 2));
-  if (since <= 0 || exit >= 1) return;
-  drawDayText(ctx, day, since, 1 - exit);
-};
+  const seg = segs[idx] as ShotSegment;
+  const prev = segs[idx - 1]?.kind === 'shot' ? labelLines(scene, segs[idx - 1] as ShotSegment) : null;
+  const next = segs[idx + 1]?.kind === 'shot' ? labelLines(scene, segs[idx + 1] as ShotSegment) : null;
+  const lines = labelLines(scene, seg);
+  const since = t - seg.start;
+  const leaving = clamp01((t - (seg.end - T / 2)) / (T / 2));
 
-const drawDayText = (ctx: Ctx, day: RecapDay, since: number, alpha: number) => {
-  const base = H - SAFE_BOTTOM - 20;
+  const base = H - SAFE_BOTTOM - 10;
+  const slots = [
+    { y: base - 150, h: 46 },
+    { y: base - 62, h: 84 },
+    { y: base, h: 50 },
+  ];
   ctx.save();
-  ctx.globalAlpha = alpha;
   ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
   ctx.shadowBlur = 24;
-  const hasPlace = !!(day.city || day.title);
-  const main = day.city || shortDate(day.date);
-  const sub = day.city ? day.title : undefined;
-  const lines: { draw: () => void; y: number; h: number }[] = [];
-
-  let y = base - (sub ? 150 : 96) - (hasPlace ? 56 : 0);
-  ctx.font = `700 34px ${NUM}`;
-  const kickerY = y;
-  lines.push({
-    y: kickerY, h: 46, draw: () => {
-      ctx.font = `700 34px ${NUM}`;
+  const draws = [
+    () => {
+      ctx.font = `700 32px ${NUM}`;
       ctx.fillStyle = ACCENT;
-      const w = spacedText(ctx, `DAY ${String(day.dayNumber).padStart(2, '0')}`, MARGIN, kickerY, 6);
-      if (hasPlace) {
-        ctx.font = `600 30px ${NUM}`;
-        ctx.fillStyle = 'rgba(255,255,255,0.78)';
-        ctx.fillText(shortDate(day.date), MARGIN + w + 26, kickerY);
+      spacedText(ctx, lines[0], MARGIN, slots[0].y, 4);
+    },
+    () => {
+      // Long names shrink a little before they get an ellipsis
+      let size = 68;
+      ctx.font = `700 ${size}px ${SANS}`;
+      while (size > 50 && ctx.measureText(lines[1]).width > W - MARGIN * 2) {
+        size -= 3;
+        ctx.font = `700 ${size}px ${SANS}`;
       }
-    },
-  });
-  y += 96;
-  const mainY = y;
-  lines.push({
-    y: mainY, h: 90, draw: () => {
-      ctx.font = `700 76px ${SANS}`;
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(fitText(ctx, main, W - MARGIN * 2), MARGIN, mainY);
+      ctx.fillText(fitText(ctx, lines[1], W - MARGIN * 2), MARGIN, slots[1].y);
     },
+    () => {
+      ctx.font = `500 36px ${SANS}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.84)';
+      ctx.fillText(fitText(ctx, lines[2], W - MARGIN * 2), MARGIN, slots[2].y);
+    },
+  ];
+  draws.forEach((draw, i) => {
+    if (!lines[i]) return;
+    const stays = prev !== null && prev[i] === lines[i];
+    const goes = next === null || next[i] !== lines[i];
+    const inP = stays ? 1 : clamp01((since - i * 0.08) / 0.6);
+    ctx.save();
+    ctx.globalAlpha = goes ? 1 - leaving : 1;
+    riseText(ctx, draw, MARGIN, slots[i].y, slots[i].h, inP);
+    ctx.restore();
   });
-  if (sub) {
-    y += 64;
-    const subY = y;
-    lines.push({
-      y: subY, h: 52, draw: () => {
-        ctx.font = `500 38px ${SANS}`;
-        ctx.fillStyle = 'rgba(255,255,255,0.86)';
-        ctx.fillText(fitText(ctx, sub, W - MARGIN * 2), MARGIN, subY);
-      },
-    });
-  }
-  lines.forEach((l, i) => riseText(ctx, l.draw, MARGIN, l.y, l.h, clamp01((since - i * 0.09) / 0.7)));
-  // Accent tick beside the label
-  const tick = easeOutExpo(clamp01(since / 0.8));
+  // Accent rule beside the label: grows in on the first photo, then stays
+  const firstShot = prev === null;
+  const tick = firstShot ? easeOutExpo(clamp01(since / 0.8)) : 1;
+  const lastLine = lines[2] ? 2 : 1;
+  ctx.globalAlpha = next === null ? 1 - leaving : 1;
   ctx.fillStyle = ACCENT;
-  ctx.fillRect(MARGIN - 34, kickerY - 30, 5, (y - kickerY + 44) * tick);
-  ctx.restore();
-};
-
-/** The big day number that opens each day */
-const drawDayIntro = (ctx: Ctx, scene: RecapScene, t: number) => {
-  const segs = scene.timeline.segments;
-  const seg = segs.find((s): s is ShotSegment => s.kind === 'shot' && s.dayStart && t >= s.start - 0.05 && t < s.start + 1.6);
-  if (!seg) return;
-  const local = t - seg.start;
-  const hold = dayIntroHold(seg);
-  const inP = clamp01(local / 0.5);
-  const outP = clamp01((local - hold) / 0.35);
-  if (outP >= 1) return;
-  ctx.save();
-  // Darken the photo while the number is up
-  ctx.fillStyle = `rgba(5,8,16,${0.42 * easeOutCubic(inP) * (1 - outP)})`;
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = 1 - easeInCubic(outP);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  const cy = H * 0.47;
-  ctx.font = `700 40px ${NUM}`;
-  ctx.fillStyle = ACCENT;
-  riseText(ctx, () => spacedText(ctx, 'DAY', W / 2, cy - 250, 14, 'center'), 0, cy - 250, 56, inP);
-  const scale = lerp(1.18, 1, easeOutExpo(inP)) + outP * 0.06;
-  ctx.translate(W / 2, cy);
-  ctx.scale(scale, scale);
-  ctx.font = `800 340px ${NUM}`;
-  ctx.fillStyle = '#ffffff';
-  ctx.globalAlpha *= clamp01(inP * 2);
-  ctx.fillText(String(seg.day.dayNumber).padStart(2, '0'), 0, 110);
+  ctx.fillRect(MARGIN - 34, slots[0].y - 30, 5, (slots[lastLine].y - slots[0].y + 40) * tick);
   ctx.restore();
 };
 
@@ -810,8 +925,7 @@ export class RecapRenderer {
 
     ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
     vignette(ctx, 0.28);
-    drawDayIntro(ctx, this.scene, t);
-    drawDayLabel(ctx, this.scene, t, T);
+    drawPhotoLabel(ctx, this.scene, t, T);
   }
 
   dispose() {
