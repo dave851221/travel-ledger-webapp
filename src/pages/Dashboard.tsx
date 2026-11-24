@@ -553,7 +553,7 @@ const Dashboard: React.FC = () => {
       <ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { refetchExpenses(); }} showToast={showToast} editData={editingExpense} />
       {recapOpen && (
         <Suspense fallback={null}>
-          <RecapVideoModal trip={trip} expenses={allExpenses} stats={stats} onClose={() => setRecapOpen(false)} />
+          <RecapVideoModal trip={trip} expenses={allExpenses} onClose={() => setRecapOpen(false)} />
         </Suspense>
       )}
 

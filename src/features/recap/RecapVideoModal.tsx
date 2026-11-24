@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clapperboard, Download, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
+import { Check, Clapperboard, Download, ImagePlus, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
-import type { TripStats } from '../../hooks/useTripStats';
 import Modal from '../../components/Modal';
 import { ui } from '../../components/ui';
 import { photoUrl } from '../../utils/storage';
@@ -11,16 +10,18 @@ import {
   MAX_PHOTOS, autoPick, buildTimeline, daysBetween, recapDays, shotsFromPicks, tripDateRange,
   type DayMeta, type ExtraSection, type RecapDay, type RecapPhoto,
 } from './plan';
-import { recapFacts, spendingRace, visitedCities } from './facts';
+import {
+  MAX_FACTS, MAX_STATS, peopleSpending, recapFacts, recapStats, spendingRace, visitedCities,
+  type RecapFact, type RecapStat,
+} from './facts';
 import { MUSIC_STYLES, renderMusic, styleBpm, type MusicStyle } from './music';
 import { PhotoStore } from './images';
-import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, type RecapContent, type RecapScene, type RecapStat } from './render';
+import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, type RecapContent, type RecapScene } from './render';
 import { checkSupport, dayTexts, encodeRecap, type EncodeSupport } from './encode';
 
 interface Props {
   trip: Trip;
   expenses: Expense[];
-  stats: TripStats;
   onClose: () => void;
 }
 
@@ -30,6 +31,9 @@ interface Saved {
   music?: MusicStyle;
   showMoney?: boolean;
   sections?: ExtraSection[];
+  /** Picked fun facts and numbers by key; missing = the defaults */
+  facts?: string[];
+  stats?: string[];
 }
 
 const storageKey = (tripId: string) => `recap_${tripId}`;
@@ -44,8 +48,9 @@ const readSaved = (tripId: string): Saved => {
 const PREVIEW_W = 360;
 
 const SECTION_OPTIONS: { key: ExtraSection; label: string; hint: string }[] = [
-  { key: 'stats', label: '統計數字', hint: '天數、筆數、照片數、總花費' },
-  { key: 'facts', label: '旅途小彩蛋', hint: '最貴的一筆、誰最常掏錢、拍最多照片的一天…' },
+  { key: 'stats', label: '統計數字', hint: '天數、筆數、照片數、總花費…' },
+  { key: 'facts', label: '旅途小彩蛋', hint: '最貴的一筆、誰最常掏錢、最常光顧…' },
+  { key: 'people', label: '每個人的花錢重點', hint: '每個人錢花最多的分類' },
   { key: 'race', label: '花費賽跑', hint: '每個人的累積花費一天天長出來' },
 ];
 
@@ -61,16 +66,21 @@ const fileName = (trip: Trip) => `${trip.name.replace(/[\\/:*?"<>|]+/g, '').trim
  * 封存旅程的「回顧影片」：挑照片、選音樂、預覽，然後在這台裝置上產生 9:16 的 MP4。
  * 選擇記在這台裝置的 localStorage（不寫資料庫，免費方案的 Disk IO 很緊）。
  */
-const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) => {
+const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   const saved = useMemo(() => readSaved(trip.id), [trip.id]);
 
   // --- Story data ---
   const { days, range, cities } = useMemo(() => {
     const entry = getItinerary(trip.id);
-    const meta: DayMeta[] = entry && isPlan(entry) ? entry.days.map(d => ({ date: d.date, city: d.city, title: d.title })) : [];
-    const r = tripDateRange(expenses, meta.map(m => m.date));
-    return { days: r ? recapDays(expenses, r, meta) : [], range: r, cities: visitedCities(meta.map(m => m.city)) };
+    const m: DayMeta[] = entry && isPlan(entry) ? entry.days.map(d => ({ date: d.date, city: d.city, title: d.title })) : [];
+    const r = tripDateRange(expenses, m.map(x => x.date));
+    return { days: r ? recapDays(expenses, r, m) : [], range: r, cities: visitedCities(m.map(x => x.city)) };
   }, [trip.id, expenses]);
+
+  // A closing photo picked from this device (e.g. the group shot from someone's camera):
+  // kept in memory only, never uploaded, gone after closing
+  const [ownOutro, setOwnOutro] = useState<{ photo: RecapPhoto; url: string } | null>(null);
+  useEffect(() => () => { if (ownOutro) URL.revokeObjectURL(ownOutro.url); }, [ownOutro]);
   const allPhotos = useMemo(() => days.flatMap(d => d.photos), [days]);
   // Counts and fun facts are about the trip's photos, not its receipts
   const itemDays = useMemo(
@@ -88,24 +98,32 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
   const [music, setMusic] = useState<MusicStyle>(saved.music ?? 'bright');
   const [showMoney, setShowMoney] = useState(saved.showMoney ?? true);
   const [sections, setSections] = useState<ExtraSection[]>(saved.sections ?? ['stats', 'facts']);
+  const [factKeys, setFactKeys] = useState<string[] | null>(saved.facts ?? null);
+  const [statKeys, setStatKeys] = useState<string[] | null>(saved.stats ?? null);
+  const [failed, setFailed] = useState<Set<string>>(() => new Set());
   const toggleSection = (key: ExtraSection) =>
     setSections(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
   const [pickerMode, setPickerMode] = useState<'photos' | 'outro' | null>(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey(trip.id), JSON.stringify({ picks, outro, music, showMoney, sections } satisfies Saved));
+      localStorage.setItem(storageKey(trip.id), JSON.stringify({
+        picks, outro: outro?.startsWith('local:') ? null : outro,
+        music, showMoney, sections, facts: factKeys ?? undefined, stats: statKeys ?? undefined,
+      } satisfies Saved));
     } catch {
       // Private mode: the choices last only this visit
     }
-  }, [trip.id, picks, outro, music, showMoney, sections]);
+  }, [trip.id, picks, outro, music, showMoney, sections, factKeys, statKeys]);
 
   // The closing photo is saved for the end, not shown twice
-  const shots = useMemo(() => shotsFromPicks(days, picks.filter(p => p !== outro)), [days, picks, outro]);
+  // Photos that could not be read are left out rather than shown as a black frame
+  const shots = useMemo(() => shotsFromPicks(days, picks.filter(p => p !== outro && !failed.has(p))), [days, picks, outro, failed]);
   const outroPhoto: RecapPhoto | null = useMemo(() => {
-    const chosen = allPhotos.find(p => p.path === outro);
+    if (ownOutro && outro === ownOutro.photo.path && !failed.has(outro)) return ownOutro.photo;
+    const chosen = allPhotos.find(p => p.path === outro && !failed.has(p.path));
     return chosen ?? shots[shots.length - 1]?.photo ?? null;
-  }, [allPhotos, outro, shots]);
+  }, [allPhotos, outro, shots, failed, ownOutro]);
 
   // A video doesn't need "¥8,850.00": whole amounts drop their zero decimals
   const money = useMemo(
@@ -113,17 +131,37 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
     [showMoney, trip.precision_config],
   );
 
-  const facts = useMemo(() => (range ? recapFacts({
+  const allFacts: RecapFact[] = useMemo(() => (range ? recapFacts({
     expenses, range, days: itemDays, members: trip.members, baseCurrency: trip.base_currency, rates: trip.rates, money, cities,
+    timeZone: trip.timezone,
   }) : []), [expenses, range, itemDays, trip, money, cities]);
+  const facts = useMemo(
+    () => allFacts.filter(f => (factKeys ? factKeys.includes(f.key) : f.defaultOn)).slice(0, MAX_FACTS),
+    [allFacts, factKeys],
+  );
+
+  const allStats: RecapStat[] = useMemo(() => (range ? recapStats({
+    expenses, range, members: trip.members, baseCurrency: trip.base_currency, rates: trip.rates, money, photoCount: itemCount,
+    currencyPrefix: formatMoney(0, trip.base_currency, trip.precision_config).replace(/[\d.,\s-]/g, '') || trip.base_currency,
+  }) : []), [expenses, range, trip, money, itemCount]);
+  const statList = useMemo(
+    () => allStats.filter(st => (statKeys ? statKeys.includes(st.key) : st.defaultOn)).slice(0, MAX_STATS),
+    [allStats, statKeys],
+  );
+
+  const people = useMemo(() => peopleSpending(expenses, trip.members, trip.rates, trip.base_currency), [expenses, trip]);
 
   const race = useMemo(
     () => (range ? spendingRace(expenses, range, trip.members, trip.rates, trip.base_currency) : null),
     [expenses, range, trip],
   );
   // Only pages that have something to show
-  const available = useMemo(() => SECTION_OPTIONS.filter(o => (o.key === 'facts' ? facts.length > 0 : o.key === 'race' ? !!race : true)), [facts.length, race]);
-  const activeSections = useMemo(() => sections.filter(k => available.some(o => o.key === k)), [sections, available]);
+  const available = useMemo(() => SECTION_OPTIONS.filter(o => (
+    o.key === 'facts' ? allFacts.length > 0 : o.key === 'race' ? !!race : o.key === 'people' ? !!people : allStats.length > 0
+  )), [allFacts.length, race, people, allStats.length]);
+  // A page with nothing ticked is skipped
+  const activeSections = useMemo(() => sections.filter(k => available.some(o => o.key === k)
+    && !(k === 'facts' && facts.length === 0) && !(k === 'stats' && statList.length === 0)), [sections, available, facts.length, statList.length]);
 
   const timeline = useMemo(
     () => buildTimeline(shots, styleBpm(music), outroPhoto, activeSections),
@@ -136,23 +174,13 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
     const dateLabel = from
       ? `${from.replace(/-/g, '.')} — ${from.slice(0, 4) === to.slice(0, 4) ? to.slice(5).replace('-', '.') : to.replace(/-/g, '.')}`
       : '';
-    const spent = expenses.filter(e => !e.deleted_at && !e.is_settlement);
-    const list: RecapStat[] = [];
-    if (range) list.push({ label: '旅行天數', value: daysBetween(range.from, range.to) + 1, suffix: '天' });
-    list.push({ label: '一起記下的消費', value: spent.length, suffix: '筆' });
-    if (itemCount > 0) list.push({ label: '拍下的照片', value: itemCount, suffix: '張' });
-    if (showMoney && stats.grandBase.total > 0) {
-      const symbol = formatMoney(0, trip.base_currency, trip.precision_config).replace(/[\d.,\s-]/g, '');
-      list.push({ label: '總花費', value: Math.round(stats.grandBase.total), prefix: symbol || trip.base_currency });
-    }
-    const top = stats.categoryData[0];
-    if (top && showMoney) list.push({ label: '花最多錢在', value: top.name });
     return {
-      tripName: trip.name, dateLabel, members: trip.members, stats: list, facts, race,
+      tripName: trip.name, dateLabel, members: trip.members, stats: statList, facts, race, people,
+      tripDays: range ? daysBetween(range.from, range.to) + 1 : undefined,
       raceMoney: money ? (n: number) => money(n, trip.base_currency) : undefined,
       amountLabel: money ? (p: RecapPhoto) => (p.amount > 0 ? money(p.amount, p.currency) : null) : undefined,
     };
-  }, [range, expenses, itemCount, showMoney, stats, trip, facts, race, money]);
+  }, [range, statList, trip, facts, race, people, money]);
 
   // --- Photo store and preview ---
   const storeRef = useRef<PhotoStore | null>(null);
@@ -170,7 +198,14 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
   useEffect(() => {
     const ac = new AbortController();
     store.prepare(needed, (done, total) => setPrepared({ done, total }), ac.signal)
-      .then(() => { if (!ac.signal.aborted) setStoreVersion(v => v + 1); });
+      .then(() => {
+        if (ac.signal.aborted) return;
+        setFailed(prev => {
+          const next = store.failedPaths();
+          return next.size === prev.size && [...next].every(p => prev.has(p)) ? prev : next;
+        });
+        setStoreVersion(v => v + 1);
+      });
     return () => ac.abort();
   }, [store, needed]);
 
@@ -345,8 +380,25 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
     });
   };
 
+  // The closing photo can come from this device: kept in memory, used only as the last scene
+  const fileInput = useRef<HTMLInputElement>(null);
+  const pickOwnOutro = (file: File | undefined) => {
+    if (!file) return;
+    const path = `local:${Date.now().toString(36)}`;
+    store.addLocal(path, file);
+    setOwnOutro({ photo: { path, date: range?.to ?? '', caption: '', amount: 0, currency: '', kind: 'item' }, url: URL.createObjectURL(file) });
+    setOutro(path);
+  };
+
+  const toggleKey = (current: string[] | null, defaults: string[], key: string, max: number): string[] => {
+    const base = current ?? defaults;
+    if (base.includes(key)) return base.filter(k => k !== key);
+    return base.length >= max ? base : [...base, key];
+  };
+
   const rendering = phase.kind === 'rendering';
   const busy = prepared.done < prepared.total;
+  const skipped = picks.filter(p => failed.has(p)).length;
   const seconds = Math.round(timeline.duration);
 
   if (days.length === 0) {
@@ -447,10 +499,19 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
                   <button onClick={() => setPickerMode(m => (m === 'outro' ? null : 'outro'))} className={`${ui.btnSecondary} flex-1`} disabled={rendering}>
                     <Star size={16} />{pickerMode === 'outro' ? '收起' : '結尾合照'}
                   </button>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={e => { pickOwnOutro(e.target.files?.[0]); e.target.value = ''; }}
+                  />
                 </div>
                 <p className={ui.hint}>
-                  預設從整趟照片裡平均挑，照片多的日子多挑一些；每張會配上日期、品名與地點。收據也能勾進來。結尾那張建議選大家的合照{outro ? '' : '（還沒選，先用最後一張）'}。
+                  預設從整趟照片裡平均挑，照片多的日子多挑一些；每張會配上日期、品名與地點。收據也能勾進來。
+                  結尾那張建議選大家的合照，也可以從手機上傳一張{outro ? '' : '（還沒選，先用最後一張）'}。
                 </p>
+                {skipped > 0 && <p className={ui.warnBox}>有 <span className="num">{skipped}</span> 張照片讀不到，影片會先略過它們。</p>}
                 {pickerMode && (
                   <PhotoPicker
                     days={days}
@@ -459,6 +520,8 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
                     outro={outroPhoto?.path ?? null}
                     onToggle={togglePick}
                     onOutro={path => setOutro(path)}
+                    ownOutro={ownOutro}
+                    onUploadOutro={() => fileInput.current?.click()}
                     onAuto={() => setPicks(autoPick(days))}
                     onClear={() => setPicks([])}
                   />
@@ -485,10 +548,21 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
 
               <section className="space-y-2">
                 <p className={ui.label}>照片之後放哪些段落</p>
+                <p className={ui.hint}>每多一段影片多幾秒，全部打開大約一分鐘。</p>
                 <div className="space-y-1.5">
                   {available.map(o => {
                     const on = sections.includes(o.key);
+                    const items = o.key === 'facts'
+                      ? allFacts.map(f => ({ key: f.key, label: f.label, preview: f.value, defaultOn: f.defaultOn }))
+                      : o.key === 'stats'
+                        ? allStats.map(st => ({ key: st.key, label: st.label, preview: `${st.prefix ?? ''}${typeof st.value === 'number' ? st.value.toLocaleString('en-US') : st.value}${st.suffix ?? ''}`, defaultOn: st.defaultOn }))
+                        : [];
+                    const chosen = o.key === 'facts' ? facts.map(f => f.key) : statList.map(st => st.key);
+                    const max = o.key === 'facts' ? MAX_FACTS : MAX_STATS;
+                    const setKeys = o.key === 'facts' ? setFactKeys : setStatKeys;
+                    const current = o.key === 'facts' ? factKeys : statKeys;
                     return (
+                      <div key={o.key} className="space-y-1.5">
                       <button
                         key={o.key}
                         onClick={() => toggleSection(o.key)}
@@ -504,6 +578,31 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, stats, onClose }) =>
                           <span className="block text-xs text-muted mt-0.5 truncate">{o.hint}</span>
                         </span>
                       </button>
+                      {on && items.length > 0 && (
+                        <div className="ml-8 rounded-xl bg-sunk border border-line p-1.5">
+                          <p className="text-[11px] text-muted px-2 pt-1 pb-1.5">挑要放的項目（最多 <span className="num">{max}</span> 項）</p>
+                          {items.map(item => {
+                            const picked = chosen.includes(item.key);
+                            const full = !picked && chosen.length >= max;
+                            return (
+                              <button
+                                key={item.key}
+                                onClick={() => setKeys(toggleKey(current, items.filter(x => x.defaultOn).map(x => x.key), item.key, max))}
+                                disabled={rendering || full}
+                                aria-pressed={picked}
+                                className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-surface disabled:opacity-40 transition-colors"
+                              >
+                                <span className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center ${picked ? 'bg-accent border-accent text-on-accent' : 'border-line bg-surface'}`}>
+                                  {picked && <Check size={11} strokeWidth={3} />}
+                                </span>
+                                <span className="text-xs text-ink-2 shrink-0">{item.label}</span>
+                                <span className="text-xs font-bold truncate">{item.preview}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      </div>
                     );
                   })}
                 </div>
@@ -550,11 +649,14 @@ interface PickerProps {
   outro: string | null;
   onToggle: (path: string) => void;
   onOutro: (path: string) => void;
+  /** The closing photo uploaded from this device, if any */
+  ownOutro: { photo: RecapPhoto; url: string } | null;
+  onUploadOutro: () => void;
   onAuto: () => void;
   onClear: () => void;
 }
 
-const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, onToggle, onOutro, onAuto, onClear }) => {
+const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, ownOutro, onUploadOutro, onToggle, onOutro, onAuto, onClear }) => {
   const picked = new Set(picks);
   const receiptCount = days.reduce<number>((n, d) => n + d.photos.filter(p => p.kind === 'receipt').length, 0);
   // Receipts can go in too, but there are usually many: hidden until asked for (or one is already picked)
@@ -579,7 +681,22 @@ const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, onToggle
           )}
         </div>
       ) : (
-        <p className="text-xs text-ink-2">點一張當作影片最後一幕。</p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-ink-2 flex-1">點一張當作影片最後一幕，或從手機上傳一張（不會存到旅程裡）。</p>
+          {ownOutro && (
+            <button
+              onClick={() => onOutro(ownOutro.photo.path)}
+              aria-pressed={outro === ownOutro.photo.path}
+              className={`relative w-12 h-12 shrink-0 rounded-lg overflow-hidden ring-2 ${outro === ownOutro.photo.path ? 'ring-accent' : 'ring-transparent opacity-70'}`}
+              title="上傳的照片"
+            >
+              <img src={ownOutro.url} alt="上傳的結尾照片" className="w-full h-full object-cover" />
+            </button>
+          )}
+          <button onClick={onUploadOutro} className={`${ui.chip} ${ui.chipOff} shrink-0`}>
+            <ImagePlus size={12} className="inline -mt-0.5 mr-1" />{ownOutro ? '換一張' : '上傳'}
+          </button>
+        </div>
       )}
       {shown.map(day => (
         <div key={day.date}>

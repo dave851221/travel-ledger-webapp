@@ -180,8 +180,10 @@ export interface StatsSegment { kind: 'stats'; start: number; end: number }
 export interface FactsSegment { kind: 'facts'; start: number; end: number }
 /** Everyone's running total, racing day by day */
 export interface RaceSegment { kind: 'race'; start: number; end: number }
+/** Where each person's money went */
+export interface PeopleSegment { kind: 'people'; start: number; end: number }
 export interface OutroSegment { kind: 'outro'; start: number; end: number; photo: RecapPhoto | null }
-export type Segment = IntroSegment | ShotSegment | StatsSegment | FactsSegment | RaceSegment | OutroSegment;
+export type Segment = IntroSegment | ShotSegment | StatsSegment | FactsSegment | PeopleSegment | RaceSegment | OutroSegment;
 
 export interface Timeline {
   bpm: number;
@@ -197,9 +199,9 @@ export interface Timeline {
 export const INTRO_BEATS = 8;
 
 /** The optional pages after the photos, in the order they play */
-export type ExtraSection = 'stats' | 'facts' | 'race';
-const EXTRA_BEATS: Record<ExtraSection, number> = { stats: 12, facts: 12, race: 16 };
-const EXTRA_ORDER: ExtraSection[] = ['stats', 'facts', 'race'];
+export type ExtraSection = 'stats' | 'facts' | 'people' | 'race';
+const EXTRA_BEATS: Record<ExtraSection, number> = { stats: 12, facts: 12, people: 12, race: 16 };
+const EXTRA_ORDER: ExtraSection[] = ['stats', 'facts', 'people', 'race'];
 export const OUTRO_BEATS = 8;
 const MIN_SECONDS = 30;
 const MAX_SECONDS = 45;
@@ -270,6 +272,7 @@ export const buildTimeline = (
     if (seg.kind === 'stats') return 'shutter';
     if (seg.kind === 'facts') return 'rise';
     if (seg.kind === 'race') return 'reveal';
+    if (seg.kind === 'people') return 'whip';
     return 'zoom';
   });
 

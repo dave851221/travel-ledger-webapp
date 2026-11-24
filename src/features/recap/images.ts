@@ -60,11 +60,41 @@ export const targetSize = (w: number, h: number): { width: number; height: numbe
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)) };
 };
 
+/**
+ * 用 CORS 抓原圖（要畫進 canvas 再編碼，no-cors 的圖會讓整張畫布不能讀）。
+ * 網址加 `?recap=1`：PWA 只快取不帶查詢字串的圖片網址，相簿 <img> 存進去的 opaque 回應不會被拿來回應這裡，
+ * 那正是「影片裡有些照片全黑」的原因。萬一還是拿到 opaque／錯誤，再換一個網址、略過 HTTP 快取重抓一次。
+ */
+const fetchPhoto = async (path: string, signal?: AbortSignal): Promise<Response> => {
+  const attempt = (suffix: string, init: RequestInit) => fetch(`${photoUrl(path)}?${suffix}`, { ...init, signal, mode: 'cors' });
+  try {
+    const res = await attempt('recap=1', {});
+    if (res.ok && res.type !== 'opaque') return res;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+  }
+  const retry = await attempt(`recap=${Date.now()}`, { cache: 'reload' });
+  if (!retry.ok) throw new Error(`HTTP ${retry.status}`);
+  return retry;
+};
+
 export class PhotoStore {
   private prepared = new Map<string, Prepared>();
   private decoded = new Map<string, ImageBitmap | HTMLImageElement>();
   private pending = new Map<string, Promise<void>>();
   private failed = new Set<string>();
+  /** Photos picked from this device: never uploaded, read straight from the file */
+  private local = new Map<string, Blob>();
+
+  addLocal(path: string, file: Blob) {
+    this.local.set(path, file);
+    this.failed.delete(path);
+  }
+
+  /** Photos that could not be read (the video skips them instead of showing black) */
+  failedPaths(): Set<string> {
+    return new Set(this.failed);
+  }
 
   /** Downloads and shrinks every photo once. Photos that fail are skipped, not fatal. */
   async prepare(paths: string[], onProgress?: (done: number, total: number) => void, signal?: AbortSignal) {
@@ -93,9 +123,8 @@ export class PhotoStore {
   }
 
   private async prepareOne(path: string, signal?: AbortSignal) {
-    const res = await fetch(photoUrl(path), { signal, mode: 'cors' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const img = await loadImage(await res.blob());
+    const local = this.local.get(path);
+    const img = await loadImage(local ?? await (await fetchPhoto(path, signal)).blob());
     const { width, height } = targetSize(img.naturalWidth, img.naturalHeight);
     const c = document.createElement('canvas');
     c.width = width;
