@@ -502,6 +502,18 @@ LINE Bot 的對話歷史曾因此永遠停在最早的六筆，AI 完全看不�
 `cd "C:/SourceCode/AI/travel-ledger-webapp"`（大寫 C）再跑即可；CI 在 Linux 上不受影響。
 看到 `npm test` 印出 `Tests  no tests` 時先檢查 `RUN` 那一行的路徑大小寫。
 
+### GitHub Pages 部署：建置與發布必須是兩個 job
+
+`.github/workflows/deploy.yml` 分成 `build`（lint、test、check、build、`upload-pages-artifact`）
+與 `deploy`（`needs: build`，只有 `deploy-pages`）兩個 job。**不要合回同一個 job。**
+2026-11-21 到 11-24 連續 5 次部署失敗都是這個原因：同一個 job 裡上傳完 0.4 秒就發布，
+GitHub 還沒登記好 artifact，報 `No artifacts named "github-pages"` 或 `Fetching artifact metadata failed`。
+升級 action 版本、推空 commit 重跑都只是碰運氣，**沒有修到原因**；在失敗的 run 上按 re-run 還會變成 `Multiple artifacts named "github-pages"`。
+
+規則（David 2026-11-24）：
+- 部署失敗時**先讀那次 run 的錯誤訊息**，把原因修掉再重跑，不要直接重試。
+- 每次合併或推到 `main` 之後，**確認 Pages 的 run 成功**才回報「已上線」。
+
 ### 密鑰與版控
 
 `.env` 與 `supabase/.temp/` 曾被 commit 進 git（前者含 anon key，後者含 Postgres 連線字串）。
@@ -518,6 +530,7 @@ LINE Bot 的對話歷史曾因此永遠停在最早的六筆，AI 完全看不�
 特別注意 **LIFF 編輯頁屬於前端**，改了要 push 才會生效。
 
 - **前端**：推送到 `main` 觸發 `.github/workflows/deploy.yml`，自動部署到 GitHub Pages。
+  workflow 是 `build` → `deploy` 兩個 job，**不要合併成一個**（見踩坑紀錄「GitHub Pages 部署」）。推完要確認 run 成功。
   Repo Secrets 需要 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`。
   LIFF ID 預設寫在程式裡（`src/utils/liff.ts` 與 `line-webhook/config.ts`，`2012713943-msELyw4c`），卡片按鈕開 liff.line.me，存檔後由 LIFF 代送「✅ 已記帳」、機器人免費 reply；在 LIFF 外開啟時退回推播。
 - **Edge Function**：`supabase functions deploy line-webhook --no-verify-jwt`，
