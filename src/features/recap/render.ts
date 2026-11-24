@@ -1,6 +1,6 @@
 import type { PhotoAsset } from './images';
 import type { PersonSpending, RecapFact, RecapStat, SpendingRace } from './facts';
-import type { OutroSegment, RecapPhoto, Segment, ShotSegment, Timeline, TransitionKind } from './plan';
+import type { OutroSegment, RecapDay, RecapPhoto, Segment, ShotSegment, Timeline, TransitionKind } from './plan';
 
 /**
  * 回顧影片的畫面：給一個時間 t（秒），畫出那一格。
@@ -693,16 +693,19 @@ const shortDate = (date: string) => {
 };
 
 /** The three lines under each photo: when, what, where (and how much, if amounts are on) */
-const labelLines = (scene: RecapScene, seg: ShotSegment): [string, string, string] => {
-  const { day, photo } = seg;
-  const inTrip = day.dayNumber >= 1 && (!scene.content.tripDays || day.dayNumber <= scene.content.tripDays);
+/** The three caption lines a photo gets in the video: when, what, where (and how much) */
+export const photoLabelLines = (photo: RecapPhoto, day: RecapDay, content: RecapContent): [string, string, string] => {
+  const inTrip = day.dayNumber >= 1 && (!content.tripDays || day.dayNumber <= content.tripDays);
   const kicker = inTrip ? `DAY ${String(day.dayNumber).padStart(2, '0')}   ${shortDate(day.date)}` : shortDate(day.date);
-  const amount = scene.content.amountLabel?.(photo) ?? '';
+  const amount = content.amountLabel?.(photo) ?? '';
   const where = day.city ?? '';
   const main = photo.caption || where || shortDate(day.date);
   const sub = [main === where ? '' : where, amount].filter(Boolean).join('  ·  ');
   return [kicker, main, sub];
 };
+
+const labelLines = (scene: RecapScene, seg: ShotSegment): [string, string, string] =>
+  photoLabelLines(seg.photo, seg.day, scene.content);
 
 /**
  * 每張照片自己的說明（第幾天、日期、這是什麼、在哪裡）。

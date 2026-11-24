@@ -12,6 +12,8 @@ export interface RecapPhoto {
   date: string;
   /** What it was: the expense's description without the bot's explanation in brackets */
   caption: string;
+  /** The expense's full description, for the picker's detail view */
+  description?: string;
   /** The expense's total, shown beside the caption when amounts are on */
   amount: number;
   currency: string;
@@ -99,7 +101,7 @@ export const recapDays = (
       if (!path || seen.has(path)) continue;
       seen.add(path);
       const list = byDate.get(e.date) ?? [];
-      list.push({ path, date: e.date, caption: photoCaption(e.description ?? ''), amount: Number(e.amount) || 0, currency: e.currency, kind: photoKind(e, path) });
+      list.push({ path, date: e.date, caption: photoCaption(e.description ?? ''), description: e.description ?? '', amount: Number(e.amount) || 0, currency: e.currency, kind: photoKind(e, path) });
       byDate.set(e.date, list);
     }
   }
