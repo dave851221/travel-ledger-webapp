@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from '../../types';
-import { recapFacts, spendingRace, visitedCities } from './facts';
+import { peopleSpending, recapFacts, recapStats, spendingRace, visitedCities } from './facts';
 import type { RecapDay } from './plan';
 
 let seq = 0;
@@ -38,12 +38,14 @@ describe('recapFacts', () => {
     expect(byLabel['花最多的一天'].value).toBe('Day 2 · 11.15');
     expect(byLabel['最常掏錢的人'].value).toBe('甲');
     expect(byLabel['拍最多照片的一天'].detail).toContain('5 張');
-    expect(facts.length).toBeLessThanOrEqual(5);
+    expect(byLabel['最常光顧']).toBeUndefined();
+    expect(facts.every(f => f.key)).toBe(true);
   });
 
   it('shows no amounts when they are hidden', () => {
     const facts = recapFacts({ ...base, expenses, days, money: null });
-    for (const f of facts) expect(`${f.value}${f.detail}`).not.toMatch(/JPY|TWD|\d{3,}/);
+    for (const f of facts) expect(`${f.value}${f.detail}`).not.toMatch(/JPY|TWD|¥|NT\$/);
+    expect(facts.some(f => f.key === 'cheapest' || f.key === 'perPersonDay')).toBe(false);
   });
 });
 
@@ -68,5 +70,28 @@ describe('spendingRace', () => {
 
   it('needs at least two people', () => {
     expect(spendingRace([], base.range, ['甲'], base.rates, base.baseCurrency)).toBeNull();
+  });
+});
+
+describe('recapStats', () => {
+  it('drops the money rows when amounts are hidden', () => {
+    const list = [exp('2026-11-14', 1000, '甲'), exp('2026-11-15', 500, '乙', { category: '交通', currency: 'TWD' })];
+    const withMoney = recapStats({ ...base, expenses: list, money: (a, c) => `${c}${a}`, photoCount: 3, currencyPrefix: 'NT$' });
+    expect(withMoney.map(s => s.key)).toEqual(['days', 'count', 'photos', 'total', 'perPerson', 'perDay', 'topCategory', 'currencies', 'categoryCount']);
+    expect(withMoney.find(s => s.key === 'total')?.value).toBe(700);
+    const hidden = recapStats({ ...base, expenses: list, money: null, photoCount: 3, currencyPrefix: 'NT$' });
+    expect(hidden.map(s => s.key)).toEqual(['days', 'count', 'photos', 'currencies', 'categoryCount']);
+  });
+});
+
+describe('peopleSpending', () => {
+  it("ranks each person's categories by their own share", () => {
+    const list = [
+      exp('2026-11-14', 1000, '甲', { split_data: { 甲: 800, 乙: 200 } }),
+      exp('2026-11-15', 500, '乙', { category: '購物', split_data: { 乙: 500 } }),
+    ];
+    const rows = peopleSpending(list, base.members, base.rates, base.baseCurrency)!;
+    expect(rows.map(r => r.member)).toEqual(['甲', '乙']);
+    expect(rows[1].categories.map(c => `${c.name}:${c.share}`)).toEqual(['購物:71', '飲食:29']);
   });
 });

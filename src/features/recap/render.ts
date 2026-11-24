@@ -1,5 +1,5 @@
 import type { PhotoAsset } from './images';
-import type { RecapFact, SpendingRace } from './facts';
+import type { PersonSpending, RecapFact, RecapStat, SpendingRace } from './facts';
 import type { OutroSegment, RecapPhoto, Segment, ShotSegment, Timeline, TransitionKind } from './plan';
 
 /**
@@ -26,14 +26,6 @@ const NAVY_DEEP = '#0a1122';
 const SANS = "'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif";
 const NUM = "'Manrope', 'Noto Sans TC', system-ui, sans-serif";
 
-export interface RecapStat {
-  label: string;
-  /** A number counts up; a string just appears */
-  value: number | string;
-  prefix?: string;
-  suffix?: string;
-}
-
 export interface RecapContent {
   tripName: string;
   /** e.g. 2026.11.14 — 11.22 */
@@ -42,6 +34,10 @@ export interface RecapContent {
   stats: RecapStat[];
   /** 趣味統計 (fun facts), shown on their own page after the numbers */
   facts?: RecapFact[];
+  /** Trip length in days; photos outside it get no "Day N" */
+  tripDays?: number;
+  /** 每個人的花錢重點 */
+  people?: PersonSpending[] | null;
   /** 花費賽跑: everyone's running total by day */
   race?: SpendingRace | null;
   /** Formats a base-currency amount for the race; leave out to hide the numbers */
@@ -65,7 +61,8 @@ export const ensureFonts = async (content: RecapContent, extra: string[] = []): 
   const text = [
     content.tripName, content.dateLabel, ...content.members, '旅行回顧這趟旅程旅遊小本本週日一二三四五六…·',
     ...content.stats.flatMap(s => [s.label, s.prefix ?? '', s.suffix ?? '', String(s.value)]),
-    ...(content.facts ?? []).flatMap(f => [f.label, f.value, f.detail]), '旅途小彩蛋誰花得最多', ...extra,
+    ...(content.facts ?? []).flatMap(f => [f.label, f.value, f.detail]),
+    ...(content.people ?? []).flatMap(p => [p.member, ...p.categories.map(c => c.name)]), '旅途小彩蛋誰花得最多每個人的花錢重點凌晨晚上', ...extra,
   ].join('');
   const jobs = [
     ...['500', '700'].map(w => document.fonts.load(`${w} 40px 'Noto Sans TC'`, text)),
@@ -474,6 +471,70 @@ const drawRace = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
   });
 };
 
+/** 每個人的花錢重點：一人一列，最多三個分類疊成一條，寫出最大的那一類占幾成 */
+const drawPeople = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
+  const { timeline, content } = scene;
+  const b = timeline.beat;
+  const local = t - seg.start;
+  drawTripBlur(ctx, scene, local, 0);
+  const top = 470;
+  kickerLine(ctx, '每個人的花錢重點', top, local, b);
+  const rows = (content.people ?? []).slice(0, 6);
+  if (rows.length === 0) return;
+  // One colour per category across everyone, so the same category matches between rows
+  const colorOf = new Map<string, string>();
+  for (const r of rows) for (const c of r.categories) if (!colorOf.has(c.name)) colorOf.set(c.name, RACE_COLORS[colorOf.size % RACE_COLORS.length]);
+  const rowH = Math.min(200, 1000 / rows.length);
+  const barW = W - MARGIN * 2;
+  rows.forEach((r, i) => {
+    const y = top + 110 + i * rowH;
+    const appear = b * (0.75 + i * 1.25);
+    const p = span(local, appear, 0.9);
+    if (p <= 0) return;
+    ctx.save();
+    riseText(ctx, () => {
+      ctx.font = `700 46px ${SANS}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(r.member, MARGIN, y);
+      if (content.raceMoney) {
+        ctx.font = `700 38px ${NUM}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.textAlign = 'right';
+        ctx.fillText(content.raceMoney(r.total), W - MARGIN, y);
+        ctx.textAlign = 'left';
+      }
+    }, MARGIN, y, 60, p);
+    // Stacked bar of the top categories, growing in from the left
+    const grow = easeOutCubic(span(local, appear + 0.2, 1.1));
+    const by = y + 26;
+    const bh = Math.min(34, rowH * 0.18);
+    ctx.globalAlpha = clamp01(p * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    roundRect(ctx, MARGIN, by, barW, bh, bh / 2);
+    ctx.fill();
+    ctx.save();
+    roundRect(ctx, MARGIN, by, barW * grow, bh, bh / 2);
+    ctx.clip();
+    let x = MARGIN;
+    for (const c of r.categories) {
+      const w = (barW * c.share) / 100;
+      ctx.fillStyle = colorOf.get(c.name) ?? ACCENT;
+      ctx.fillRect(x, by, w, bh);
+      x += w;
+    }
+    ctx.restore();
+    const lead = r.categories[0];
+    if (lead) {
+      ctx.globalAlpha = clamp01((local - appear - 0.5) / 0.5);
+      ctx.font = `500 32px ${SANS}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      const rest = r.categories.slice(1).map(c => `${c.name} ${c.share}%`).join('   ');
+      ctx.fillText(fitText(ctx, `最多花在 ${lead.name} ${lead.share}%${rest ? `   ${rest}` : ''}`, barW), MARGIN, by + bh + 44);
+    }
+    ctx.restore();
+  });
+};
+
 const drawStats = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
   const { timeline, content } = scene;
   const b = timeline.beat;
@@ -616,6 +677,7 @@ const drawSegment = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number, T: nu
   else if (seg.kind === 'stats') drawStats(ctx, scene, seg, t);
   else if (seg.kind === 'facts') drawFacts(ctx, scene, seg, t);
   else if (seg.kind === 'race') drawRace(ctx, scene, seg, t);
+  else if (seg.kind === 'people') drawPeople(ctx, scene, seg, t);
   else drawOutro(ctx, scene, seg, t, T);
   ctx.restore();
 };
@@ -631,7 +693,8 @@ const shortDate = (date: string) => {
 /** The three lines under each photo: when, what, where (and how much, if amounts are on) */
 const labelLines = (scene: RecapScene, seg: ShotSegment): [string, string, string] => {
   const { day, photo } = seg;
-  const kicker = `DAY ${String(day.dayNumber).padStart(2, '0')}   ${shortDate(day.date)}`;
+  const inTrip = day.dayNumber >= 1 && (!scene.content.tripDays || day.dayNumber <= scene.content.tripDays);
+  const kicker = inTrip ? `DAY ${String(day.dayNumber).padStart(2, '0')}   ${shortDate(day.date)}` : shortDate(day.date);
   const amount = scene.content.amountLabel?.(photo) ?? '';
   const where = day.city ?? '';
   const main = photo.caption || where || shortDate(day.date);

@@ -59,7 +59,9 @@ export default defineConfig({
         // Ensure Supabase storage images are handled correctly or cached if needed
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/.*\.supabase\.co\/storage\/v1\/object\/public\/.*/i,
+            // 只快取不帶查詢字串的網址。回顧影片用 `?recap=1` 以 CORS 抓原圖：相簿的 <img> 是 no-cors，
+            // 快取裡存的是 opaque 回應，CORS 請求拿到它會直接失敗（影片裡的照片就變成全黑）。
+            urlPattern: /^https:\/\/.*\.supabase\.co\/storage\/v1\/object\/public\/[^?]*$/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'supabase-images-cache',

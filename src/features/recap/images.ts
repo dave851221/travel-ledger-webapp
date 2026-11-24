@@ -60,11 +60,41 @@ export const targetSize = (w: number, h: number): { width: number; height: numbe
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)) };
 };
 
+/**
+ * 用 CORS 抓原圖（要畫進 canvas 再編碼，no-cors 的圖會讓整張畫布不能讀）。
+ * 網址加 `?recap=1`：PWA 只快取不帶查詢字串的圖片網址，相簿 <img> 存進去的 opaque 回應不會被拿來回應這裡，
+ * 那正是「影片裡有些照片全黑」的原因。萬一還是拿到 opaque／錯誤，再換一個網址、略過 HTTP 快取重抓一次。
+ */
+const fetchPhoto = async (path: string, signal?: AbortSignal): Promise<Response> => {
+  const attempt = (suffix: string, init: RequestInit) => fetch(`${photoUrl(path)}?${suffix}`, { ...init, signal, mode: 'cors' });
+  try {
+    const res = await attempt('recap=1', {});
+    if (res.ok && res.type !== 'opaque') return res;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+  }
+  const retry = await attempt(`recap=${Date.now()}`, { cache: 'reload' });
+  if (!retry.ok) throw new Error(`HTTP ${retry.status}`);
+  return retry;
+};
+
 export class PhotoStore {
   private prepared = new Map<string, Prepared>();
   private decoded = new Map<string, ImageBitmap | HTMLImageElement>();
   private pending = new Map<string, Promise<void>>();
   private failed = new Set<string>();
+  /** Photos picked from this device: never uploaded, read straight from the file */
+  private local = new Map<string, Blob>();
+
+  addLocal(path: string, file: Blob) {
+    this.local.set(path, file);
+    this.failed.delete(path);
+  }
+
+  /** Photos that could not be read (the video skips them instead of showing black) */
+  failedPaths(): Set<string> {
+    return new Set(this.failed);
+  }
 
   /** Downloads and shrinks every photo once. Photos that fail are skipped, not fatal. */
   async prepare(paths: string[], onProgress?: (done: number, total: number) => void, signal?: AbortSignal) {
@@ -93,9 +123,8 @@ export class PhotoStore {
   }
 
   private async prepareOne(path: string, signal?: AbortSignal) {
-    const res = await fetch(photoUrl(path), { signal, mode: 'cors' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const img = await loadImage(await res.blob());
+    const local = this.local.get(path);
+    const img = await loadImage(local ?? await (await fetchPhoto(path, signal)).blob());
     const { width, height } = targetSize(img.naturalWidth, img.naturalHeight);
     const c = document.createElement('canvas');
     c.width = width;
@@ -176,3 +205,64 @@ export class PhotoStore {
     this.prepared.clear();
   }
 }
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * 照片的拍攝日（YYYY-MM-DD）。JPEG 讀 EXIF 的 DateTimeOriginal（沒有就讀 DateTime），
+ * 讀不到（PNG、被修圖軟體拿掉、手機轉檔）就用檔案的修改時間。
+ */
+export const photoTakenDate = async (file: File): Promise<string> => {
+  try {
+    const view = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    const exif = readExifDate(view);
+    if (exif) return exif;
+  } catch {
+    // Not a JPEG or a broken header: fall back below
+  }
+  return ymd(new Date(file.lastModified || Date.now()));
+};
+
+/** Minimal EXIF walk: APP1 → TIFF → IFD0 → Exif IFD → 0x9003 (or IFD0 0x0132) */
+export const readExifDate = (view: DataView): string | null => {
+  if (view.byteLength < 4 || view.getUint16(0) !== 0xffd8) return null;
+  let at = 2;
+  while (at + 4 <= view.byteLength) {
+    const marker = view.getUint16(at);
+    const size = view.getUint16(at + 2);
+    if (marker === 0xffe1 && view.getUint32(at + 4) === 0x45786966) {
+      const tiff = at + 10;
+      const little = view.getUint16(tiff) === 0x4949;
+      const u16 = (o: number) => view.getUint16(o, little);
+      const u32 = (o: number) => view.getUint32(o, little);
+      const entries = (ifd: number) => {
+        const n = u16(ifd);
+        return Array.from({ length: n }, (_, i) => ifd + 2 + i * 12).filter(e => e + 12 <= view.byteLength);
+      };
+      const ascii = (e: number) => {
+        const count = u32(e + 4);
+        const off = count > 4 ? tiff + u32(e + 8) : e + 8;
+        let text = '';
+        for (let i = 0; i < count - 1 && off + i < view.byteLength; i++) text += String.fromCharCode(view.getUint8(off + i));
+        return text;
+      };
+      const toDate = (text: string) => (/^\d{4}:\d{2}:\d{2}/.test(text) && !text.startsWith('0000') ? text.slice(0, 10).replace(/:/g, '-') : null);
+      const ifd0 = tiff + u32(tiff + 4);
+      let fallback: string | null = null;
+      for (const e of entries(ifd0)) {
+        const tag = u16(e);
+        if (tag === 0x0132) fallback = toDate(ascii(e));
+        if (tag === 0x8769) {
+          for (const x of entries(tiff + u32(e + 8))) if (u16(x) === 0x9003) {
+            const d = toDate(ascii(x));
+            if (d) return d;
+          }
+        }
+      }
+      return fallback;
+    }
+    if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) return null;
+    at += 2 + size;
+  }
+  return null;
+};
