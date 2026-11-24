@@ -104,6 +104,53 @@ export const readLocalPhoto = async (file: File): Promise<Blob> => {
   throw new Error(`Unreadable image: ${file.type || 'unknown type'}`);
 };
 
+// --- The uploaded closing photo survives a reload ------------------------------------
+// Phones often reload the page after a long encode or after the share sheet (memory), and the
+// photo was only in memory, so "回去調整" came back without it (David 2026-11-24).
+// It lives in this browser's IndexedDB, never on the server.
+
+const DB_NAME = 'recap';
+const OUTRO_STORE = 'outro';
+
+const openDb = () =>
+  new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(OUTRO_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+const withStore = async <T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
+  const db = await openDb();
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const req = run(db.transaction(OUTRO_STORE, mode).objectStore(OUTRO_STORE));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
+};
+
+export const saveOwnOutro = async (tripId: string, photo: Blob | null): Promise<void> => {
+  try {
+    if (photo) await withStore('readwrite', s => s.put(photo, tripId));
+    else await withStore('readwrite', s => s.delete(tripId));
+  } catch {
+    // Private mode or storage blocked: it stays for this visit only
+  }
+};
+
+export const loadOwnOutro = async (tripId: string): Promise<Blob | null> => {
+  try {
+    const found = await withStore<unknown>('readonly', s => s.get(tripId));
+    return found instanceof Blob ? found : null;
+  } catch {
+    return null;
+  }
+};
+
 export class PhotoStore {
   private prepared = new Map<string, Prepared>();
   private decoded = new Map<string, ImageBitmap | HTMLImageElement>();

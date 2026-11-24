@@ -1,3 +1,4 @@
+import { MUSIC_STYLES } from './music';
 import { describe, expect, it } from 'vitest';
 import type { Expense } from '../../types';
 import { type RecapDay, autoPick, buildTimeline, evenlySpaced, photoCaption, recapDays, shotsFromPicks, tripDateRange, MAX_PHOTOS, PER_DAY_MAX } from './plan';
@@ -97,7 +98,14 @@ describe('buildTimeline', () => {
     for (const bpm of [92, 118]) {
       const tl = buildTimeline(shotsOf(n), bpm, null, ['stats', 'facts']);
       expect(tl.duration).toBeGreaterThanOrEqual(29.5);
-      expect(tl.duration).toBeLessThanOrEqual(bpm === 118 ? 46.5 : 50);
+      expect(tl.duration).toBeLessThanOrEqual(47);
+    }
+  });
+
+  it('lasts about as long whichever music is picked', () => {
+    for (const n of [6, 12, 18]) {
+      const lengths = MUSIC_STYLES.map(s => s.bpm).map(bpm => buildTimeline(shotsOf(n), bpm, null, ['stats', 'facts']).duration);
+      expect(Math.max(...lengths) - Math.min(...lengths)).toBeLessThanOrEqual(4);
     }
   });
 

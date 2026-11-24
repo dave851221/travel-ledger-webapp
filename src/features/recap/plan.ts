@@ -198,14 +198,23 @@ export interface Timeline {
   marks: { drop: number; stats: number; outro: number; end: number };
 }
 
-export const INTRO_BEATS = 8;
+/**
+ * 每一段想要的長度用「秒」定，再換成整小節的拍數：換音樂（速度不同）時影片長度才不會跟著大幅變動。
+ * 以前用固定拍數，92 BPM 的「溫暖」會比 118 BPM 的「輕快」長好幾秒（David 2026-11-24 問過）。
+ */
+const INTRO_SECONDS = 4;
+const OUTRO_SECONDS = 4;
+/** A relaxed pace for one photo */
+const PHOTO_SECONDS = 1.3;
+const barsFor = (seconds: number, beat: number) => Math.max(1, Math.round(seconds / beat / 4)) * 4;
+/** Beats of the opening title at this tempo (the music's drop) */
+export const introBeats = (bpm: number) => barsFor(INTRO_SECONDS, 60 / bpm);
 
 /** The optional pages after the photos, in the order they play */
 export type ExtraSection = 'stats' | 'facts' | 'people' | 'race';
 // Kept short: David wants the whole video around 40-odd seconds (2026-11-24)
-const EXTRA_BEATS: Record<ExtraSection, number> = { stats: 8, facts: 12, people: 8, race: 12 };
+const EXTRA_SECONDS: Record<ExtraSection, number> = { stats: 4, facts: 6, people: 4, race: 6 };
 const EXTRA_ORDER: ExtraSection[] = ['stats', 'facts', 'people', 'race'];
-export const OUTRO_BEATS = 8;
 const MIN_SECONDS = 30;
 const MAX_SECONDS = 46;
 /** Even with very few photos, no single photo stays longer than this */
@@ -217,7 +226,7 @@ const IN_DAY: TransitionKind[] = ['fade', 'whip', 'fade', 'rise', 'fade', 'shutt
 
 /**
  * 依照片數與速度排出整支影片。全部以「拍」為單位，所以每一刀都落在拍點上。
- * 平均每張約 2.6 拍（多出來的拍先給每天的第一張）；照片多時壓縮（每張至少 2 拍）、少時拉長，總長落在 30～46 秒。
+ * 平均每張約 1.3 秒（多出來的拍先給每天的第一張）；照片多時壓縮（每張至少 2 拍）、少時拉長，總長落在 30～46 秒。
  * 照片段結束時補到整小節（4 拍），統計段才會正好在新的一小節開始。
  */
 export const buildTimeline = (
@@ -227,8 +236,11 @@ export const buildTimeline = (
   sections: ExtraSection[] = ['stats'],
 ): Timeline => {
   const beat = 60 / bpm;
+  const INTRO_BEATS = barsFor(INTRO_SECONDS, beat);
+  const OUTRO_BEATS = barsFor(OUTRO_SECONDS, beat);
   const extras = EXTRA_ORDER.filter(k => sections.includes(k));
-  const extraBeats = extras.reduce<number>((n, k) => n + EXTRA_BEATS[k], 0);
+  const extraBeatsOf = (k: ExtraSection) => barsFor(EXTRA_SECONDS[k], beat);
+  const extraBeats = extras.reduce<number>((n, k) => n + extraBeatsOf(k), 0);
   const fixed = INTRO_BEATS + extraBeats + OUTRO_BEATS;
   const maxSeconds = MAX_SECONDS;
   const n = shots.length;
@@ -236,8 +248,10 @@ export const buildTimeline = (
   const maxBeats = Math.floor(maxSeconds / beat - fixed - 3); // leave room for rounding up to a bar
   const minBeats = Math.ceil(MIN_SECONDS / beat - fixed);
 
-  // A relaxed pace is ~2.6 beats a photo; squeeze or stretch to fit 30–45 s
-  const natural = Math.round(n * 2.6);
+  // A relaxed pace is ~1.3 s a photo; squeeze or stretch to fit 30–46 s. The photos also soak up
+  // whatever the other sections gained or lost by snapping to whole bars, so the total stays put
+  const nominal = INTRO_SECONDS + OUTRO_SECONDS + extras.reduce<number>((t, k) => t + EXTRA_SECONDS[k], 0) + n * PHOTO_SECONDS;
+  const natural = Math.round(nominal / beat) - fixed;
   // Never under two beats a photo: faster than that the cuts become a strobe
   const budget = Math.min(n * MAX_SHOT_BEATS, Math.max(n * 2, Math.min(maxBeats, Math.max(minBeats, natural))));
   const lens = shots.map(() => Math.floor(budget / Math.max(1, n)));
@@ -262,8 +276,8 @@ export const buildTimeline = (
   });
   const stats = at;
   for (const kind of extras) {
-    segments.push({ kind, start: at * beat, end: (at + EXTRA_BEATS[kind]) * beat });
-    at += EXTRA_BEATS[kind];
+    segments.push({ kind, start: at * beat, end: (at + extraBeatsOf(kind)) * beat });
+    at += extraBeatsOf(kind);
   }
   const outro = at;
   segments.push({ kind: 'outro', start: at * beat, end: (at + OUTRO_BEATS) * beat, photo: outroPhoto });
