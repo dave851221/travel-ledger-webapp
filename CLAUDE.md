@@ -103,7 +103,7 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   **預覽**：`AudioContext` 必須在點擊當下建立並 `resume()`（等到合成完音樂才建立，手機上會一直是 suspended、時間不動，按播放看起來沒反應）；`resume()` 可能永遠不 resolve，最多等 0.6 秒，沒聲音就用牆上時鐘照樣播。播放前先解碼開頭幾張。
   **挑照片的「眼睛」**：跳出一個視窗（portal 到 body、`useBackClose`），看那張照片在影片裡配的三行字（`photoLabelLines`，與畫面共用）與帳目原文；已選的直接畫出影片那一格。不要嵌在清單裡：清單捲動時看不到，以為沒反應。
   ⚠️ **照片全黑的坑**：相簿的 `<img>` 是 no-cors，PWA 的 runtime cache 存的是 opaque 回應；影片要用 CORS 抓原圖，拿到 opaque 會失敗。所以 `vite.config.ts` 的圖片快取只比對**不帶查詢字串**的網址，影片抓圖一律帶 `?recap=1`（`images.ts` 的 `fetchPhoto`），讀不到的照片會被略過並提示，不會畫成黑畫面；
-  `music.ts` 用 `OfflineAudioContext` **現場合成原創配樂**（輕快 118、夏日 108、電影感 96、溫暖 92 BPM，外加「不要音樂」；不放任何音檔 → 沒有版權問題，IG 不會消音）。溫暖原本的黑膠雜音 David 不喜歡，已拿掉。各段長度用**秒**定再換成整小節（`barsFor`），換音樂時影片長度只差一兩秒；預覽用的音樂在選項穩定後於背景先合成（`previewMusic`）；
+  `music.ts` 用 `OfflineAudioContext` **現場合成原創配樂**（輕快 118、夏日 108、復古霓虹 104、小清新 100、電影感 96、溫暖 92、夢幻 84 BPM，外加「不要音樂」；每首旁邊的 ▶ 用 `renderSample` 合成約 15 秒試聽，不必先產生影片；不放任何音檔 → 沒有版權問題，IG 不會消音）。溫暖原本的黑膠雜音 David 不喜歡，已拿掉。各段長度用**秒**定再換成整小節（`barsFor`），換音樂時影片長度只差一兩秒；預覽用的音樂在選項穩定後於背景先合成（`previewMusic`）；
   `render.ts` 依時間 t 畫一格（Ken Burns、每張照片的說明、轉場、統計數字、小彩蛋、賽跑長條圖），**不用 `ctx.filter`**（Safari 舊版沒有），模糊一律「縮小再放大」；文字避開 IG 介面（上 220px、下 440px）；
   `images.ts` 把原圖縮到剛好夠用的大小存成小 JPEG、只解碼目前前後幾張（iPhone 記憶體）；載圖用 `onload` 不用 `img.decode()`（有的 WebView 永遠不 resolve）；
   `encode.ts` 用 mediabunny（WebCodecs H.264 + AAC，沒有 AAC 編碼器時載入 `@mediabunny/aac-encoder` 的 WASM）封裝 MP4，整個 `RecapVideoModal` 是 lazy chunk。iOS 要 16.4 以上；不支援 1080p 編碼的裝置退回 720p。

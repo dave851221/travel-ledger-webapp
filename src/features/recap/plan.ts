@@ -248,8 +248,10 @@ export const buildTimeline = (
   const maxBeats = Math.floor(maxSeconds / beat - fixed - 3); // leave room for rounding up to a bar
   const minBeats = Math.ceil(MIN_SECONDS / beat - fixed);
 
-  // A relaxed pace is ~1.3 s a photo; squeeze or stretch to fit 30–46 s
-  const natural = Math.round((n * PHOTO_SECONDS) / beat);
+  // A relaxed pace is ~1.3 s a photo; squeeze or stretch to fit 30–46 s. The photos also soak up
+  // whatever the other sections gained or lost by snapping to whole bars, so the total stays put
+  const nominal = INTRO_SECONDS + OUTRO_SECONDS + extras.reduce<number>((t, k) => t + EXTRA_SECONDS[k], 0) + n * PHOTO_SECONDS;
+  const natural = Math.round(nominal / beat) - fixed;
   // Never under two beats a photo: faster than that the cuts become a strobe
   const budget = Math.min(n * MAX_SHOT_BEATS, Math.max(n * 2, Math.min(maxBeats, Math.max(minBeats, natural))));
   const lens = shots.map(() => Math.floor(budget / Math.max(1, n)));

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clapperboard, Download, Eye, ImagePlus, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
+import { Check, Clapperboard, Download, Eye, ImagePlus, Loader2, Pause, Play, Square, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import type { Expense, Trip } from '../../types';
 import { useBackClose } from '../../hooks/useBackClose';
@@ -16,7 +16,7 @@ import {
   MAX_FACTS, MAX_STATS, peopleSpending, recapFacts, recapStats, spendingRace, visitedCities,
   type RecapFact, type RecapStat,
 } from './facts';
-import { MUSIC_STYLES, renderMusic, styleBpm, type MusicStyle } from './music';
+import { MUSIC_STYLES, renderMusic, renderSample, styleBpm, type MusicStyle } from './music';
 import { PhotoStore, loadOwnOutro, readLocalPhoto, saveOwnOutro } from './images';
 import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, photoLabelLines, type RecapContent, type RecapScene } from './render';
 import { checkSupport, dayTexts, encodeRecap, type EncodeSupport } from './encode';
@@ -276,6 +276,52 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   // Any change to the story restarts the preview from the top next time
   useEffect(() => { stopPreview(); }, [timeline, music, stopPreview]);
 
+  // --- Music audition: hear a style without making a video ---
+  const [audition, setAudition] = useState<{ style: MusicStyle; loading: boolean } | null>(null);
+  const auditionRef = useRef<AudioContext | null>(null);
+  const sampleCache = useRef(new Map<MusicStyle, Promise<AudioBuffer | null>>());
+  const stopAudition = useCallback(() => {
+    const ctx = auditionRef.current;
+    auditionRef.current = null;
+    if (ctx) void ctx.close().catch(() => undefined);
+    setAudition(null);
+  }, []);
+  useEffect(() => stopAudition, [stopAudition]);
+  const playAudition = async (style: MusicStyle) => {
+    if (audition?.style === style) {
+      stopAudition();
+      return;
+    }
+    stopAudition();
+    // Created inside the tap, like the preview: phones keep a later one silent
+    let ctx: AudioContext;
+    try {
+      ctx = new AudioContext();
+    } catch {
+      return;
+    }
+    void ctx.resume().catch(() => undefined);
+    auditionRef.current = ctx;
+    setAudition({ style, loading: true });
+    let sample = sampleCache.current.get(style);
+    if (!sample) {
+      sample = renderSample(style).catch(() => null);
+      sampleCache.current.set(style, sample);
+    }
+    const buffer = await sample;
+    if (auditionRef.current !== ctx) return;
+    if (!buffer) {
+      stopAudition();
+      return;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    src.onended = () => { if (auditionRef.current === ctx) stopAudition(); };
+    src.start();
+    setAudition({ style, loading: false });
+  };
+
   const [previewLoading, setPreviewLoading] = useState(false);
   // Synthesising the track takes a few seconds on a phone: do it in the background once the
   // choices settle, so pressing play starts right away
@@ -295,6 +341,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   const startPreview = async () => {
     if (previewLoading) return;
     stopPreview();
+    stopAudition();
     const from = timeRef.current >= timeline.duration - 0.1 || timeRef.current === posterTime ? 0 : timeRef.current;
     // The AudioContext must be created and resumed inside the tap itself: phones keep one made after an
     // await suspended, its clock never moves, and the preview just sat there (David 2026-11-24)
@@ -373,6 +420,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   const generate = async () => {
     if (!support?.ok) return;
     stopPreview();
+    stopAudition();
     const ac = new AbortController();
     abortRef.current = ac;
     try {
@@ -617,20 +665,37 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
 
               <section className="space-y-2">
                 <p className={ui.label}>音樂</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {MUSIC_STYLES.map(s => (
-                    <button
-                      key={s.key}
-                      onClick={() => setMusic(s.key)}
-                      disabled={rendering}
-                      className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${music === s.key ? 'border-accent bg-accent/10' : 'border-line bg-surface hover:bg-sunk'}`}
-                    >
-                      <span className="block text-sm font-bold">{s.label}</span>
-                      <span className="block text-[11px] text-muted mt-0.5 leading-snug">{s.hint}</span>
-                    </button>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {MUSIC_STYLES.map(s => {
+                    const hearing = audition?.style === s.key;
+                    return (
+                      <div key={s.key} className="relative">
+                        <button
+                          onClick={() => setMusic(s.key)}
+                          disabled={rendering}
+                          aria-pressed={music === s.key}
+                          className={`w-full h-full rounded-xl border pl-3 pr-9 py-2.5 text-left transition-colors ${music === s.key ? 'border-accent bg-accent/10' : 'border-line bg-surface hover:bg-sunk'}`}
+                        >
+                          <span className="block text-sm font-bold">{s.label}</span>
+                          <span className="block text-[11px] text-muted mt-0.5 leading-snug">{s.hint}</span>
+                        </button>
+                        {s.key !== 'none' && (
+                          <button
+                            onClick={() => void playAudition(s.key)}
+                            disabled={rendering}
+                            aria-label={hearing ? `停止試聽「${s.label}」` : `試聽「${s.label}」`}
+                            className={`absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-colors ${hearing ? 'bg-accent text-on-accent' : 'bg-sunk text-ink-2 hover:text-ink'}`}
+                          >
+                            {hearing && audition?.loading
+                              ? <Loader2 size={13} className="animate-spin" />
+                              : hearing ? <Square size={11} fill="currentColor" /> : <Play size={13} className="ml-0.5" fill="currentColor" />}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <p className={ui.hint}>音樂是這台裝置現場合成的原創曲，沒有版權問題，上傳 IG 不會被消音。</p>
+                <p className={ui.hint}>按 ▶ 可以先試聽一小段。音樂是這台裝置現場合成的原創曲，沒有版權問題，上傳 IG 不會被消音。</p>
               </section>
 
               <section className="space-y-2">
