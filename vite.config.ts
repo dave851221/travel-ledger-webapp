@@ -54,6 +54,8 @@ export default defineConfig({
       injectRegister: 'auto',
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // The recap video encoder (~1.7 MB) is only fetched when someone makes a video; don't make every install download it
+        globIgnores: ['**/vendor-video-*.js'],
         // Ensure Supabase storage images are handled correctly or cached if needed
         runtimeCaching: [
           {
@@ -94,6 +96,16 @@ export default defineConfig({
     // 解決分包過大問題，使用函式格式確保在所有 Vite 版本中相容
     rollupOptions: {
       output: {
+        // 回顧影片的編碼器（mediabunny）只在有人產生影片時才下載；改名成 vendor-video-* 好讓 PWA 不預先快取它。
+        // 只改檔名不動分塊（manualChunks 會讓首頁 preload 它）。
+        chunkFileNames(chunk) {
+          // Vite normalises module ids to forward slashes (Windows too). A chunk may also hold a
+          // bundler stub such as `__vite-browser-external`, which has no path.
+          const isVideo = (id: string) => /\/node_modules\/(?:@mediabunny\/|mediabunny\/)/.test(id);
+          const ids = chunk.moduleIds;
+          const video = ids.some(isVideo) && ids.every(id => isVideo(id) || !id.includes('/'));
+          return video ? 'assets/vendor-video-[hash].js' : 'assets/[name]-[hash].js';
+        },
         // 比對套件目錄而不是子字串：以前 `id.includes('react')` 會把 lucide-react 與
         // 圖表套件的 react-redux 一起塞進首頁必載的 vendor-react。
         // 圖表相關的不指定，讓它跟著延遲載入的統計分頁走。
