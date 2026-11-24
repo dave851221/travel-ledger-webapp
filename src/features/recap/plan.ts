@@ -200,20 +200,22 @@ export const INTRO_BEATS = 8;
 
 /** The optional pages after the photos, in the order they play */
 export type ExtraSection = 'stats' | 'facts' | 'people' | 'race';
-const EXTRA_BEATS: Record<ExtraSection, number> = { stats: 12, facts: 12, people: 12, race: 16 };
+// Kept short: David wants the whole video around 40-odd seconds (2026-11-24)
+const EXTRA_BEATS: Record<ExtraSection, number> = { stats: 8, facts: 12, people: 8, race: 12 };
 const EXTRA_ORDER: ExtraSection[] = ['stats', 'facts', 'people', 'race'];
 export const OUTRO_BEATS = 8;
 const MIN_SECONDS = 30;
-const MAX_SECONDS = 45;
+const MAX_SECONDS = 46;
 /** Even with very few photos, no single photo stays longer than this */
 const MAX_SHOT_BEATS = 8;
 
 /** Plain cuts inside a day rotate through these so no two in a row look alike */
-const IN_DAY: TransitionKind[] = ['whip', 'rise', 'shutter', 'reveal', 'whip', 'fade'];
+// Mostly clean dissolves; the moving ones are spaced out so the video doesn't keep pulsing blur
+const IN_DAY: TransitionKind[] = ['fade', 'whip', 'fade', 'rise', 'fade', 'shutter', 'fade', 'reveal'];
 
 /**
  * 依照片數與速度排出整支影片。全部以「拍」為單位，所以每一刀都落在拍點上。
- * 平均每張約 2.6 拍（多出來的拍先給每天的第一張）；照片多時壓縮、少時拉長，總長落在 30～45 秒。
+ * 平均每張約 2.6 拍（多出來的拍先給每天的第一張）；照片多時壓縮（每張至少 2 拍）、少時拉長，總長落在 30～46 秒。
  * 照片段結束時補到整小節（4 拍），統計段才會正好在新的一小節開始。
  */
 export const buildTimeline = (
@@ -226,8 +228,7 @@ export const buildTimeline = (
   const extras = EXTRA_ORDER.filter(k => sections.includes(k));
   const extraBeats = extras.reduce<number>((n, k) => n + EXTRA_BEATS[k], 0);
   const fixed = INTRO_BEATS + extraBeats + OUTRO_BEATS;
-  // Every extra page is worth a few more seconds; Reels allow up to 90
-  const maxSeconds = MAX_SECONDS + Math.max(0, extras.length - 1) * 5;
+  const maxSeconds = MAX_SECONDS;
   const n = shots.length;
   const dayStarts = shots.map((s, i) => i === 0 || s.day.date !== shots[i - 1].day.date);
   const maxBeats = Math.floor(maxSeconds / beat - fixed - 3); // leave room for rounding up to a bar
@@ -235,7 +236,8 @@ export const buildTimeline = (
 
   // A relaxed pace is ~2.6 beats a photo; squeeze or stretch to fit 30–45 s
   const natural = Math.round(n * 2.6);
-  const budget = Math.min(n * MAX_SHOT_BEATS, Math.max(n, Math.min(maxBeats, Math.max(minBeats, natural))));
+  // Never under two beats a photo: faster than that the cuts become a strobe
+  const budget = Math.min(n * MAX_SHOT_BEATS, Math.max(n * 2, Math.min(maxBeats, Math.max(minBeats, natural))));
   const lens = shots.map(() => Math.floor(budget / Math.max(1, n)));
   let extra = budget - lens.reduce<number>((a, x) => a + x, 0);
   // Spare beats go to the first photo of each day (a new place to take in), then the rest

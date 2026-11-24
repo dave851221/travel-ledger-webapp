@@ -94,11 +94,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   **載入**：`Dashboard`、兩個 LIFF 頁、統計分頁（recharts）、行程分頁都是 `React.lazy`，首頁不必先下載它們。
   `vite.config.ts` 的 `manualChunks` 比對**套件目錄**，不要改回 `id.includes('react')`（會把 lucide-react、react-redux 拉進首頁）。
   **「我是誰」**（`currentUser`）由 `localStorage` 的 `me_{id}` 推導、只認還在成員清單裡的名字，不另外存 state。
-- **回顧影片**（`src/features/recap/`，封存旅程才有入口：相簿分頁頂端的卡片、手機 ⋯ 選單、電腦版標題列）：在瀏覽器裡產生 30～60 秒、1080×1920 的 MP4，可直接上傳 IG Reels。
+- **回顧影片**（`src/features/recap/`，封存旅程才有入口：相簿分頁頂端的卡片、手機 ⋯ 選單、電腦版標題列）：在瀏覽器裡產生約 30～46 秒、1080×1920 的 MP4，可直接上傳 IG Reels。
   **全程前端運算，不寫資料庫**（挑選的照片、結尾合照、音樂、是否顯示金額記在 `localStorage` 的 `recap_{tripId}`）。
   `plan.ts`（純函式，`plan.test.ts`）決定日期範圍（有行程表用行程表，沒有就取支出最密集的一段，避開幾個月前訂的機票）、自動挑照片、以「拍」為單位排時間軸（每一刀落在拍點，照片之後的段落都從新的小節開始）。
   **以照片為主，不硬照日子排**（David 2026-11-24）：自動挑選依每天的照片數按比例分（照片少的日子可能不挑），每張照片自己配說明（Day N・日期、品名＝支出描述去掉括號說明、城市・金額）；收據也能手動勾進來，但不會被自動挑。
-  照片之後的段落使用者勾選（`ExtraSection`）：統計數字（`recapStats`）、旅途小彩蛋（`recapFacts`：最貴的一筆、最豪華的一餐、最常光顧、錢都花去哪、最常掏錢的人、夜貓時刻…）、每個人的花錢重點（`peopleSpending`，依分攤看每人前三大分類）、花費賽跑（`spendingRace`）。統計與彩蛋**逐項勾選**（每項有 `key`／`defaultOn`，各最多 6 項，存在 `recap_{tripId}` 的 `stats`／`facts`）。每多一段上限多 5 秒；「顯示金額」關掉時所有金額都不出現，只有金額才成立的項目直接不提供；
+  照片之後的段落使用者勾選（`ExtraSection`）：統計數字（`recapStats`）、旅途小彩蛋（`recapFacts`：最貴的一筆、最豪華的一餐、最常光顧、錢都花去哪、最常掏錢的人、夜貓時刻…）、每個人的花錢重點（`peopleSpending`，依分攤看每人前三大分類）、花費賽跑（`spendingRace`）。統計與彩蛋**逐項勾選**（每項有 `key`／`defaultOn`，各最多 6 項，存在 `recap_{tripId}` 的 `stats`／`facts`）。總長上限 46 秒（David 要 40 幾秒），段落越多照片切得越快，但**每張至少 2 拍**、轉場 0.22～0.32 秒、轉場的模糊量壓低（以前照片只有一秒、一半時間在模糊轉場，看起來像一直閃）；「顯示金額」關掉時所有金額都不出現，只有金額才成立的項目直接不提供；
   **結尾合照可以從手機上傳**（只有結尾那張；David 2026-11-24：一般照片自己上傳的話拍攝日常常對不上，所以不做）：只在記憶體（`PhotoStore.addLocal`，路徑 `local:…`），不上傳、不存，關掉視窗就沒了。
   ⚠️ **照片全黑的坑**：相簿的 `<img>` 是 no-cors，PWA 的 runtime cache 存的是 opaque 回應；影片要用 CORS 抓原圖，拿到 opaque 會失敗。所以 `vite.config.ts` 的圖片快取只比對**不帶查詢字串**的網址，影片抓圖一律帶 `?recap=1`（`images.ts` 的 `fetchPhoto`），讀不到的照片會被略過並提示，不會畫成黑畫面；
   `music.ts` 用 `OfflineAudioContext` **現場合成原創配樂**（輕快 118 BPM／溫暖 92 BPM，不放任何音檔 → 沒有版權問題，IG 不會消音）；

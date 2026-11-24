@@ -82,8 +82,10 @@ export const encodeRecap = async ({ scene, store, audio, width, height, onProgre
     for (let f = 0; f < frames; f++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       const t = f / FPS;
-      // Decode the next few photos, free the rest (keeps memory flat on phones)
-      if (f % 10 === 0) await store.keepOnly(pathsNear(scene.timeline, t, 1.5));
+      // Decode the next few photos, free the rest (keeps memory flat on phones). Also re-check every
+      // frame that what's on screen is decoded, so a frame never falls back to the blurry placeholder.
+      const near = pathsNear(scene.timeline, t, 1.5);
+      if (f % 10 === 0 || !near.every(p => store.isReady(p))) await store.keepOnly(near);
       renderer.draw(t);
       await video.add(t, 1 / FPS);
       if (f % 6 === 0) onProgress(f / frames);

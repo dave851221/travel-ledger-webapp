@@ -311,7 +311,9 @@ const drawShot = (ctx: Ctx, scene: RecapScene, seg: ShotSegment, t: number, T: n
   const u = segWindow(seg, t, T);
   drawPhoto(ctx, scene.photo(seg.photo.path), u, MOTIONS[seg.index % MOTIONS.length]);
   shade(ctx, 0, 300, 0.28, 0);
-  shade(ctx, H * 0.55, H, 0, 0.62);
+  // Two-step bottom shade: light over the photo, darker behind the caption so white text reads even on white paper
+  shade(ctx, H * 0.45, H * 0.62, 0, 0.3);
+  shade(ctx, H * 0.62, H, 0.3, 0.72);
 };
 
 const formatStat = (stat: RecapStat, x: number): string => {
@@ -362,8 +364,8 @@ const drawFacts = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
   const rowH = Math.min(210, 1000 / Math.max(1, facts.length));
   facts.forEach((fact, i) => {
     const y = top + 110 + i * rowH;
-    const appear = b * (0.75 + i * 1.5);
-    const p = span(local, appear, 0.9);
+    const appear = b * (0.5 + i * 0.9);
+    const p = span(local, appear, 0.7);
     if (p <= 0) return;
     ctx.save();
     ctx.font = `500 32px ${SANS}`;
@@ -488,7 +490,7 @@ const drawPeople = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
   const barW = W - MARGIN * 2;
   rows.forEach((r, i) => {
     const y = top + 110 + i * rowH;
-    const appear = b * (0.75 + i * 1.25);
+    const appear = b * (0.5 + i * 0.8);
     const p = span(local, appear, 0.9);
     if (p <= 0) return;
     ctx.save();
@@ -548,7 +550,7 @@ const drawStats = (ctx: Ctx, scene: RecapScene, seg: Segment, t: number) => {
   const numSize = Math.min(140, rowH * 0.64);
   content.stats.forEach((stat, i) => {
     const y = top + 60 + numSize + i * rowH;
-    const appear = b * (1 + i * 1.5);
+    const appear = b * (0.5 + i * 0.75);
     const p = span(local, appear, 0.9);
     if (p <= 0) return;
     const count = easeOutCubic(span(local, appear, b * 2.2));
@@ -725,8 +727,8 @@ const drawPhotoLabel = (ctx: Ctx, scene: RecapScene, t: number, T: number) => {
   ];
   ctx.save();
   ctx.textBaseline = 'alphabetic';
-  ctx.shadowColor = 'rgba(0,0,0,0.4)';
-  ctx.shadowBlur = 24;
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 28;
   const draws = [
     () => {
       ctx.font = `700 32px ${NUM}`;
@@ -834,29 +836,29 @@ const composite = (ctx: Ctx, blurs: Blurs, kind: TransitionKind, a: CanvasImageS
     case 'zoom': {
       if (p < 0.5) {
         const q = easeInCubic(p * 2);
-        drawBlurred(ctx, blurs, 'xy', a, q * 1.3, 1 + 0.5 * q);
+        drawBlurred(ctx, blurs, 'xy', a, q * 0.55, 1 + 0.25 * q);
       } else {
         const q = easeOutCubic((p - 0.5) * 2);
-        drawBlurred(ctx, blurs, 'xy', b, (1 - q) * 1.3, 1.4 - 0.4 * q);
+        drawBlurred(ctx, blurs, 'xy', b, (1 - q) * 0.55, 1.2 - 0.2 * q);
       }
       // A soft white bloom right at the cut
-      const flash = 1 - Math.abs(p - 0.5) * 5;
+      const flash = 1 - Math.abs(p - 0.5) * 6;
       if (flash > 0) {
-        ctx.fillStyle = `rgba(255,255,255,${flash * 0.3})`;
+        ctx.fillStyle = `rgba(255,255,255,${flash * 0.15})`;
         ctx.fillRect(0, 0, W, H);
       }
       break;
     }
     case 'whip': {
       const e = easeInOutQuint(p);
-      const amt = Math.sin(Math.PI * p) * 1.6;
+      const amt = Math.sin(Math.PI * p) * 0.8;
       drawBlurred(ctx, blurs, 'x', a, amt, 1, -W * e);
       drawBlurred(ctx, blurs, 'x', b, amt, 1, W * (1 - e));
       break;
     }
     case 'rise': {
       const e = easeInOutQuint(p);
-      const amt = Math.sin(Math.PI * p) * 1.6;
+      const amt = Math.sin(Math.PI * p) * 0.8;
       drawBlurred(ctx, blurs, 'y', a, amt * 0.6, 1, 0, -H * e * 0.35);
       ctx.fillStyle = `rgba(0,0,0,${e * 0.6})`;
       ctx.fillRect(0, 0, W, H);
@@ -911,7 +913,8 @@ const composite = (ctx: Ctx, blurs: Blurs, kind: TransitionKind, a: CanvasImageS
 
 // --- Renderer --------------------------------------------------------------
 
-export const transitionLength = (tl: Timeline) => Math.min(0.5, Math.max(0.3, tl.beat * 0.72));
+// Short cuts: long blurry transitions on one-second photos read as flicker
+export const transitionLength = (tl: Timeline) => Math.min(0.32, Math.max(0.22, tl.beat * 0.5));
 
 /** Which photo paths the frames around `t` need decoded */
 export const pathsNear = (tl: Timeline, t: number, ahead = 1.2): string[] => {
