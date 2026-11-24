@@ -14,11 +14,10 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
+# 建置與部署拆成兩個 job（GitHub 官方範本的做法）：同一個 job 裡上傳完 artifact 立刻部署，
+# deploy-pages 常常在 artifact 還沒登記好就去查，報「No artifacts named github-pages」而失敗。
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -58,6 +57,13 @@ jobs:
         with:
           path: './dist'
 
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
