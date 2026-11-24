@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "^2.100.1",
     "browser-image-compression": "^2.0.2",
     "decimal.js": "^10.6.0",
+    "heic-to": "1.6.7",
     "lucide-react": "^1.7.0",
     "mediabunny": "1.65.2",
     "papaparse": "^5.5.3",

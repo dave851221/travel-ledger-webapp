@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clapperboard, Download, ImagePlus, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
+import { Check, Clapperboard, Download, Eye, ImagePlus, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import Modal from '../../components/Modal';
 import { ui } from '../../components/ui';
@@ -15,8 +15,8 @@ import {
   type RecapFact, type RecapStat,
 } from './facts';
 import { MUSIC_STYLES, renderMusic, styleBpm, type MusicStyle } from './music';
-import { PhotoStore } from './images';
-import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, type RecapContent, type RecapScene } from './render';
+import { PhotoStore, readLocalPhoto } from './images';
+import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, photoLabelLines, type RecapContent, type RecapScene } from './render';
 import { checkSupport, dayTexts, encodeRecap, type EncodeSupport } from './encode';
 
 interface Props {
@@ -236,7 +236,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   const drawAt = useCallback((t: number) => {
     const r = rendererRef.current;
     if (!r || encodingRef.current) return;
-    void store.keepOnly(pathsNear(scene.timeline, t, 1.5)).then(() => {
+    void store.keepOnly(pathsNear(scene.timeline, t, 2.5)).then(() => {
       // Repaint once the photos land when the preview is paused
       if (!playRef.current && Math.abs(timeRef.current - t) < 1e-6) r.draw(t);
     });
@@ -272,21 +272,47 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   // Any change to the story restarts the preview from the top next time
   useEffect(() => { stopPreview(); }, [timeline, music, stopPreview]);
 
+  const [previewLoading, setPreviewLoading] = useState(false);
   const startPreview = async () => {
+    if (previewLoading) return;
     stopPreview();
     const from = timeRef.current >= timeline.duration - 0.1 || timeRef.current === posterTime ? 0 : timeRef.current;
+    // The AudioContext must be created and resumed inside the tap itself: phones keep one made after an
+    // await suspended, its clock never moves, and the preview just sat there (David 2026-11-24)
     let ctx: AudioContext | null = null;
-    try {
-      const buffer = await renderMusic(music, timeline, 44100);
-      if (buffer) {
+    let resumed: Promise<void> = Promise.resolve();
+    if (music !== 'none') {
+      try {
         ctx = new AudioContext();
+        resumed = ctx.resume();
+      } catch {
+        ctx = null;
+      }
+    }
+    setPreviewLoading(true);
+    try {
+      // Decode the opening photos before the clock starts, so playback doesn't begin on blurry placeholders
+      const opening = store.keepOnly(pathsNear(timeline, from, 3));
+      const buffer = ctx ? await renderMusic(music, timeline, 44100) : null;
+      await opening;
+      // resume() can stay pending forever when the browser refuses sound; don't wait on it for long
+      await Promise.race([resumed.catch(() => undefined), new Promise(r => setTimeout(r, 600))]);
+      if (ctx && buffer && ctx.state === 'running') {
         const src = ctx.createBufferSource();
         src.buffer = buffer;
         src.connect(ctx.destination);
         src.start(0, from);
+      } else if (ctx) {
+        // No sound possible: still play the pictures on the wall clock
+        void ctx.close();
+        ctx = null;
       }
     } catch (e) {
       console.warn('[recap] preview audio failed', e);
+      if (ctx) void ctx.close();
+      ctx = null;
+    } finally {
+      setPreviewLoading(false);
     }
     const startedAt = ctx ? ctx.currentTime : performance.now() / 1000;
     const state = { raf: 0, ctx, startedAt, offset: from };
@@ -386,13 +412,31 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
 
   // The closing photo can come from this device: kept in memory, used only as the last scene
   const fileInput = useRef<HTMLInputElement>(null);
-  const pickOwnOutro = (file: File | undefined) => {
+  const [outroUpload, setOutroUpload] = useState<'idle' | 'reading' | 'error'>('idle');
+  const pickOwnOutro = async (file: File | undefined) => {
     if (!file) return;
-    const path = `local:${Date.now().toString(36)}`;
-    store.addLocal(path, file);
-    setOwnOutro({ photo: { path, date: range?.to ?? '', caption: '', amount: 0, currency: '', kind: 'item' }, url: URL.createObjectURL(file) });
-    setOutro(path);
+    setOutroUpload('reading');
+    try {
+      const readable = await readLocalPhoto(file);
+      const path = `local:${Date.now().toString(36)}`;
+      store.addLocal(path, readable);
+      setOwnOutro({ photo: { path, date: range?.to ?? '', caption: '', amount: 0, currency: '', kind: 'item' }, url: URL.createObjectURL(readable) });
+      setOutro(path);
+      setOutroUpload('idle');
+    } catch (e) {
+      console.warn('[recap] closing photo unreadable', e);
+      setOutroUpload('error');
+    }
   };
+
+  // Jump the main preview to a photo (from the picker's detail view)
+  const shotTime = (path: string) => {
+    const seg = timeline.segments.find(sg => sg.kind === 'shot' && sg.photo.path === path)
+      ?? (outroPhoto?.path === path ? timeline.segments.find(sg => sg.kind === 'outro') : undefined);
+    return seg ? seg.start + Math.min(1.2, (seg.end - seg.start) * 0.6) : null;
+  };
+  const describe = (photo: RecapPhoto, day: RecapDay) => photoLabelLines(photo, day, content);
+  const ensureFrame = useCallback((t: number) => store.keepOnly(pathsNear(timeline, t, 0.5)), [store, timeline]);
 
   const toggleKey = (current: string[] | null, defaults: string[], key: string, max: number): string[] => {
     const base = current ?? defaults;
@@ -437,9 +481,10 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
               <button
                 onClick={() => void startPreview()}
                 aria-label="播放預覽"
+                disabled={previewLoading}
                 className="absolute bottom-4 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-black/45 backdrop-blur text-white flex items-center justify-center"
               >
-                <Play size={28} className="ml-1" fill="currentColor" />
+                {previewLoading ? <Loader2 size={26} className="animate-spin" /> : <Play size={28} className="ml-1" fill="currentColor" />}
               </button>
             )}
             {busy && phase.kind === 'setup' && (
@@ -508,7 +553,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
                     type="file"
                     accept="image/*"
                     hidden
-                    onChange={e => { pickOwnOutro(e.target.files?.[0]); e.target.value = ''; }}
+                    onChange={e => { void pickOwnOutro(e.target.files?.[0]); e.target.value = ''; }}
                   />
                 </div>
                 <p className={ui.hint}>
@@ -525,7 +570,12 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
                     onToggle={togglePick}
                     onOutro={path => setOutro(path)}
                     ownOutro={ownOutro}
+                    outroUpload={outroUpload}
                     onUploadOutro={() => fileInput.current?.click()}
+                    describe={describe}
+                    timeOf={shotTime}
+                    scene={scene}
+                    ensure={ensureFrame}
                     onAuto={() => setPicks(autoPick(days))}
                     onClear={() => setPicks([])}
                   />
@@ -624,7 +674,16 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
               {support && !support.ok && <p className={ui.warnBox}>{support.reason}</p>}
 
               {rendering ? (
-                <button onClick={cancel} className={`${ui.btnSecondary} w-full py-3`}>取消</button>
+                <div className="rounded-xl border border-line bg-sunk px-3.5 py-3 space-y-2.5" role="status" aria-live="polite">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2 font-bold"><Loader2 size={16} className="animate-spin" />{phase.step}…</span>
+                    <span className="num font-bold">{Math.round(phase.progress * 100)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-line overflow-hidden">
+                    <div className="h-full bg-accent transition-[width] duration-300" style={{ width: `${Math.max(2, phase.progress * 100)}%` }} />
+                  </div>
+                  <button onClick={cancel} className={`${ui.btnSecondary} w-full`}>取消</button>
+                </div>
               ) : (
                 <button
                   onClick={() => void generate()}
@@ -655,13 +714,23 @@ interface PickerProps {
   onOutro: (path: string) => void;
   /** The closing photo uploaded from this device, if any */
   ownOutro: { photo: RecapPhoto; url: string } | null;
+  outroUpload: 'idle' | 'reading' | 'error';
   onUploadOutro: () => void;
+  /** The caption lines the photo gets in the video */
+  describe: (photo: RecapPhoto, day: RecapDay) => [string, string, string];
+  /** Where the photo plays in the video, or null when it isn't in it */
+  timeOf: (path: string) => number | null;
+  scene: RecapScene;
+  ensure: (t: number) => Promise<void>;
   onAuto: () => void;
   onClear: () => void;
 }
 
-const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, ownOutro, onUploadOutro, onToggle, onOutro, onAuto, onClear }) => {
+const PhotoPicker: React.FC<PickerProps> = ({
+  days, mode, picks, outro, ownOutro, outroUpload, onUploadOutro, describe, timeOf, scene, ensure, onToggle, onOutro, onAuto, onClear,
+}) => {
   const picked = new Set(picks);
+  const [inspect, setInspect] = useState<{ photo: RecapPhoto; day: RecapDay } | null>(null);
   const receiptCount = days.reduce<number>((n, d) => n + d.photos.filter(p => p.kind === 'receipt').length, 0);
   // Receipts can go in too, but there are usually many: hidden until asked for (or one is already picked)
   const [withReceipts, setWithReceipts] = useState(() => days.some(d => d.photos.some(p => p.kind === 'receipt' && picked.has(p.path))));
@@ -697,11 +766,17 @@ const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, ownOutro
               <img src={ownOutro.url} alt="上傳的結尾照片" className="w-full h-full object-cover" />
             </button>
           )}
-          <button onClick={onUploadOutro} className={`${ui.chip} ${ui.chipOff} shrink-0`}>
-            <ImagePlus size={12} className="inline -mt-0.5 mr-1" />{ownOutro ? '換一張' : '上傳'}
+          <button onClick={onUploadOutro} disabled={outroUpload === 'reading'} className={`${ui.chip} ${ui.chipOff} shrink-0`}>
+            {outroUpload === 'reading'
+              ? <><Loader2 size={12} className="inline -mt-0.5 mr-1 animate-spin" />讀取中</>
+              : <><ImagePlus size={12} className="inline -mt-0.5 mr-1" />{ownOutro ? '換一張' : '上傳'}</>}
           </button>
         </div>
       )}
+      {mode === 'outro' && outroUpload === 'error' && (
+        <p className={ui.errorBox}>這張照片讀不出來，請換一張（JPEG、PNG、HEIC 都可以）。</p>
+      )}
+      {inspect && <PhotoDetail photo={inspect.photo} day={inspect.day} lines={describe(inspect.photo, inspect.day)} time={timeOf(inspect.photo.path)} scene={scene} ensure={ensure} onClose={() => setInspect(null)} />}
       {shown.map(day => (
         <div key={day.date}>
           <p className="text-xs font-medium text-ink-2 mb-1.5">
@@ -713,12 +788,12 @@ const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, ownOutro
               const on = mode === 'photos' ? picked.has(p.path) : outro === p.path;
               const order = mode === 'photos' && on ? picks.indexOf(p.path) : -1;
               return (
+                <div key={p.path} className="relative">
                 <button
-                  key={p.path}
                   onClick={() => (mode === 'photos' ? onToggle(p.path) : onOutro(p.path))}
                   aria-pressed={on}
                   title={p.caption}
-                  className={`relative aspect-square rounded-lg overflow-hidden ring-2 transition ${on ? 'ring-accent' : 'ring-transparent opacity-70 hover:opacity-100'}`}
+                  className={`relative block w-full aspect-square rounded-lg overflow-hidden ring-2 transition ${on ? 'ring-accent' : 'ring-transparent opacity-70 hover:opacity-100'}`}
                 >
                   <img src={photoUrl(p.path)} alt={p.caption} loading="lazy" className="w-full h-full object-cover" />
                   {on && (
@@ -731,11 +806,75 @@ const PhotoPicker: React.FC<PickerProps> = ({ days, mode, picks, outro, ownOutro
                   )}
                   {order >= 0 && <span className="sr-only">第 {order + 1} 張</span>}
                 </button>
+                <button
+                  onClick={() => setInspect({ photo: p, day })}
+                  aria-label={`看「${p.caption || '這張照片'}」在影片裡的樣子`}
+                  className="absolute top-1 left-1 w-6 h-6 rounded-full bg-black/55 text-white flex items-center justify-center"
+                >
+                  <Eye size={13} />
+                </button>
+                </div>
               );
             })}
           </div>
         </div>
       ))}
+    </div>
+  );
+};
+
+interface DetailProps {
+  photo: RecapPhoto;
+  day: RecapDay;
+  lines: [string, string, string];
+  time: number | null;
+  scene: RecapScene;
+  ensure: (t: number) => Promise<void>;
+  onClose: () => void;
+}
+
+/**
+ * 挑照片時看「這張在影片裡會長怎樣」：已選的照片直接畫出影片那一格，
+ * 還沒選的顯示照片與影片會配的三行字，下面附上帳目原本的描述與金額。
+ */
+const PhotoDetail: React.FC<DetailProps> = ({ photo, lines, time, scene, ensure, onClose }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || time === null) return;
+    const renderer = new RecapRenderer(canvas, scene);
+    let alive = true;
+    renderer.draw(time);
+    // Decode the photo, then draw the real frame
+    void ensure(time).then(() => { if (alive) renderer.draw(time); });
+    return () => { alive = false; renderer.dispose(); };
+  }, [time, scene, ensure]);
+  return (
+    <div className="rounded-xl bg-surface border border-line p-2.5 flex gap-3">
+      <div className="w-[108px] shrink-0 aspect-[9/16] rounded-lg overflow-hidden bg-navy relative">
+        {time !== null ? (
+          <canvas ref={canvasRef} width={216} height={384} className="absolute inset-0 w-full h-full" />
+        ) : (
+          <img src={photoUrl(photo.path)} alt={photo.caption} className="absolute inset-0 w-full h-full object-cover" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0 space-y-1.5 text-xs">
+        <div className="flex items-start gap-2">
+          <p className="flex-1 font-bold text-sm">影片裡會顯示</p>
+          <button onClick={onClose} className="text-muted hover:text-ink" aria-label="收起">✕</button>
+        </div>
+        <div className="rounded-lg bg-navy text-navy-fg px-2.5 py-2 space-y-0.5">
+          <p className="num text-[10px] tracking-wider text-accent">{lines[0]}</p>
+          <p className="font-bold text-sm leading-snug break-words">{lines[1]}</p>
+          {lines[2] && <p className="text-navy-sub">{lines[2]}</p>}
+        </div>
+        {photo.description && photo.description !== photo.caption && (
+          <p className="text-ink-2 break-words">帳目：{photo.description}</p>
+        )}
+        <p className="text-muted">
+          {time !== null ? <>在影片第 <span className="num">{Math.floor(time)}</span> 秒左右出現</> : '還沒選進影片'}
+        </p>
+      </div>
     </div>
   );
 };

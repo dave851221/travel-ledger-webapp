@@ -78,6 +78,32 @@ const fetchPhoto = async (path: string, signal?: AbortSignal): Promise<Response>
   return retry;
 };
 
+/** HEIC/HEIF (iPhone, and Samsung's "high efficiency" photos): an ISO-BMFF box with an HEIF brand */
+const isHeif = async (file: Blob): Promise<boolean> => {
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const text = String.fromCharCode(...head.slice(4, 12));
+  return text.startsWith('ftyp') && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(text.slice(4));
+};
+
+/**
+ * 手機挑的照片，回傳瀏覽器讀得了的版本。HEIC／HEIF（iPhone、三星的「高效率照片」）
+ * Chrome 讀不了，縮圖會破圖、影片也畫不出來，所以先轉成 JPEG（轉檔程式約 3 MB，只有遇到 HEIC 才下載）。
+ * 讀不了也轉不了就丟錯，讓畫面說清楚，而不是默默不見。
+ */
+export const readLocalPhoto = async (file: File): Promise<Blob> => {
+  try {
+    const img = await loadImage(file);
+    if (img.naturalWidth > 0) return file;
+  } catch {
+    // Try converting below
+  }
+  if (await isHeif(file)) {
+    const { heicTo } = await import('heic-to/csp');
+    return heicTo({ blob: file, type: 'image/jpeg', quality: 0.92 });
+  }
+  throw new Error(`Unreadable image: ${file.type || 'unknown type'}`);
+};
+
 export class PhotoStore {
   private prepared = new Map<string, Prepared>();
   private decoded = new Map<string, ImageBitmap | HTMLImageElement>();

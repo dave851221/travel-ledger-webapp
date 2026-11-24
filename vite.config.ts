@@ -103,7 +103,8 @@ export default defineConfig({
         chunkFileNames(chunk) {
           // Vite normalises module ids to forward slashes (Windows too). A chunk may also hold a
           // bundler stub such as `__vite-browser-external`, which has no path.
-          const isVideo = (id: string) => /\/node_modules\/(?:@mediabunny\/|mediabunny\/)/.test(id);
+          // heic-to (HEIC → JPEG for the closing photo, ~3 MB) is just as optional
+          const isVideo = (id: string) => /\/node_modules\/(?:@mediabunny\/|mediabunny\/|heic-to\/)/.test(id);
           const ids = chunk.moduleIds;
           const video = ids.some(isVideo) && ids.every(id => isVideo(id) || !id.includes('/'));
           return video ? 'assets/vendor-video-[hash].js' : 'assets/[name]-[hash].js';
