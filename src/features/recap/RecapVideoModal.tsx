@@ -231,9 +231,11 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
     else rendererRef.current.setScene(scene);
   }, [scene]);
 
+  // While the video is being made the encoder owns the decoded photos: the preview must not evict them
+  const encodingRef = useRef(false);
   const drawAt = useCallback((t: number) => {
     const r = rendererRef.current;
-    if (!r) return;
+    if (!r || encodingRef.current) return;
     void store.keepOnly(pathsNear(scene.timeline, t, 1.5)).then(() => {
       // Repaint once the photos land when the preview is paused
       if (!playRef.current && Math.abs(timeRef.current - t) < 1e-6) r.draw(t);
@@ -329,6 +331,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
+      encodingRef.current = true;
       setPhase({ kind: 'rendering', progress: 0, step: '準備照片' });
       await store.prepare(needed, (done, total) => setPhase({ kind: 'rendering', progress: 0.1 * (done / Math.max(1, total)), step: '準備照片' }), ac.signal);
       if (ac.signal.aborted) return;
@@ -348,6 +351,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
       console.error('[recap] export failed', e);
       setPhase({ kind: 'error', message: '產生影片時發生問題。可以再試一次，或減少照片張數。' });
     } finally {
+      encodingRef.current = false;
       if (abortRef.current === ac) abortRef.current = null;
       // Back to the preview's working set
       drawAt(timeRef.current);
@@ -548,7 +552,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
 
               <section className="space-y-2">
                 <p className={ui.label}>照片之後放哪些段落</p>
-                <p className={ui.hint}>每多一段影片多幾秒，全部打開大約一分鐘。</p>
+                <p className={ui.hint}>開越多段，照片的部分會切得越快（每張至少兩拍）；預設兩段大約 40 幾秒。</p>
                 <div className="space-y-1.5">
                   {available.map(o => {
                     const on = sections.includes(o.key);

@@ -93,22 +93,26 @@ describe('buildTimeline', () => {
     return shotsFromPicks(days, days.flatMap(d => d.photos.map(p => p.path)).slice(0, n));
   };
 
-  it.each([4, 5, 12, 22, MAX_PHOTOS])('stays between 30 and 50 seconds with %i photos and two extra pages', n => {
+  it.each([4, 5, 12, 18])('stays around 30–46 seconds with %i photos and the default pages', n => {
     for (const bpm of [92, 118]) {
       const tl = buildTimeline(shotsOf(n), bpm, null, ['stats', 'facts']);
       expect(tl.duration).toBeGreaterThanOrEqual(29.5);
-      expect(tl.duration).toBeLessThanOrEqual(50.5);
-      expect(buildTimeline(shotsOf(n), bpm, null, ['stats']).duration).toBeLessThanOrEqual(45.5);
+      expect(tl.duration).toBeLessThanOrEqual(bpm === 118 ? 46.5 : 50);
     }
   });
 
-  it('gives a little more room when every extra page is on', () => {
-    const tl = buildTimeline(shotsOf(18), 118, null, ['race', 'stats', 'facts']);
-    expect(tl.segments.filter(s => s.kind !== 'shot').map(s => s.kind)).toEqual(['intro', 'stats', 'facts', 'race', 'outro']);
-    expect(tl.duration).toBeLessThanOrEqual(55.5);
+  it('never cuts faster than two beats a photo, even when that runs long', () => {
+    const tl = buildTimeline(shotsOf(MAX_PHOTOS), 118, null, ['stats', 'facts', 'people', 'race']);
+    for (const s of tl.segments) if (s.kind === 'shot') expect((s.end - s.start) / tl.beat).toBeGreaterThanOrEqual(2 - 1e-9);
+  });
+
+  it('keeps every page on to about 45 seconds with the usual 18 photos', () => {
+    const tl = buildTimeline(shotsOf(18), 118, null, ['race', 'stats', 'facts', 'people']);
+    expect(tl.segments.filter(s => s.kind !== 'shot').map(s => s.kind)).toEqual(['intro', 'stats', 'facts', 'people', 'race', 'outro']);
+    expect(tl.duration).toBeLessThanOrEqual(48);
     const bare = buildTimeline(shotsOf(18), 118, null, []);
     expect(bare.segments.some(s => s.kind === 'stats')).toBe(false);
-    expect(bare.duration).toBeLessThanOrEqual(45.5);
+    expect(bare.duration).toBeLessThanOrEqual(46.5);
   });
 
   it('cuts on beats and starts the stats on a new bar', () => {
