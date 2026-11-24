@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Clapperboard, Download, Eye, ImagePlus, Loader2, Pause, Play, Receipt, RotateCcw, Share2, Sparkles, Star } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import type { Expense, Trip } from '../../types';
+import { useBackClose } from '../../hooks/useBackClose';
 import Modal from '../../components/Modal';
 import { ui } from '../../components/ui';
 import { photoUrl } from '../../utils/storage';
@@ -8,14 +10,14 @@ import { formatMoney } from '../../utils/money';
 import { getItinerary, isPlan } from '../itinerary/registry';
 import {
   MAX_PHOTOS, autoPick, buildTimeline, daysBetween, recapDays, shotsFromPicks, tripDateRange,
-  type DayMeta, type ExtraSection, type RecapDay, type RecapPhoto,
+  type DayMeta, type ExtraSection, type RecapDay, type RecapPhoto, type Timeline,
 } from './plan';
 import {
   MAX_FACTS, MAX_STATS, peopleSpending, recapFacts, recapStats, spendingRace, visitedCities,
   type RecapFact, type RecapStat,
 } from './facts';
 import { MUSIC_STYLES, renderMusic, styleBpm, type MusicStyle } from './music';
-import { PhotoStore, readLocalPhoto } from './images';
+import { PhotoStore, loadOwnOutro, readLocalPhoto, saveOwnOutro } from './images';
 import { RecapRenderer, VIDEO_W, ensureFonts, pathsNear, photoLabelLines, type RecapContent, type RecapScene } from './render';
 import { checkSupport, dayTexts, encodeRecap, type EncodeSupport } from './encode';
 
@@ -46,6 +48,8 @@ const readSaved = (tripId: string): Saved => {
 };
 
 const PREVIEW_W = 360;
+/** Saved in place of the path when the closing photo is the one uploaded from this device */
+const LOCAL_OUTRO = 'local';
 
 const SECTION_OPTIONS: { key: ExtraSection; label: string; hint: string }[] = [
   { key: 'stats', label: '統計數字', hint: '天數、筆數、照片數、總花費…' },
@@ -108,7 +112,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   useEffect(() => {
     try {
       localStorage.setItem(storageKey(trip.id), JSON.stringify({
-        picks, outro: outro?.startsWith('local:') ? null : outro,
+        picks, outro: outro?.startsWith('local:') ? LOCAL_OUTRO : outro,
         music, showMoney, sections, facts: factKeys ?? undefined, stats: statKeys ?? undefined,
       } satisfies Saved));
     } catch {
@@ -273,6 +277,21 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   useEffect(() => { stopPreview(); }, [timeline, music, stopPreview]);
 
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Synthesising the track takes a few seconds on a phone: do it in the background once the
+  // choices settle, so pressing play starts right away
+  const musicCache = useRef<{ timeline: Timeline; music: MusicStyle; buffer: Promise<AudioBuffer | null> } | null>(null);
+  const previewMusic = useCallback(() => {
+    const c = musicCache.current;
+    if (c && c.timeline === timeline && c.music === music) return c.buffer;
+    const buffer = renderMusic(music, timeline, 22050).catch(() => null);
+    musicCache.current = { timeline, music, buffer };
+    return buffer;
+  }, [timeline, music]);
+  useEffect(() => {
+    if (music === 'none') return;
+    const timer = setTimeout(() => { void previewMusic(); }, 1200);
+    return () => clearTimeout(timer);
+  }, [music, previewMusic]);
   const startPreview = async () => {
     if (previewLoading) return;
     stopPreview();
@@ -293,7 +312,7 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
     try {
       // Decode the opening photos before the clock starts, so playback doesn't begin on blurry placeholders
       const opening = store.keepOnly(pathsNear(timeline, from, 3));
-      const buffer = ctx ? await renderMusic(music, timeline, 44100) : null;
+      const buffer = ctx ? await previewMusic() : null;
       await opening;
       // resume() can stay pending forever when the browser refuses sound; don't wait on it for long
       await Promise.race([resumed.catch(() => undefined), new Promise(r => setTimeout(r, 600))]);
@@ -413,15 +432,29 @@ const RecapVideoModal: React.FC<Props> = ({ trip, expenses, onClose }) => {
   // The closing photo can come from this device: kept in memory, used only as the last scene
   const fileInput = useRef<HTMLInputElement>(null);
   const [outroUpload, setOutroUpload] = useState<'idle' | 'reading' | 'error'>('idle');
+  const registerOwnOutro = useCallback((blob: Blob, select: boolean) => {
+    const path = `local:${Date.now().toString(36)}`;
+    store.addLocal(path, blob);
+    setOwnOutro({ photo: { path, date: range?.to ?? '', caption: '', amount: 0, currency: '', kind: 'item' }, url: URL.createObjectURL(blob) });
+    if (select) setOutro(path);
+  }, [store, range]);
+
+  // Bring back the closing photo uploaded last time (kept in this browser only)
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    void loadOwnOutro(trip.id).then(blob => {
+      if (blob) registerOwnOutro(blob, saved.outro === LOCAL_OUTRO);
+    });
+  }, [trip.id, registerOwnOutro, saved.outro]);
   const pickOwnOutro = async (file: File | undefined) => {
     if (!file) return;
     setOutroUpload('reading');
     try {
       const readable = await readLocalPhoto(file);
-      const path = `local:${Date.now().toString(36)}`;
-      store.addLocal(path, readable);
-      setOwnOutro({ photo: { path, date: range?.to ?? '', caption: '', amount: 0, currency: '', kind: 'item' }, url: URL.createObjectURL(readable) });
-      setOutro(path);
+      registerOwnOutro(readable, true);
+      void saveOwnOutro(trip.id, readable);
       setOutroUpload('idle');
     } catch (e) {
       console.warn('[recap] closing photo unreadable', e);
@@ -849,33 +882,46 @@ const PhotoDetail: React.FC<DetailProps> = ({ photo, lines, time, scene, ensure,
     void ensure(time).then(() => { if (alive) renderer.draw(time); });
     return () => { alive = false; renderer.dispose(); };
   }, [time, scene, ensure]);
-  return (
-    <div className="rounded-xl bg-surface border border-line p-2.5 flex gap-3">
-      <div className="w-[108px] shrink-0 aspect-[9/16] rounded-lg overflow-hidden bg-navy relative">
-        {time !== null ? (
-          <canvas ref={canvasRef} width={216} height={384} className="absolute inset-0 w-full h-full" />
-        ) : (
-          <img src={photoUrl(photo.path)} alt={photo.caption} className="absolute inset-0 w-full h-full object-cover" />
-        )}
-      </div>
-      <div className="flex-1 min-w-0 space-y-1.5 text-xs">
-        <div className="flex items-start gap-2">
-          <p className="flex-1 font-bold text-sm">影片裡會顯示</p>
-          <button onClick={onClose} className="text-muted hover:text-ink" aria-label="收起">✕</button>
+  // A layer of its own over everything (back button closes it first), so it shows wherever the list is scrolled
+  useBackClose(true, onClose);
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] bg-scrim anim-fade flex items-end sm:items-center justify-center sm:p-4"
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="這張照片在影片裡的樣子"
+    >
+      <div className="w-full sm:max-w-md bg-surface text-ink rounded-t-3xl sm:rounded-2xl shadow-2xl anim-sheet px-5 pt-4 pb-[max(20px,env(safe-area-inset-bottom))] sm:pb-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <p className="flex-1 font-bold text-base">影片裡會顯示</p>
+          <button onClick={onClose} className={ui.iconBtn} aria-label="關閉">✕</button>
         </div>
-        <div className="rounded-lg bg-navy text-navy-fg px-2.5 py-2 space-y-0.5">
-          <p className="num text-[10px] tracking-wider text-accent">{lines[0]}</p>
-          <p className="font-bold text-sm leading-snug break-words">{lines[1]}</p>
-          {lines[2] && <p className="text-navy-sub">{lines[2]}</p>}
+        <div className="flex gap-4">
+          <div className="w-[150px] shrink-0 aspect-[9/16] rounded-xl overflow-hidden bg-navy relative shadow">
+            {time !== null ? (
+              <canvas ref={canvasRef} width={300} height={534} className="absolute inset-0 w-full h-full" />
+            ) : (
+              <img src={photoUrl(photo.path)} alt={photo.caption} className="absolute inset-0 w-full h-full object-cover" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0 space-y-2 text-xs">
+            <div className="rounded-lg bg-navy text-navy-fg px-3 py-2.5 space-y-0.5">
+              <p className="num text-[10px] tracking-wider text-accent">{lines[0]}</p>
+              <p className="font-bold text-sm leading-snug break-words">{lines[1]}</p>
+              {lines[2] && <p className="text-navy-sub">{lines[2]}</p>}
+            </div>
+            {photo.description && photo.description !== photo.caption && (
+              <p className="text-ink-2 break-words">帳目：{photo.description}</p>
+            )}
+            <p className="text-muted">
+              {time !== null ? <>在影片第 <span className="num">{Math.floor(time)}</span> 秒左右出現</> : '還沒選進影片，勾選後就會出現'}
+            </p>
+          </div>
         </div>
-        {photo.description && photo.description !== photo.caption && (
-          <p className="text-ink-2 break-words">帳目：{photo.description}</p>
-        )}
-        <p className="text-muted">
-          {time !== null ? <>在影片第 <span className="num">{Math.floor(time)}</span> 秒左右出現</> : '還沒選進影片'}
-        </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

@@ -8,11 +8,13 @@ import type { Timeline } from './plan';
  * 統計數字那段抽掉大鼓留空間，結尾再回來一次然後淡出。
  */
 
-export type MusicStyle = 'bright' | 'warm' | 'none';
+export type MusicStyle = 'bright' | 'warm' | 'cinematic' | 'tropical' | 'none';
 
 export const MUSIC_STYLES: { key: MusicStyle; label: string; hint: string; bpm: number }[] = [
   { key: 'bright', label: '輕快', hint: '電子流行，節奏感強', bpm: 118 },
-  { key: 'warm', label: '溫暖', hint: 'Lo-fi 爵士和弦，比較放鬆', bpm: 92 },
+  { key: 'tropical', label: '夏日', hint: '熱帶浩室，木琴與反拍和弦', bpm: 108 },
+  { key: 'cinematic', label: '電影感', hint: '鋼琴與大鼓，慢慢推高', bpm: 96 },
+  { key: 'warm', label: '溫暖', hint: '爵士和弦，比較放鬆', bpm: 92 },
   { key: 'none', label: '不要音樂', hint: '只有畫面', bpm: 112 },
 ];
 
@@ -42,6 +44,30 @@ const BRIGHT_HOOK: (number | null)[] = [
 const WARM_HOOK: (number | null)[] = [
   null, null, 69, 72, 74, null, 72, null, null, null, null, null, 71, null, 67, null,
   null, null, 67, 69, 71, null, 74, null, 72, null, null, null, null, null, null, null,
+];
+
+// Am – F – C – G, voiced wide for the slow build
+const CINEMATIC_CHORDS: Chord[] = [
+  { bass: 45, notes: [57, 64, 69, 72] }, // Am
+  { bass: 41, notes: [57, 60, 65, 69] }, // F
+  { bass: 36, notes: [55, 60, 64, 67] }, // C
+  { bass: 43, notes: [55, 59, 62, 67] }, // G
+];
+const CINEMATIC_HOOK: (number | null)[] = [
+  76, null, null, null, 74, null, 72, null, 72, null, null, null, 69, null, 72, null,
+  72, null, null, null, 71, null, 67, null, 67, null, null, null, 71, null, 74, null,
+];
+
+// Em – C – G – D in G major: bright and summery
+const TROPICAL_CHORDS: Chord[] = [
+  { bass: 40, notes: [59, 64, 67, 71] }, // Em
+  { bass: 36, notes: [60, 64, 67, 71] }, // Cmaj7
+  { bass: 43, notes: [59, 62, 67, 71] }, // G
+  { bass: 38, notes: [57, 62, 66, 69] }, // D
+];
+const TROPICAL_HOOK: (number | null)[] = [
+  79, null, 76, 79, null, 81, 79, null, 76, null, 74, null, 76, null, null, null,
+  79, null, 76, 79, null, 81, 83, null, 81, null, 79, null, 76, null, 74, null,
 ];
 
 const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
@@ -323,25 +349,6 @@ const keys = (r: Rig, t: number, length: number, notes: number[], gain = 1) => {
   }
 };
 
-const vinyl = (r: Rig, from: number, to: number) => {
-  const rand = seeded(99);
-  for (let t = from; t < to; t += 0.05 + rand() * 0.35) {
-    noiseHit(r, t, 'highpass', 2500, 0.5, 0.02 + rand() * 0.03, 0.006, r.dry, rand());
-  }
-  const s = r.ctx.createBufferSource();
-  s.buffer = r.noise;
-  s.loop = true;
-  const f = r.ctx.createBiquadFilter();
-  f.type = 'bandpass';
-  f.frequency.value = 1200;
-  f.Q.value = 0.4;
-  const g = r.ctx.createGain();
-  g.gain.value = 0.012;
-  s.connect(f).connect(g).connect(r.dry);
-  s.start(from);
-  s.stop(to);
-};
-
 // --- Arrangement -------------------------------------------------------------
 
 const arrangeBright = (r: Rig, tl: Timeline) => {
@@ -417,7 +424,6 @@ const arrangeWarm = (r: Rig, tl: Timeline) => {
   const { drop, stats, outro, end } = tl.marks;
   r.delayNode.delayTime.value = b * 0.5;
   const swing = b * 0.08;
-  vinyl(r, 0, tl.duration);
 
   for (let bar = 0; bar * 4 < end; bar++) {
     const beat0 = bar * 4;
@@ -460,6 +466,108 @@ const arrangeWarm = (r: Rig, tl: Timeline) => {
   }
 };
 
+/** Big, slow, building: piano arpeggios, wide pads, a deep kick and a reverb-heavy clap */
+const arrangeCinematic = (r: Rig, tl: Timeline) => {
+  const b = tl.beat;
+  const { drop, stats, outro, end } = tl.marks;
+  r.delayNode.delayTime.value = b * 0.75;
+
+  for (let bar = 0; bar * 4 < end; bar++) {
+    const beat0 = bar * 4;
+    const t = beat0 * b;
+    const chord = CINEMATIC_CHORDS[bar % 4];
+    const inIntro = beat0 < drop;
+    const inStats = beat0 >= stats && beat0 < outro;
+    const lastBar = beat0 + 4 >= end;
+
+    if (lastBar) {
+      pad(r, t, 4 * b + 1, CINEMATIC_CHORDS[0].notes, 1800, 600, 1.1);
+      keys(r, t, 4 * b, CINEMATIC_CHORDS[0].notes, 1.1);
+      bassNote(r, t, 3 * b, CINEMATIC_CHORDS[0].bass, 0.8);
+      kick(r, t, 1, true);
+      crash(r, t);
+      continue;
+    }
+    // Pads open up over the intro, stay warm afterwards
+    const p = inIntro ? beat0 / drop : 1;
+    pad(r, t, 4 * b, chord.notes, 400 + 1200 * p, 700 + 1600 * p, 0.8);
+    // Piano: rolling eighth-note arpeggio
+    for (let s = 0; s < 8; s++) {
+      const note = chord.notes[[0, 1, 2, 3, 2, 1, 2, 3][s]] + (s >= 4 ? 12 : 0);
+      keys(r, t + (s * b) / 2, b * 0.9, [note], inIntro ? 0.35 + 0.35 * p : 0.55);
+    }
+    if (!inIntro) bassNote(r, t, 3.5 * b, chord.bass, 0.75);
+    if (!inIntro && !inStats) {
+      const melody = CINEMATIC_HOOK.slice(((bar - drop / 4) % 4) * 8, ((bar - drop / 4) % 4) * 8 + 8);
+      melody.forEach((n, s) => { if (n) keys(r, t + (s * b) / 2, b * 1.2, [n + 12], 0.6); });
+      kick(r, t, 1, true);
+      kick(r, t + 2.5 * b, 0.55, true);
+      duckAt(r, t, b * 1.5, 0.6);
+      clap(r, t + 2 * b, 0.8);
+      for (let s = 0; s < 4; s++) hat(r, t + s * b + b / 2, false, 0.5);
+    }
+    if (inStats) {
+      kick(r, t, 0.6, true);
+      clap(r, t + 2 * b, 0.5);
+    }
+    if (beat0 + 4 === drop || beat0 + 4 === outro) {
+      riser(r, t, 4 * b);
+      [2, 2.5, 3, 3.25, 3.5, 3.75].forEach((x, i) => kick(r, t + x * b, 0.4 + i * 0.1, true));
+    }
+    if (beat0 === drop || beat0 === outro) crash(r, t);
+  }
+};
+
+/** Tropical house: off-beat chord stabs, marimba-like plucks, a soft four-on-the-floor */
+const arrangeTropical = (r: Rig, tl: Timeline) => {
+  const b = tl.beat;
+  const { drop, stats, outro, end } = tl.marks;
+  r.delayNode.delayTime.value = b * 0.75;
+
+  for (let bar = 0; bar * 4 < end; bar++) {
+    const beat0 = bar * 4;
+    const t = beat0 * b;
+    const chord = TROPICAL_CHORDS[bar % 4];
+    const inIntro = beat0 < drop;
+    const inStats = beat0 >= stats && beat0 < outro;
+    const lastBar = beat0 + 4 >= end;
+
+    if (lastBar) {
+      keys(r, t, 4 * b, TROPICAL_CHORDS[2].notes, 1.1);
+      bassNote(r, t, 3 * b, TROPICAL_CHORDS[2].bass, 0.8);
+      kick(r, t, 0.9);
+      crash(r, t);
+      continue;
+    }
+    // Chord stabs on the off-beats
+    for (let k = 0; k < 4; k++) keys(r, t + k * b + b / 2, b * 0.35, chord.notes, inIntro ? 0.45 : 0.7);
+    pad(r, t, 4 * b, chord.notes, 600, 1400, inIntro ? 0.4 : 0.5);
+    if (!inIntro || beat0 + 8 >= drop) {
+      for (let s = 0; s < 8; s++) {
+        const hook = TROPICAL_HOOK[(bar % 4) * 8 + s];
+        if (hook && !inStats) pluck(r, t + (s * b) / 2, hook, inIntro ? 0.45 : 0.7, true);
+      }
+    }
+    if (!inIntro && !inStats) {
+      for (let k = 0; k < 4; k++) {
+        kick(r, t + k * b, 0.75);
+        duckAt(r, t + k * b, b, 0.5);
+        bassNote(r, t + k * b + b / 2, b * 0.4, chord.bass + 12, 0.8);
+      }
+      clap(r, t + b, 0.7);
+      clap(r, t + 3 * b, 0.7);
+      // Shaker: soft sixteenths
+      for (let s = 0; s < 16; s++) hat(r, t + (s * b) / 4, false, s % 4 === 2 ? 0.55 : 0.25);
+    }
+    if (inStats) {
+      for (let s = 0; s < 8; s++) hat(r, t + (s * b) / 2, false, 0.3);
+      kick(r, t, 0.5);
+    }
+    if (beat0 + 4 === drop || beat0 + 4 === outro) riser(r, t + 2 * b, 2 * b);
+    if (beat0 === drop || beat0 === outro) crash(r, t);
+  }
+};
+
 /**
  * Renders the whole track for this timeline. A 40-second track takes about a second offline.
  * Returns null for "no music" — the caller adds no audio track at all.
@@ -469,6 +577,8 @@ export const renderMusic = async (style: MusicStyle, tl: Timeline, sampleRate = 
   const ctx = new OfflineAudioContext(2, Math.ceil(tl.duration * sampleRate), sampleRate);
   const rig = buildRig(ctx, tl.duration);
   if (style === 'warm') arrangeWarm(rig, tl);
+  else if (style === 'cinematic') arrangeCinematic(rig, tl);
+  else if (style === 'tropical') arrangeTropical(rig, tl);
   else arrangeBright(rig, tl);
   return ctx.startRendering();
 };

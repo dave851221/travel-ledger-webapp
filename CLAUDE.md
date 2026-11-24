@@ -99,11 +99,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   `plan.ts`（純函式，`plan.test.ts`）決定日期範圍（有行程表用行程表，沒有就取支出最密集的一段，避開幾個月前訂的機票）、自動挑照片、以「拍」為單位排時間軸（每一刀落在拍點，照片之後的段落都從新的小節開始）。
   **以照片為主，不硬照日子排**（David 2026-11-24）：自動挑選依每天的照片數按比例分（照片少的日子可能不挑），每張照片自己配說明（Day N・日期、品名＝支出描述去掉括號說明、城市・金額）；收據也能手動勾進來，但不會被自動挑。
   照片之後的段落使用者勾選（`ExtraSection`）：統計數字（`recapStats`）、旅途小彩蛋（`recapFacts`：最貴的一筆、最豪華的一餐、最常光顧、錢都花去哪、最常掏錢的人、夜貓時刻…）、每個人的花錢重點（`peopleSpending`，依分攤看每人前三大分類）、花費賽跑（`spendingRace`）。統計與彩蛋**逐項勾選**（每項有 `key`／`defaultOn`，各最多 6 項，存在 `recap_{tripId}` 的 `stats`／`facts`）。總長上限 46 秒（David 要 40 幾秒），段落越多照片切得越快，但**每張至少 2 拍**、轉場 0.22～0.32 秒、轉場的模糊量壓低（以前照片只有一秒、一半時間在模糊轉場，看起來像一直閃）；「顯示金額」關掉時所有金額都不出現，只有金額才成立的項目直接不提供；
-  **結尾合照可以從手機上傳**（只有結尾那張；David 2026-11-24：一般照片自己上傳的話拍攝日常常對不上，所以不做）：只在記憶體（`PhotoStore.addLocal`，路徑 `local:…`），不上傳、不存，關掉視窗就沒了。手機挑的照片先過 `readLocalPhoto`：HEIC／HEIF（iPhone、三星高效率照片，Chrome 讀不了，曾經縮圖破圖、影片也沒出現）用 `heic-to/csp` 轉 JPEG，那支約 3 MB，只有遇到 HEIC 才下載、也不進 PWA 預先快取；讀不了就在畫面上說，不默默消失。
+  **結尾合照可以從手機上傳**（只有結尾那張；David 2026-11-24：一般照片自己上傳的話拍攝日常常對不上，所以不做）：不上傳伺服器，存在這個瀏覽器的 IndexedDB（`saveOwnOutro`／`loadOwnOutro`，每趟一張），`recap_{tripId}` 的 `outro` 記成 `'local'`。只放記憶體的版本在手機上產生完影片、按「回去調整」後會不見（頁面被系統重新載入）。手機挑的照片先過 `readLocalPhoto`：HEIC／HEIF（iPhone、三星高效率照片，Chrome 讀不了，曾經縮圖破圖、影片也沒出現）用 `heic-to/csp` 轉 JPEG，那支約 3 MB，只有遇到 HEIC 才下載、也不進 PWA 預先快取；讀不了就在畫面上說，不默默消失。
   **預覽**：`AudioContext` 必須在點擊當下建立並 `resume()`（等到合成完音樂才建立，手機上會一直是 suspended、時間不動，按播放看起來沒反應）；`resume()` 可能永遠不 resolve，最多等 0.6 秒，沒聲音就用牆上時鐘照樣播。播放前先解碼開頭幾張。
-  **挑照片的「眼睛」**：看那張照片在影片裡配的三行字（`photoLabelLines`，與畫面共用）與帳目原文；已選的直接畫出影片那一格。
+  **挑照片的「眼睛」**：跳出一個視窗（portal 到 body、`useBackClose`），看那張照片在影片裡配的三行字（`photoLabelLines`，與畫面共用）與帳目原文；已選的直接畫出影片那一格。不要嵌在清單裡：清單捲動時看不到，以為沒反應。
   ⚠️ **照片全黑的坑**：相簿的 `<img>` 是 no-cors，PWA 的 runtime cache 存的是 opaque 回應；影片要用 CORS 抓原圖，拿到 opaque 會失敗。所以 `vite.config.ts` 的圖片快取只比對**不帶查詢字串**的網址，影片抓圖一律帶 `?recap=1`（`images.ts` 的 `fetchPhoto`），讀不到的照片會被略過並提示，不會畫成黑畫面；
-  `music.ts` 用 `OfflineAudioContext` **現場合成原創配樂**（輕快 118 BPM／溫暖 92 BPM，不放任何音檔 → 沒有版權問題，IG 不會消音）；
+  `music.ts` 用 `OfflineAudioContext` **現場合成原創配樂**（輕快 118、夏日 108、電影感 96、溫暖 92 BPM，外加「不要音樂」；不放任何音檔 → 沒有版權問題，IG 不會消音）。溫暖原本的黑膠雜音 David 不喜歡，已拿掉。各段長度用**秒**定再換成整小節（`barsFor`），換音樂時影片長度只差一兩秒；預覽用的音樂在選項穩定後於背景先合成（`previewMusic`）；
   `render.ts` 依時間 t 畫一格（Ken Burns、每張照片的說明、轉場、統計數字、小彩蛋、賽跑長條圖），**不用 `ctx.filter`**（Safari 舊版沒有），模糊一律「縮小再放大」；文字避開 IG 介面（上 220px、下 440px）；
   `images.ts` 把原圖縮到剛好夠用的大小存成小 JPEG、只解碼目前前後幾張（iPhone 記憶體）；載圖用 `onload` 不用 `img.decode()`（有的 WebView 永遠不 resolve）；
   `encode.ts` 用 mediabunny（WebCodecs H.264 + AAC，沒有 AAC 編碼器時載入 `@mediabunny/aac-encoder` 的 WASM）封裝 MP4，整個 `RecapVideoModal` 是 lazy chunk。iOS 要 16.4 以上；不支援 1080p 編碼的裝置退回 720p。
