@@ -298,27 +298,3 @@ export const shotsFromPicks = (days: RecapDay[], picks: string[]): { photo: Reca
   const wanted = new Set(picks);
   return days.flatMap(day => day.photos.filter(p => wanted.has(p.path)).map(photo => ({ photo, day })));
 };
-
-/**
- * 把使用者從手機挑的照片（不上傳，只在這台裝置）併進每天的清單。
- * 拍攝日在旅程範圍外的照片也收，自成一天（標籤只顯示日期，不寫 Day N）。
- */
-export const mergeLocalPhotos = (days: RecapDay[], local: RecapPhoto[], range: { from: string; to: string } | null, meta: DayMeta[] = []): RecapDay[] => {
-  if (local.length === 0) return days;
-  const map = new Map(days.map(d => [d.date, { ...d, photos: [...d.photos] }]));
-  const metaByDate = new Map(meta.map(m => [m.date, m]));
-  for (const p of local) {
-    const day = map.get(p.date);
-    if (day) day.photos.push(p);
-    else {
-      map.set(p.date, {
-        date: p.date,
-        dayNumber: range ? daysBetween(range.from, p.date) + 1 : 0,
-        city: metaByDate.get(p.date)?.city,
-        title: metaByDate.get(p.date)?.title,
-        photos: [p],
-      });
-    }
-  }
-  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
-};

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from '../../types';
-import { type RecapDay, autoPick, mergeLocalPhotos, buildTimeline, evenlySpaced, photoCaption, recapDays, shotsFromPicks, tripDateRange, MAX_PHOTOS, PER_DAY_MAX } from './plan';
+import { type RecapDay, autoPick, buildTimeline, evenlySpaced, photoCaption, recapDays, shotsFromPicks, tripDateRange, MAX_PHOTOS, PER_DAY_MAX } from './plan';
 
 let seq = 0;
 const exp = (date: string, photos: string[], extra: Partial<Expense> = {}): Expense => ({
@@ -125,17 +125,5 @@ describe('buildTimeline', () => {
     tl.segments.forEach((s, i) => {
       if (s.kind === 'shot' && s.dayStart) expect(tl.transitions[i]).toBe('zoom');
     });
-  });
-});
-
-describe('mergeLocalPhotos', () => {
-  it('slots photos from the phone into their day, or a day of their own', () => {
-    const day: RecapDay = { date: '2026-11-15', dayNumber: 2, photos: [] };
-    const local = (date: string) => ({ path: `local:${date}`, date, caption: '', amount: 0, currency: '', kind: 'item' as const });
-    const merged = mergeLocalPhotos([day], [local('2026-11-15'), local('2026-11-13')], { from: '2026-11-14', to: '2026-11-16' }, [{ date: '2026-11-13', city: '台北' }]);
-    expect(merged.map(d => [d.date, d.dayNumber, d.city, d.photos.length])).toEqual([
-      ['2026-11-13', 0, '台北', 1],
-      ['2026-11-15', 2, undefined, 1],
-    ]);
   });
 });
