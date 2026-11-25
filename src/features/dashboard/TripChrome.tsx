@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Images, Lock, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Images, Lock, MessageCircle, Plus, Settings, Trash2, UserRound } from 'lucide-react';
 import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
+import { ASSISTANT_CHAT_TITLE, ASSISTANT_NAME } from '../../config/assistant';
 import { ui } from '../../components/ui';
 import Dropdown, { MenuDivider, MenuItem, MenuLabel } from './Dropdown';
 import MemberAvatar from './MemberAvatar';
@@ -40,11 +41,13 @@ interface ChromeProps extends IdentityProps {
   onOpenSettings: () => void;
   /** Archived trips only: open the recap video maker */
   onOpenRecap?: () => void;
+  /** 跟耀西聊天記帳 */
+  onOpenChat?: () => void;
 }
 
 /** 手機頂列：返回、旅程名稱、我是誰、⋯ 選單（設定、其他旅程、垃圾桶）。 */
 export const MobileTopBar: React.FC<ChromeProps> = ({
-  trip, currentUser, onPick, onChange, trashCount, onBack, onOpenSettings, onOpenRecap,
+  trip, currentUser, onPick, onChange, trashCount, onBack, onOpenSettings, onOpenRecap, onOpenChat,
 }) => {
   const [whoOpen, setWhoOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -63,6 +66,9 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
           </p>
           <h1 className="text-base font-bold truncate">{trip.name}</h1>
         </div>
+        {onOpenChat && (
+          <button onClick={onOpenChat} aria-label={`跟${ASSISTANT_NAME}聊天記帳`} className={`${ui.iconBtn} text-ink`}><MessageCircle size={21} /></button>
+        )}
         <Dropdown
           open={whoOpen}
           onClose={() => setWhoOpen(false)}
@@ -102,7 +108,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
 
 /** 電腦版左側欄：品牌、目前旅程、分頁、垃圾桶與設定。 */
 export const SideNav: React.FC<ChromeProps> = ({
-  trip, tabs, active, onChange, trashCount, onBack, onOpenSettings,
+  trip, tabs, active, onChange, trashCount, onBack, onOpenSettings, onOpenChat,
 }) => {
   const items = [...tabs, TAB_SIBLINGS];
   const navBtn = (on: boolean) =>
@@ -128,6 +134,9 @@ export const SideNav: React.FC<ChromeProps> = ({
           </button>
         ))}
       </nav>
+      {onOpenChat && (
+        <button onClick={onOpenChat} className={`${navBtn(false)} mt-3`}><MessageCircle size={18} />{ASSISTANT_CHAT_TITLE}</button>
+      )}
       <div className="flex-1" />
       <button onClick={() => onChange(TAB_RECYCLE.key)} className={navBtn(active === 'recycle')}>
         <Trash2 size={18} />垃圾桶
@@ -139,8 +148,8 @@ export const SideNav: React.FC<ChromeProps> = ({
 };
 
 /** 電腦版內容區的標題列：旅程名稱、成員、我是誰、新增支出。 */
-export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCategory?: () => void; onOpenRecap?: () => void }> = ({
-  trip, currentUser, onPick, onAdd, onCategory, onOpenRecap,
+export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCategory?: () => void; onOpenRecap?: () => void; onOpenChat?: () => void }> = ({
+  trip, currentUser, onPick, onAdd, onCategory, onOpenRecap, onOpenChat,
 }) => {
   const [whoOpen, setWhoOpen] = useState(false);
   return (
@@ -169,6 +178,9 @@ export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCat
       >
         <IdentityItems trip={trip} currentUser={currentUser} onPick={onPick} close={() => setWhoOpen(false)} />
       </Dropdown>
+      {onOpenChat && (
+        <button onClick={onOpenChat} className={`${ui.btnSecondary} py-2`}><MessageCircle size={16} />{ASSISTANT_CHAT_TITLE}</button>
+      )}
       {onAdd && (
         <button onClick={onAdd} className={`${ui.btnPrimary} py-2`}><Plus size={16} strokeWidth={2.6} />新增支出</button>
       )}

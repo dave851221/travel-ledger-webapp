@@ -8,24 +8,14 @@
 // import config.ts（bucket 名稱）與 db.ts。
 // ============================================================
 
-import { type ReceiptItem, reconcileReceiptItems, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
+import { reconcileReceiptItems, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
 import { RECEIPTS_BUCKET } from "./config.ts"
 import { supabase } from "./db.ts"
-import type { DraftExpense, PendingDraft } from "./types.ts"
+import type { PendingDraft } from "./types.ts"
 
-/** 一張還等在聊天室裡、使用者既沒確認也沒取消的記帳草稿 */
-export interface OutstandingDraft {
-  nonce: string
-  exp: DraftExpense
-  photoIds: string[]
-  /** 照片是收據（見 PendingDraft.rc） */
-  receipt: boolean
-  tripId: string
-  /** 收據品項明細（🧾 逐項分），沒有就是空陣列 */
-  items: ReceiptItem[]
-  /** 收據印的品項小計（PendingDraft.st） */
-  subtotal?: number
-}
+// 型別與網頁聊天共用（_shared/assistant/types.ts）
+export type { OutstandingDraft } from "../_shared/assistant/types.ts"
+import type { OutstandingDraft } from "../_shared/assistant/types.ts"
 
 /** 一次看多少張 pending 卡。修改／刪除的確認卡也佔位子，所以比原本的 5 張寬鬆。 */
 const OUTSTANDING_SCAN_LIMIT = 10

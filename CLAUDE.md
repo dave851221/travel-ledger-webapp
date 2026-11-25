@@ -26,7 +26,7 @@ npm run build     # tsc -b + vite build
 npm run lint      # ESLint 掃整個專案
 npm run preview   # 本機預覽正式建置結果
 npm run db:build  # 由 supabase/schema/ 重新產生 bootstrap.generated.sql
-npm run fn:deploy # 部署兩支 Edge Function（已自動帶 --no-verify-jwt）
+npm run fn:deploy # 部署三支 Edge Function（line-webhook、liff-notify、web-chat，旗標已帶好）
 npm test          # Vitest（純函式，不含 UI）
 npm run test:watch
 npm run check:functions  # 用 Deno 對 Edge Function 做型別檢查
@@ -292,6 +292,42 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
   LINE Bot 收到 `ID:XXXXXX` 後直接完成綁定，不再要求通行碼。
 - **刪除旅程沒有前端功能**，只能從後台執行，見 [`docs/DB_MAINTENANCE.md`](docs/DB_MAINTENANCE.md)。
 
+### 網頁聊天（跟耀西對話記帳）與共用的 AI 核心 `_shared/assistant/`
+
+網頁的 Dashboard 有「耀西記帳」（手機頂列的對話圖示、電腦左側欄與標題列），打開 `src/features/chat/ChatPanel.tsx`（lazy chunk）。
+**與 LINE 用同一顆腦**：判斷、驗證、OCR、prompt 全在 `_shared/assistant/`，`line-webhook` 與 `web-chat` 只是兩個外殼（LINE 畫 Flex、網頁回 JSON 區塊）。
+改記帳規則、prompt、防呆時改 `_shared/assistant/`，兩邊一起生效；**改完要兩支函式都部署**。
+
+| 檔案 | 內容 |
+| :--- | :--- |
+| `ai.ts` | 系統指令 `YOSHI_SYSTEM_INSTRUCTION`、OCR schema、函式清單（`readToolNames`／`buildTextToolDeclarations`）、`createAssistantAi`（用哪一家，env 由呼叫端傳入）、`analyzeReceiptPhoto` |
+| `chat.ts` | 文字路徑：`buildTripContext`、`buildConversation`、`photoDraftHint`、`prepareProposedExpenses`（含打字版逐項分）、`prepareProposedUpdate`、`sanitizeReplyText`、`chooseReceiptExpense` |
+| `receipt.ts` | 收據 OCR：`buildOcrPrompt`、`recognizeReceipt`（三種照片、付款人規則、品項明細） |
+| `guards.ts` | 原 `line-webhook/guards.ts` 的純函式（那裡原樣轉出，`guards.test.ts` 不動） |
+| `persona.ts` | 機器人的名字與人設（prompt 裡的「耀西」全從這裡拿）。前端的名字在 `src/config/assistant.ts`。公開營業版換名字只改這兩個檔；LINE 舊機器人自己的文案（自我介紹、「耀西」開頭叫它）留在 line-webhook |
+| `types.ts`／`notices.ts`／`time.ts`／`itinerary.ts` | 草稿型別、AI 失敗的說法、旅程時區與今天、讀行程 JSON |
+
+**`web-chat` Edge Function**（`supabase functions deploy web-chat --no-verify-jwt`；前端用 publishable key 不是 JWT）：一個 POST、`action` 決定做什麼 ——
+`message`（文字 → AI → 區塊）、`photo`（網頁先把照片壓縮傳到 `expenses/{tripId}/chat_*.jpg` 再叫它 OCR）、
+`save`／`update`／`delete`／`undo`（使用者按卡片按鈕才寫，走 `commitExpense` 等共用工具）、`discard`（取消草稿時刪照片，已被支出用到的不刪）。
+同步回答，不先回再背景處理。網頁送來的東西全在 `web-chat/payload.ts` 收斂（照片路徑一定要在這趟旅程的資料夾）。
+
+**比 LINE 好的地方**（David 2026-11-25：網頁不必照抄 LINE，要更好）：
+- 卡片可以「回覆」：`replyTo` 直接告訴模型是哪一張草稿或哪一筆已存的支出；回覆草稿而模型只回一筆、沒填 `corrects_draft` 時程式補上。
+- 卡片上直接改品名、金額、日期、分類，點成員加入／移出付款與分攤（`draftOps.ts`，走 `calculateDistribution`）；只算我、逐項分（`ItemSplitPanel` 全螢幕）、換幣別、完整表單（`ExpenseModal`，修改預覽會帶入**提議後**的內容）都在卡片上。
+- 快捷查詢（今日／近 7 天／本月支出、結算、旅程總覽）用網頁手上的資料當場算（`quick.ts`），不打 API。「編輯支出」「刪除支出」「取消上一筆」「取消」也在前端處理。
+- 一次可以選多張照片，各出一張卡；問「這張收據買了什麼」時，還沒存的收據草稿也答得出來。
+- 語音輸入用瀏覽器的 Web Speech API（有支援才顯示麥克風）。
+
+**對話與草稿存在這台裝置**（`localStorage` 的 `chat_{tripId}`，`chatStore.ts`），**不寫資料庫**（Disk IO）。每則訊息帶最近 8 輪與還沒處理的草稿上去；
+按了卡片上的按鈕（存入、撤銷、取消、修改、刪除）會補一行進對話紀錄（`remember`），不然模型以為那張卡還沒存，「剛剛那筆改 500」會再出一張新卡。
+代價：換裝置看不到之前的對話。
+
+**開放版沿用**：`web-chat/auth.ts`（現在只認旅程 id，跟網頁其他地方一樣；之後改成驗登入 JWT 與成員）與 `APP_DB_SCHEMA`（資料表所在的 schema）是唯二要換的地方。
+
+⚠️ `ExpenseModal` 要一直掛著、用 `isOpen` 開關。一掛上就是開的話，開發模式的 StrictMode 會用第一次 render 的 0 元重跑自動分帳，把帶進來的分攤蓋掉。
+`onSuccess` 會帶新增那一筆的 id（聊天卡片的「撤銷」要用）。
+
 ### LINE Bot Edge Function
 
 `supabase/functions/line-webhook/` 是一組模組，不再是單一檔案（原本 index.ts 有 2778 行）。
@@ -335,7 +371,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
   它同時**原樣轉出** `validate.ts` 的全部內容，所以 `guards.test.ts` 一行都不必改。
 
 兩邊都由 `guards.test.ts` 看守 —— **改這些行為請連同測試一起改**。
-`check:functions` 列了這幾個進入點：`line-webhook/index.ts`、`liff-notify/index.ts`、
+`check:functions` 列了這幾個進入點：`line-webhook/index.ts`、`liff-notify/index.ts`、`web-chat/index.ts`、
 `_shared/tools/registry.ts`，以及 `_shared/ai/` 的 `gemini.ts`／`claude.ts`／`fallback.ts`，其餘模組透過 import 一起被檢查。
 `guards.ts` 只 import `_shared/finance.ts`、`_shared/deps.ts`（Decimal）與 `_shared/validate.ts` ——
 `vitest.config.ts` 的 alias 用 `/^(?:\.\.?\/)+(?:_shared\/)?deps\.ts$/` 涵蓋所有相對寫法
@@ -539,6 +575,6 @@ GitHub 還沒登記好 artifact，報 `No artifacts named "github-pages"` 或 `F
   workflow 是 `build` → `deploy` 兩個 job，**不要合併成一個**（見踩坑紀錄「GitHub Pages 部署」）。推完要確認 run 成功。
   Repo Secrets 需要 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`。
   LIFF ID 預設寫在程式裡（`src/utils/liff.ts` 與 `line-webhook/config.ts`，`2012713943-msELyw4c`），卡片按鈕開 liff.line.me，存檔後由 LIFF 代送「✅ 已記帳」、機器人免費 reply；在 LIFF 外開啟時退回推播。
-- **Edge Function**：`supabase functions deploy line-webhook --no-verify-jwt`，
+- **Edge Function**：`supabase functions deploy line-webhook --no-verify-jwt`（網頁聊天是 `web-chat`，同樣帶 `--no-verify-jwt`；改 `_shared/assistant/` 兩支都要部署），
   Webhook URL 須在 LINE Developer Console 登錄。
 - **環境變數**：本機 `.env`（見 `.env.example`）；Edge Function 密鑰用 `supabase secrets set`。

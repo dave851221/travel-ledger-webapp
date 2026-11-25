@@ -38,6 +38,8 @@ const StatsTab = lazy(() => import('../features/dashboard/StatsTab'));
 const TripItinerary = lazy(() => import('../features/itinerary/TripItinerary'));
 // 回顧影片帶著影片編碼器（mediabunny），只有封存的旅程按了才下載
 const RecapVideoModal = lazy(() => import('../features/recap/RecapVideoModal'));
+// 跟耀西聊天記帳：打開才下載
+const ChatPanel = lazy(() => import('../features/chat/ChatPanel'));
 
 const TabLoading = () => (
   <div className="flex justify-center py-20 text-muted"><Loader2 className="animate-spin" size={24} /></div>
@@ -67,6 +69,9 @@ const Dashboard: React.FC = () => {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [recapOpen, setRecapOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  // 開過一次就一直掛著：關掉聊天室時還在等的回覆（AI、照片辨識）才不會跟著不見
+  const [chatMounted, setChatMounted] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // 「我是誰」由資料推導，不另外存一份會過期的 state。
@@ -330,6 +335,7 @@ const Dashboard: React.FC = () => {
   const readOnly = trip.is_archived;
   const goHome = () => navigate('/');
   const openRecap = readOnly ? () => setRecapOpen(true) : undefined;
+  const openChat = () => { setChatMounted(true); setChatOpen(true); };
   const goCategory = () => { if (trip.category) navigate(`/#cat-${encodeURIComponent(trip.category)}`); };
 
   const chromeProps = {
@@ -343,6 +349,7 @@ const Dashboard: React.FC = () => {
     onBack: goHome,
     onOpenSettings: () => setIsSettingsModalOpen(true),
     onOpenRecap: openRecap,
+    onOpenChat: openChat,
   };
 
   const ticket = (notchBg: string) => (
@@ -376,6 +383,7 @@ const Dashboard: React.FC = () => {
             onAdd={readOnly ? undefined : openNewExpense}
             onCategory={goCategory}
             onOpenRecap={openRecap}
+            onOpenChat={openChat}
           />
 
           {/* 缺少匯率警告：避免統計數字默默算錯 */}
@@ -559,6 +567,25 @@ const Dashboard: React.FC = () => {
       )}
 
       <ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { refetchExpenses(); }} showToast={showToast} editData={editingExpense} />
+      {chatMounted && (
+        <Suspense fallback={null}>
+          <ChatPanel
+            // 換旅程就換一個新的聊天室：上一趟還在等的回覆不能落到這一趟（卡片按存入會記錯旅程）
+            key={trip.id}
+            open={chatOpen}
+            onClose={() => setChatOpen(false)}
+            trip={trip}
+            expenses={allExpenses}
+            balances={stats.balances.GRAND_TOTAL ?? {}}
+            currentUser={currentUser}
+            onPickUser={() => setWelcomeRequested(true)}
+            onChanged={() => { refetchExpenses(); refetchDeleted(); }}
+            onEditExpense={handleEditExpense}
+            onDeleteExpense={requestDelete}
+            showToast={showToast}
+          />
+        </Suspense>
+      )}
       {recapOpen && (
         <Suspense fallback={null}>
           <RecapVideoModal trip={trip} expenses={allExpenses} onClose={() => setRecapOpen(false)} />

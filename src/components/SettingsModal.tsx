@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ASSISTANT_NAME } from '../config/assistant';
 import { 
   X, 
   Save, 
@@ -577,7 +578,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Bot size={18} /></span>
                   <div>
                     <p className="text-sm font-bold">AI 記帳偏好</p>
-                    <p className="text-xs text-muted mt-0.5">耀西解析你說的話或收據時，會參考這段描述</p>
+                    <p className="text-xs text-muted mt-0.5">{ASSISTANT_NAME}解析你說的話或收據時，會參考這段描述</p>
                   </div>
                 </div>
                 <textarea
@@ -590,7 +591,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 />
                 <p className={ui.hint}>
                   整趟旅程共用一份，在 LINE 裡按「⚙️ 記帳偏好」看到的也是這一份，留空代表沒有偏好。
-                  不要在這裡寫「我是○○」：群組裡每個人看到的都是同一句，耀西會用 LINE 顯示名稱判斷「我」是誰。
+                  不要在這裡寫「我是○○」：群組裡每個人看到的都是同一句，{ASSISTANT_NAME}會用 LINE 顯示名稱判斷「我」是誰。
                 </p>
               </section>
 
