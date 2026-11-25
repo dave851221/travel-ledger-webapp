@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Camera, CornerUpLeft, Loader2, Mic, Trash2, X } from 'lucide-react';
+import { ArrowUp, Camera, CornerUpLeft, ImagePlus, Loader2, Mic, Trash2, X } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import { ui } from '../../components/ui';
 import ExpenseModal from '../../components/ExpenseModal';
@@ -42,14 +42,14 @@ interface Props {
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-const HELP_TEXT = `${ASSISTANT_CATCHPHRASE} 我是${ASSISTANT_NAME} ${ASSISTANT_EMOJI} 在這裡可以：
-・直接打字記帳：「晚餐 3200 小明付」「計程車 1500 我付，我跟阿杰分」，一句話記好幾筆也行
-・按 📷 傳收據或商品照片（可以一次選好幾張），我會讀出金額和品項
-・卡片上可以直接改金額、日期、分類，點開「付款／分攤」就能選人；逐項分、只算我也都在卡片上
-・想補充某張卡片，按卡片下面的「回覆」再打字，我就知道你在講哪一張
-・問帳：「這趟總共花多少？」「我還要付誰多少？」「上週吃最多的是哪天？」
-・問行程、天氣、附近吃什麼，或請我改／刪已經存好的支出（會先出一張確認卡）
-下面那排按鈕是常用查詢，按了馬上出來。`;
+const HELP_TEXT = `${ASSISTANT_CATCHPHRASE} 我是${ASSISTANT_NAME} ${ASSISTANT_EMOJI}
+・打字記帳：「晚餐 3200 小明付」
+・📷 拍收據或選照片，我幫你讀
+・卡片上可以直接改；按「回覆」補充那一張
+・問我花多少、行程、天氣都可以`;
+
+/** 手機、平板（觸控為主）才有「直接開相機」；電腦上 capture 沒作用，按了只會開檔案 */
+const TOUCH_DEVICE = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
 
 const EXAMPLES = ['晚餐 3000 大家分', '今天總共花多少？', '明天的行程是什麼？'];
 
@@ -96,6 +96,7 @@ const ChatPanel: React.FC<Props> = ({
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef(chat);
   chatRef.current = chat;
@@ -610,8 +611,22 @@ const ChatPanel: React.FC<Props> = ({
           <div className="flex items-end gap-1.5">
             {!readOnly && (
               <>
-                <button onClick={() => fileRef.current?.click()} className={`${ui.iconBtn} shrink-0 w-10 h-10`} aria-label="傳收據照片" title="傳收據或商品照片（可以選好幾張）">
-                  <Camera size={21} />
+                {/* 直接開相機拍（手機才有；電腦上 capture 沒作用，按了只是開檔案，所以不顯示） */}
+                {TOUCH_DEVICE && (
+                  <button onClick={() => cameraRef.current?.click()} className={`${ui.iconBtn} shrink-0 w-10 h-10`} aria-label="拍收據" title="直接開相機拍收據">
+                    <Camera size={21} />
+                  </button>
+                )}
+                <input
+                  ref={cameraRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; sendPhotos(files); }}
+                />
+                <button onClick={() => fileRef.current?.click()} className={`${ui.iconBtn} shrink-0 w-10 h-10`} aria-label="從相簿選照片" title="從相簿選收據或商品照片（可以選好幾張）">
+                  <ImagePlus size={21} />
                 </button>
                 <input
                   ref={fileRef}
