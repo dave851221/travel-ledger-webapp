@@ -631,7 +631,10 @@ export async function handleDelete(scope: ChatScope, req: ChatRequest, mode: 'de
 /** ❌ 取消草稿：把已經上傳的照片刪掉（只收這趟旅程資料夾裡的） */
 export async function handleDiscard(scope: ChatScope, req: ChatRequest): Promise<ActionReply> {
   const { db, trip } = scope
-  const paths = (Array.isArray(req.photoIds) ? req.photoIds : []).filter((p) => isTripPhotoPath(p, trip.id)).slice(0, 10)
+  // 只刪網頁聊天自己上傳的（chat_ 開頭）：同一個資料夾裡還有 LINE 草稿與表單的照片，不能被這裡刪掉
+  const paths = (Array.isArray(req.photoIds) ? req.photoIds : [])
+    .filter((p): p is string => isTripPhotoPath(p, trip.id) && p.slice(p.lastIndexOf('/') + 1).startsWith('chat_'))
+    .slice(0, 10)
   if (paths.length > 0) {
     // 已經存進某一筆支出的照片不能刪（例如先在表單裡存過、又回來按取消）
     const { data: used } = await db.from('expenses').select('photo_urls').eq('trip_id', trip.id).overlaps('photo_urls', paths)

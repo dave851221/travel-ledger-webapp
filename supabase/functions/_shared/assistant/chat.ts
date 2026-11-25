@@ -40,6 +40,7 @@ import {
   summarizeHistoryEntry,
   summarizeTripExpenses,
 } from "./guards.ts"
+import { PERSONA } from "./persona.ts"
 import type { OutstandingDraft, PhotoSelectResponse } from "./types.ts"
 
 /** 近期支出與全庫搜尋只 select 這幾個欄位 */
@@ -459,7 +460,7 @@ export function sanitizeReplyText(text: unknown, seenText: string, maxLength = 4
   if (maps.removed.length > 0) console.warn('[GUARD] Removed unverified map links:', maps.removed.join(' '))
   safe = maps.text
   if (safe.length > maxLength) safe = safe.substring(0, maxLength) + "\n\n...(內容過長已截斷)"
-  if (!safe) safe = 'Yoshi! 🥚 有什麼需要幫忙的嗎？'
+  if (!safe) safe = `${PERSONA.catchphrase} ${PERSONA.emoji} 有什麼需要幫忙的嗎？`
   return safe
 }
 

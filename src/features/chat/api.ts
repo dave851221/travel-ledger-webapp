@@ -4,6 +4,7 @@
 import imageCompression from 'browser-image-compression';
 import { supabase } from '../../api/supabase';
 import { RECEIPTS_BUCKET } from '../../utils/storage';
+import { ASSISTANT_NAME } from '../../config/assistant';
 import type { ActionReply, ChatReply, DraftExpense, HistoryTurn, ReplyTarget, WebDraft } from './types';
 
 type Base = { tripId: string; memberName: string | null };
@@ -13,7 +14,7 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   if (error) {
     // 離線或函式掛了：給一句看得懂的話，不要把 FunctionsFetchError 原文丟給使用者
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-    throw new Error(offline ? '目前離線，連上網路後再試一次。' : '耀西暫時連不上，請稍後再試。');
+    throw new Error(offline ? '目前離線，連上網路後再試一次。' : `${ASSISTANT_NAME}暫時連不上，請稍後再試。`);
   }
   return data as T;
 }

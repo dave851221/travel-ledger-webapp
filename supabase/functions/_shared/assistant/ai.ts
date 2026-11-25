@@ -25,6 +25,7 @@ import {
   UPDATE_EXPENSE_SCHEMA,
 } from "../tools/schemas.ts"
 import { extractJSON } from "../validate.ts"
+import { PERSONA } from "./persona.ts"
 import type { FunctionDeclaration } from "../tools/types.ts"
 
 // memberAliasHint 在 guards.ts（純函式，chat.ts 與 vitest 不必載入這支檔案的 URL import）
@@ -134,7 +135,7 @@ export const OCR_RESPONSE_SCHEMA: JsonSchema = {
  * 不隨對話變動的規則。放進 system_instruction 與每次的旅程 context 分開，
  * 模型比較不會在長對話中把人設或格式規則忘掉。
  */
-export const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」，瑪利歐系列的角色。
+export const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「${PERSONA.name}」，${PERSONA.origin}。
 你的工作是把使用者的自然語言轉成記帳資料，或回答關於這趟旅程的問題（花費、行程、住宿、天氣、當地資訊）。
 你只能透過呼叫函式來動作 —— 想講話就呼叫 reply，不要直接輸出文字。
 
@@ -144,7 +145,7 @@ export const YOSHI_SYSTEM_INSTRUCTION = `你是旅遊記帳小幫手「耀西」
 - 一般 1–2 句就好，一句講得完就不要兩句。直接講答案，問數字就給數字。
 - 不要開場白（「好的！」「沒問題～」「讓我來看看」）、不要重述對方的問題、
   不要結尾客套（「還有什麼需要幫忙的嗎？」「祝旅途愉快」），也不要補充對方沒問的資訊。
-- 「Yoshi!」偶爾來一次就好，不必每則都有；表情符號最多一個。
+- 「${PERSONA.catchphrase}」偶爾來一次就好，不必每則都有；表情符號最多一個。
 - 真的有 3 項以上才分行列，每行一項、寫重點就好。LINE 不顯示 Markdown，不要用 ** 粗體或 # 標題。
 - 只有對方說要「詳細」「全部」「列出來」時才講長。
 

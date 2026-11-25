@@ -10,6 +10,7 @@ import { useBackClose } from '../../hooks/useBackClose';
 import { isSubmitEnter } from '../../utils/keyboard';
 import { photoUrl } from '../../utils/storage';
 import { formatMoney } from '../../utils/money';
+import { ASSISTANT_CATCHPHRASE, ASSISTANT_CHAT_TITLE, ASSISTANT_EMOJI, ASSISTANT_NAME } from '../../config/assistant';
 import * as api from './api';
 import {
   applyBlocks, emptyChat, lastSavedDraft, latestPendingDraft, loadChat, MAX_HISTORY, newId, patchItem,
@@ -41,7 +42,7 @@ interface Props {
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-const HELP_TEXT = `Yoshi! 我是耀西 🥚 在這裡可以：
+const HELP_TEXT = `${ASSISTANT_CATCHPHRASE} 我是${ASSISTANT_NAME} ${ASSISTANT_EMOJI} 在這裡可以：
 ・直接打字記帳：「晚餐 3200 小明付」「計程車 1500 我付，我跟阿杰分」，一句話記好幾筆也行
 ・按 📷 傳收據或商品照片（可以一次選好幾張），我會讀出金額和品項
 ・卡片上可以直接改金額、日期、分類，點開「付款／分攤」就能選人；逐項分、只算我也都在卡片上
@@ -177,7 +178,7 @@ const ChatPanel: React.FC<Props> = ({
       }
     }
 
-    setThinking('耀西正在想…');
+    setThinking(`${ASSISTANT_NAME}正在想…`);
     try {
       const s = chatRef.current;
       const reply = await api.sendMessage({
@@ -225,7 +226,12 @@ const ChatPanel: React.FC<Props> = ({
   const changeDraft = (item: DraftItem, exp: DraftExpense) =>
     patch<DraftItem>(item.id, { draft: { ...item.draft, exp } });
 
+  /** 正在送出的卡片。按鈕的 disabled 要等下一次 render，手快連點兩下會存成兩筆，所以另外用 ref 擋 */
+  const inFlight = useRef(new Set<string>());
+
   const saveItem = async (item: DraftItem, exp?: DraftExpense) => {
+    if (inFlight.current.has(item.id)) return;
+    inFlight.current.add(item.id);
     const draft = exp ? { ...item.draft, exp } : item.draft;
     setBusyFor(item.id, true);
     try {
@@ -241,6 +247,7 @@ const ChatPanel: React.FC<Props> = ({
     } catch (e) {
       showToast(e instanceof Error ? e.message : '存入失敗，請再試一次', 'error');
     } finally {
+      inFlight.current.delete(item.id);
       setBusyFor(item.id, false);
     }
   };
@@ -262,7 +269,8 @@ const ChatPanel: React.FC<Props> = ({
   }
 
   async function undo(item: DraftItem): Promise<string | null> {
-    if (!item.expenseId) return null;
+    if (!item.expenseId || inFlight.current.has(item.id)) return null;
+    inFlight.current.add(item.id);
     setBusyFor(item.id, true);
     try {
       const res = await api.deleteExpense({ ...base, expenseId: item.expenseId, undo: true });
@@ -278,11 +286,14 @@ const ChatPanel: React.FC<Props> = ({
       showToast(e instanceof Error ? e.message : '撤銷失敗', 'error');
       return null;
     } finally {
+      inFlight.current.delete(item.id);
       setBusyFor(item.id, false);
     }
   }
 
   const applyUpdateCard = async (item: Extract<ChatItem, { kind: 'update' }>) => {
+    if (inFlight.current.has(item.id)) return;
+    inFlight.current.add(item.id);
     setBusyFor(item.id, true);
     try {
       const res = await api.applyUpdate({ ...base, expenseId: item.expenseId, exp: item.exp });
@@ -291,11 +302,14 @@ const ChatPanel: React.FC<Props> = ({
     } catch (e) {
       showToast(e instanceof Error ? e.message : '修改失敗', 'error');
     } finally {
+      inFlight.current.delete(item.id);
       setBusyFor(item.id, false);
     }
   };
 
   const confirmDelete = async (item: Extract<ChatItem, { kind: 'delete' }>) => {
+    if (inFlight.current.has(item.id)) return;
+    inFlight.current.add(item.id);
     setBusyFor(item.id, true);
     try {
       const res = await api.deleteExpense({ ...base, expenseId: item.expenseId });
@@ -304,6 +318,7 @@ const ChatPanel: React.FC<Props> = ({
     } catch (e) {
       showToast(e instanceof Error ? e.message : '刪除失敗', 'error');
     } finally {
+      inFlight.current.delete(item.id);
       setBusyFor(item.id, false);
     }
   };
@@ -446,14 +461,14 @@ const ChatPanel: React.FC<Props> = ({
     <div className="fixed inset-0 z-[45] flex md:justify-end bg-scrim/0 md:bg-scrim anim-fade" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <section
         className="relative flex flex-col w-full md:w-[440px] h-dvh bg-canvas md:border-l md:border-line md:shadow-2xl"
-        aria-label="跟耀西聊天記帳"
+        aria-label={`跟${ASSISTANT_NAME}聊天記帳`}
         role="dialog"
       >
         {/* 標題列 */}
         <header className="shrink-0 flex items-center gap-2 px-3 h-14 border-b border-line bg-surface" style={{ paddingTop: 'env(safe-area-inset-top)', boxSizing: 'content-box' }}>
           <BrandMark />
           <div className="flex-1 min-w-0 leading-tight">
-            <p className="text-[15px] font-bold truncate">耀西記帳</p>
+            <p className="text-[15px] font-bold truncate">{ASSISTANT_CHAT_TITLE}</p>
             <p className="text-[11px] text-muted truncate">
               {trip.name}{currentUser ? ` · 我是 ${currentUser}` : ''}{pendingCount > 0 ? ` · ${pendingCount} 張待確認` : ''}
             </p>

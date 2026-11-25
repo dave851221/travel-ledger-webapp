@@ -105,11 +105,13 @@ export const DraftCard: React.FC<DraftCardProps> = ({
   const evenSplit = splits.length > 0 && new Set(Object.values(exp.s)).size <= 2;
   const editable = pending && !busy && !readOnly && !item.currencies;
 
-  const commitAmount = () => {
-    if (amountText === null) return;
-    const n = parseFloat(amountText);
-    if (Number.isFinite(n) && n !== exp.a) onChange(changeAmount(exp, trip, n));
-    setAmountText(null);
+  // 每打一個字就寫回卡片（不是等離開輸入框才寫）：手機上打完金額直接按「確認存入」，
+  // blur 與 click 同一下發生，等 blur 才寫的話存進去的會是舊金額
+  const typeAmount = (value: string) => {
+    setAmountText(value);
+    const n = parseFloat(value);
+    const next = Number.isFinite(n) ? n : 0;
+    if (next !== exp.a) onChange(changeAmount(exp, trip, next));
   };
 
   const photo = item.draft.photoIds[0];
@@ -158,8 +160,8 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                 className={`num text-2xl font-extrabold bg-transparent outline-none w-full border-b ${Number(exp.a) > 0 ? 'border-transparent' : 'border-warn'} focus:border-line`}
                 value={amountText ?? (Number(exp.a) > 0 ? String(exp.a) : '')}
                 placeholder="填金額"
-                onChange={e => setAmountText(e.target.value)}
-                onBlur={commitAmount}
+                onChange={e => typeAmount(e.target.value)}
+                onBlur={() => setAmountText(null)}
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                 aria-label="金額"
               />

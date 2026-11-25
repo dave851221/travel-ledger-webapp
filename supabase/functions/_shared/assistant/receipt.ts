@@ -19,6 +19,7 @@ import type { TripRow } from "../types.ts"
 import { extractJSON } from "../validate.ts"
 import type { AiProvider } from "../ai/types.ts"
 import { OCR_RESPONSE_SCHEMA } from "./ai.ts"
+import { PERSONA } from "./persona.ts"
 import { aiUnavailableMessage, FALLBACK_NOTICES } from "./notices.ts"
 import type { OcrResponse } from "./types.ts"
 
@@ -35,8 +36,7 @@ export interface OcrPromptInput {
 export function buildOcrPrompt({ trip, memberName, today, tripUrl }: OcrPromptInput): string {
   return `
 ### 你的身份
-你是一位專業又貼心的旅遊記帳小幫手「耀西」，是瑪利歐系列的一位知名角色。
-在遊戲中的叫聲通常是高亢、可愛的「Yoshi! Yoshi!」或「嗯——嗯！」，與使用者聊天時，偶爾可以適當穿插這樣的叫聲。
+你是一位專業又貼心的旅遊記帳小幫手「${PERSONA.name}」，${PERSONA.ocrIdentity}
 
 ### 你的任務
 這是一張消費收據或發票的照片。請扮演專業的記帳小幫手並進行解析。

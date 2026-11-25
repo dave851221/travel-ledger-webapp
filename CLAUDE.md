@@ -304,6 +304,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 | `chat.ts` | 文字路徑：`buildTripContext`、`buildConversation`、`photoDraftHint`、`prepareProposedExpenses`（含打字版逐項分）、`prepareProposedUpdate`、`sanitizeReplyText`、`chooseReceiptExpense` |
 | `receipt.ts` | 收據 OCR：`buildOcrPrompt`、`recognizeReceipt`（三種照片、付款人規則、品項明細） |
 | `guards.ts` | 原 `line-webhook/guards.ts` 的純函式（那裡原樣轉出，`guards.test.ts` 不動） |
+| `persona.ts` | 機器人的名字與人設（prompt 裡的「耀西」全從這裡拿）。前端的名字在 `src/config/assistant.ts`。公開營業版換名字只改這兩個檔；LINE 舊機器人自己的文案（自我介紹、「耀西」開頭叫它）留在 line-webhook |
 | `types.ts`／`notices.ts`／`time.ts`／`itinerary.ts` | 草稿型別、AI 失敗的說法、旅程時區與今天、讀行程 JSON |
 
 **`web-chat` Edge Function**（`supabase functions deploy web-chat --no-verify-jwt`；前端用 publishable key 不是 JWT）：一個 POST、`action` 決定做什麼 ——

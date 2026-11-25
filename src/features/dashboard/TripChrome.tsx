@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Images, Lock, MessageCircle, Plus, Settings, Trash2, UserRound } from 'lucide-react';
 import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
+import { ASSISTANT_CHAT_TITLE, ASSISTANT_NAME } from '../../config/assistant';
 import { ui } from '../../components/ui';
 import Dropdown, { MenuDivider, MenuItem, MenuLabel } from './Dropdown';
 import MemberAvatar from './MemberAvatar';
@@ -66,7 +67,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
           <h1 className="text-base font-bold truncate">{trip.name}</h1>
         </div>
         {onOpenChat && (
-          <button onClick={onOpenChat} aria-label="跟耀西聊天記帳" className={`${ui.iconBtn} text-ink`}><MessageCircle size={21} /></button>
+          <button onClick={onOpenChat} aria-label={`跟${ASSISTANT_NAME}聊天記帳`} className={`${ui.iconBtn} text-ink`}><MessageCircle size={21} /></button>
         )}
         <Dropdown
           open={whoOpen}
@@ -134,7 +135,7 @@ export const SideNav: React.FC<ChromeProps> = ({
         ))}
       </nav>
       {onOpenChat && (
-        <button onClick={onOpenChat} className={`${navBtn(false)} mt-3`}><MessageCircle size={18} />耀西記帳</button>
+        <button onClick={onOpenChat} className={`${navBtn(false)} mt-3`}><MessageCircle size={18} />{ASSISTANT_CHAT_TITLE}</button>
       )}
       <div className="flex-1" />
       <button onClick={() => onChange(TAB_RECYCLE.key)} className={navBtn(active === 'recycle')}>
@@ -178,7 +179,7 @@ export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCat
         <IdentityItems trip={trip} currentUser={currentUser} onPick={onPick} close={() => setWhoOpen(false)} />
       </Dropdown>
       {onOpenChat && (
-        <button onClick={onOpenChat} className={`${ui.btnSecondary} py-2`}><MessageCircle size={16} />耀西記帳</button>
+        <button onClick={onOpenChat} className={`${ui.btnSecondary} py-2`}><MessageCircle size={16} />{ASSISTANT_CHAT_TITLE}</button>
       )}
       {onAdd && (
         <button onClick={onAdd} className={`${ui.btnPrimary} py-2`}><Plus size={16} strokeWidth={2.6} />新增支出</button>
