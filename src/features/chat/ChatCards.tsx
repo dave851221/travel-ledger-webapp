@@ -116,14 +116,17 @@ export const DraftCard: React.FC<DraftCardProps> = ({
 
   return (
     <div className={`${ui.card} overflow-hidden w-full max-w-[400px] ${pending ? '' : 'opacity-[.92]'}`}>
-      {photo && (
-        <button onClick={() => onOpenPhoto(photo)} className="block w-full bg-sunk" aria-label="看收據照片">
-          <img src={photoUrl(photo)} alt="收據" className="w-full max-h-40 object-cover" loading="lazy" />
-        </button>
-      )}
       <div className="px-4 pt-3 pb-3 space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-bold text-accent">{item.title}</span>
+          <span className="flex items-center gap-2 min-w-0">
+            {/* 照片在上面「傳出的照片」已經看得到，這裡只放小縮圖，點了放大 */}
+            {photo && (
+              <button onClick={() => onOpenPhoto(photo)} className="shrink-0 w-9 h-9 rounded-lg overflow-hidden bg-sunk border border-line" aria-label="看收據照片">
+                <img src={photoUrl(photo)} alt="收據" className="w-full h-full object-cover" loading="lazy" />
+              </button>
+            )}
+            <span className="text-xs font-bold text-accent">{item.title}</span>
+          </span>
           {item.status === 'saved' && <StatusPill tone="pos"><Check size={12} />已存入</StatusPill>}
           {item.status === 'undone' && <StatusPill tone="muted"><Undo2 size={12} />已撤銷</StatusPill>}
           {item.status === 'cancelled' && <StatusPill tone="muted"><X size={12} />已取消</StatusPill>}
@@ -132,11 +135,13 @@ export const DraftCard: React.FC<DraftCardProps> = ({
 
         {/* 品名與金額：草稿可以直接改 */}
         {editable ? (
-          <input
-            className="w-full bg-transparent text-lg font-bold text-ink outline-none border-b border-transparent focus:border-line placeholder:text-muted"
+          <textarea
+            rows={1}
+            className="w-full resize-none bg-transparent text-lg font-bold leading-snug text-ink outline-none border-b border-transparent focus:border-line placeholder:text-muted"
+            style={{ fieldSizing: 'content' } as React.CSSProperties}
             value={exp.d}
             placeholder={item.unidentified ? '這是什麼？' : '品名'}
-            onChange={e => onChange({ ...exp, d: e.target.value })}
+            onChange={e => onChange({ ...exp, d: e.target.value.replace(/\n/g, ' ') })}
             aria-label="品名"
           />
         ) : (

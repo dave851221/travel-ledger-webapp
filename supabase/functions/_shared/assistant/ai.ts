@@ -27,20 +27,8 @@ import {
 import { extractJSON } from "../validate.ts"
 import type { FunctionDeclaration } from "../tools/types.ts"
 
-/**
- * 給 AI 的成員別名提示。
- *
- * 以前這段直接把「代杰／阿杰／Jay／小杰」寫死在 prompt 裡，
- * 對其他旅程來說那是一個不存在的人名，只會變成噪音。
- * 改成用這趟旅程實際的成員舉例。
- */
-export function memberAliasHint(members: string[]): string {
-  if (!members || members.length === 0) return ''
-  const sample = members[0]
-  return `\n【成員名稱】只能使用：${members.join('、')}
-使用者可能用暱稱或簡稱（例如把「${sample}」說成別的叫法），請對應回上面清單裡的正式名稱；
-對應不出來時就用 reply 反問，不要自己造一個名字。\n`
-}
+// memberAliasHint 在 guards.ts（純函式，chat.ts 與 vitest 不必載入這支檔案的 URL import）
+export { memberAliasHint } from "./guards.ts"
 
 /** 下載收據照片並轉成送給 AI 的 base64 */
 export async function fetchPhotoPart(photoUrl: string): Promise<AiMediaPart | null> {

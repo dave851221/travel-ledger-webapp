@@ -30,10 +30,10 @@ import type { SupabaseClient } from "../deps.ts"
 import type { ExpenseRow, TripRow } from "../types.ts"
 import { extractJSON, resolveMember } from "../validate.ts"
 import type { AiMessage, AiProvider } from "../ai/types.ts"
-import { memberAliasHint } from "./ai.ts"
 import {
   claimsCompletedAction,
   matchExpensesByQuestion,
+  memberAliasHint,
   mentionsEditingExisting,
   pickExpenseByRef,
   sanitizeMapLinks,
@@ -313,7 +313,12 @@ export function prepareProposedExpenses(
 
   // 🧾 逐項分（打字版）：「雞皮、啤酒是賢佑的，其他平分」。
   // 模型只負責說「哪幾項是誰的」，金額由程式依品項算（含稅與折扣的比例），加總一定等於總額。
-  const assignments = Array.isArray(args.item_assignments) ? args.item_assignments as ToolArgs[] : []
+  // 模型有時把 item_assignments／others 塞進 expenses[0] 裡，而不是放在最外層（2026-11-25 實測，約一半）——
+  // 只改一張草稿時兩種寫法意思一樣，都收
+  const first = (rawList[0] ?? {}) as ToolArgs
+  const assignmentsRaw = args.item_assignments ?? first.item_assignments
+  const othersRaw = args.others ?? first.others
+  const assignments = Array.isArray(assignmentsRaw) ? assignmentsRaw as ToolArgs[] : []
   if (correctedDraft && correctedDraft.items.length > 0 && assignments.length > 0 && prepared[0]) {
     const items = correctedDraft.items
     const owners: string[][] = items.map(() => [])
@@ -330,7 +335,7 @@ export function prepareProposedExpenses(
         if (Number.isInteger(i) && i >= 0 && i < items.length) owners[i] = [...new Set([...owners[i], ...who])]
       }
     }
-    const othersArg = toMembers(args.others)
+    const othersArg = toMembers(othersRaw)
     if (unknownOwners.length > 0) {
       return { kind: 'message', text: `😅 對不到這幾個名字：${unknownOwners.join('、')}\n目前成員：${trip.members.join('、')}` }
     }
@@ -423,13 +428,28 @@ export function prepareProposedUpdate(
 }
 
 /**
+ * 模型偶爾不呼叫函式，而是把呼叫「寫成文字」：`reply({"text": "…"})`（附了圖片的那輪比較常見，2026-11-25）。
+ * 迴圈會把純文字當成 reply，使用者就看到一整串 JSON。認得出來就取出裡面的 text。
+ */
+export function unwrapFakeReplyCall(text: string): string {
+  const m = text.trim().match(/^reply\s*\(\s*(\{[\s\S]*\})\s*\)\s*$/)
+  if (!m) return text
+  try {
+    const parsed = JSON.parse(m[1])
+    return typeof parsed?.text === 'string' ? parsed.text : text
+  } catch {
+    return text
+  }
+}
+
+/**
  * reply 送出前的最後一道防線：
  * - 模型說「已經幫您刪除了」—— 那要使用者按了確認才生效，假訊息比直說做不到還糟，換掉
  * - 沒查過的地圖連結拿掉
  * - 太長截斷、空的補一句
  */
 export function sanitizeReplyText(text: unknown, seenText: string, maxLength = 4900): string {
-  let safe = String(text ?? '')
+  let safe = unwrapFakeReplyCall(String(text ?? ''))
   if (claimsCompletedAction(safe)) {
     console.warn('[GUARD] Blocked a false completion claim:', safe.substring(0, 120))
     safe = '我可以幫你提議修改或刪除，但要你按了確認卡片才會真的生效 🙇\n\n'

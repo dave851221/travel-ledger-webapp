@@ -129,6 +129,9 @@ const ChatPanel: React.FC<Props> = ({
   const patch = useCallback(<T extends ChatItem>(id: string, p: Partial<T>) => update(s => ({ ...s, items: patchItem<T>(s.items, id, p) })), [update]);
   const botText = (t: string): ChatItem => ({ id: newId(), at: Date.now(), role: 'bot', kind: 'text', text: t });
   const setBusyFor = (id: string, v: boolean) => setBusy(b => ({ ...b, [id]: v }));
+  /** 按了卡片上的按鈕也記進對話紀錄：不然模型以為那張卡還沒存，「剛剛那筆改 500」會再出一張新卡 */
+  const remember = (content: string) => update(s => ({ ...s, history: [...s.history, { role: 'model' as const, content }].slice(-MAX_HISTORY) }));
+  const refOf = (id?: string) => (id ? ` ref=${id.slice(0, 8)}` : '');
 
   const base = { tripId: trip.id, memberName: currentUser };
 
@@ -160,7 +163,9 @@ const ChatPanel: React.FC<Props> = ({
     if (UNDO_KEYWORDS.includes(t)) {
       const last = lastSavedDraft(chatRef.current.items);
       if (!last) { addItems([botText('這裡沒有剛存入、可以撤銷的支出。要刪其他筆，打「刪除支出」從清單挑。')]); return; }
-      await undo(last);
+      const result = await undo(last);
+      // 卡片在上面，可能已經捲出畫面：在下面也回一句
+      if (result) addItems([botText(result)]);
       return;
     }
     if (CANCEL_DRAFT_KEYWORDS.includes(t) && !target) {
@@ -227,6 +232,7 @@ const ChatPanel: React.FC<Props> = ({
       const res = await api.saveDraft({ ...base, draft });
       if (res.ok) {
         patch<DraftItem>(item.id, { draft, status: 'saved', expenseId: res.expenseId, resultText: res.text });
+        remember(`[已存入${refOf(res.expenseId)}] ${draft.exp.d} ${draft.exp.a} ${draft.exp.c}（使用者按了確認存入，這筆已經在帳本裡，要改請用 propose_expense_update）`);
         onChanged();
       } else {
         if (exp) patch<DraftItem>(item.id, { draft });
@@ -249,24 +255,28 @@ const ChatPanel: React.FC<Props> = ({
 
   async function cancelDraft(item: DraftItem) {
     patch<DraftItem>(item.id, { status: 'cancelled' });
+    remember(`[已取消草稿 nonce=${item.draft.nonce}] ${item.draft.exp.d}（沒有存入）`);
     if (item.draft.photoIds.length > 0) {
       try { await api.discardPhotos({ ...base, photoIds: item.draft.photoIds }); } catch { /* 照片留著只佔空間，之後的孤兒清理會收 */ }
     }
   }
 
-  async function undo(item: DraftItem) {
-    if (!item.expenseId) return;
+  async function undo(item: DraftItem): Promise<string | null> {
+    if (!item.expenseId) return null;
     setBusyFor(item.id, true);
     try {
       const res = await api.deleteExpense({ ...base, expenseId: item.expenseId, undo: true });
       if (res.ok) {
         patch<DraftItem>(item.id, { status: 'undone', resultText: res.text });
+        remember(`[已撤銷${refOf(item.expenseId)}] ${item.draft.exp.d}（已移到垃圾桶）`);
         onChanged();
-      } else {
-        showToast(res.text, 'error');
+        return res.text;
       }
+      showToast(res.text, 'error');
+      return null;
     } catch (e) {
       showToast(e instanceof Error ? e.message : '撤銷失敗', 'error');
+      return null;
     } finally {
       setBusyFor(item.id, false);
     }
@@ -276,7 +286,7 @@ const ChatPanel: React.FC<Props> = ({
     setBusyFor(item.id, true);
     try {
       const res = await api.applyUpdate({ ...base, expenseId: item.expenseId, exp: item.exp });
-      if (res.ok) { patch(item.id, { status: 'done', resultText: res.text }); onChanged(); }
+      if (res.ok) { patch(item.id, { status: 'done', resultText: res.text }); remember(`[已修改${refOf(item.expenseId)}] ${item.existing.description}`); onChanged(); }
       else showToast(res.text, 'error');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '修改失敗', 'error');
@@ -289,7 +299,7 @@ const ChatPanel: React.FC<Props> = ({
     setBusyFor(item.id, true);
     try {
       const res = await api.deleteExpense({ ...base, expenseId: item.expenseId });
-      if (res.ok) { patch(item.id, { status: 'done', resultText: res.text }); onChanged(); }
+      if (res.ok) { patch(item.id, { status: 'done', resultText: res.text }); remember(`[已刪除${refOf(item.expenseId)}] ${item.existing.description}`); onChanged(); }
       else showToast(res.text, 'error');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '刪除失敗', 'error');
@@ -546,29 +556,30 @@ const ChatPanel: React.FC<Props> = ({
         </footer>
       </section>
 
-      {/* 完整表單：草稿存成新的一筆；修改預覽改的是既有那一筆 */}
-      {formFor && formItem && (
-        <ExpenseModal
-          isOpen
-          onClose={() => setFormFor(null)}
-          trip={trip}
-          currentUser={currentUser}
-          showToast={showToast}
-          editData={formFor.expense}
-          onSuccess={(savedId) => {
-            onChanged();
-            if (formItem.kind === 'draft') {
-              patch<DraftItem>(formItem.id, {
-                status: 'saved',
-                expenseId: savedId ?? undefined,
-                resultText: '✅ 已用完整表單存入，內容以帳目裡的為準。',
-              });
-            } else if (formItem.kind === 'update') {
-              patch(formItem.id, { status: 'done', resultText: '✏️ 已用表單修改，內容以帳目裡的為準。' });
-            }
-          }}
-        />
-      )}
+      {/* 完整表單：草稿存成新的一筆；修改預覽改的是既有那一筆。
+          跟 Dashboard 一樣一直掛著、用 isOpen 開關：一掛上就是開的話，開發模式（StrictMode）重跑的
+          自動分帳 effect 會拿第一次 render 的 0 元把逐項分好的金額蓋掉 */}
+      <ExpenseModal
+        isOpen={!!formFor && !!formItem}
+        onClose={() => setFormFor(null)}
+        trip={trip}
+        currentUser={currentUser}
+        showToast={showToast}
+        editData={formFor?.expense ?? null}
+        onSuccess={(savedId) => {
+          onChanged();
+          if (formItem?.kind === 'draft') {
+            patch<DraftItem>(formItem.id, {
+              status: 'saved',
+              expenseId: savedId ?? undefined,
+              resultText: '✅ 已用完整表單存入，內容以帳目裡的為準。',
+            });
+            remember(`[已存入${refOf(savedId ?? undefined)}] ${formFor?.expense.description ?? ''}（用完整表單存的）`);
+          } else if (formItem?.kind === 'update') {
+            patch(formItem.id, { status: 'done', resultText: '✏️ 已用表單修改，內容以帳目裡的為準。' });
+          }
+        }}
+      />
 
       {itemsFor && (
         <FullScreen onClose={() => setItemsFor(null)}>
@@ -586,7 +597,12 @@ const ChatPanel: React.FC<Props> = ({
               addItems([botText(`🧾 照品項分好了：${summary}。確認沒問題就按卡片上的「確認存入」。`)]);
               setItemsFor(null);
             }}
-            onSkip={() => setItemsFor(null)}
+            // 「直接編輯」：跳過指派，打開完整表單自己填每個人的金額
+            onSkip={() => {
+              const cur = findDraft(itemsFor.id) ?? itemsFor;
+              setItemsFor(null);
+              setFormFor({ itemId: cur.id, expense: draftToExpense(cur.draft, trip) });
+            }}
           />
         </FullScreen>
       )}

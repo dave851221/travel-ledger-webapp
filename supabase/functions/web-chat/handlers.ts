@@ -49,7 +49,7 @@ import { createItineraryLoader } from "../_shared/assistant/itinerary.ts"
 import { aiUnavailableMessage, FALLBACK_NOTICES } from "../_shared/assistant/notices.ts"
 import { recognizeReceipt } from "../_shared/assistant/receipt.ts"
 import { tripToday } from "../_shared/assistant/time.ts"
-import type { DraftExpense } from "../_shared/assistant/types.ts"
+import type { DraftExpense, OutstandingDraft } from "../_shared/assistant/types.ts"
 import type { SupabaseClient } from "../_shared/deps.ts"
 import { formatAmount } from "../_shared/finance.ts"
 import { buildSavedText } from "../_shared/savedText.ts"
@@ -172,9 +172,15 @@ function formatFieldValue(value: unknown): string {
 function replyTargetNote(target: ReplyTarget | null, drafts: WebDraft[]): string {
   if (!target) return ''
   if (target.kind === 'draft') {
-    if (!drafts.some(d => d.nonce === target.nonce)) return ''
+    const draft = drafts.find(d => d.nonce === target.nonce)
+    if (!draft) return ''
+    // 有品項的收據：講「哪幾項是誰的」一定要走 item_assignments，金額由程式算（模型自己算的分攤常常是錯的）
+    const itemsNote = draft.items.length > 0
+      ? `這張有品項清單（見【尚未確認的草稿】的 #編號）。使用者講哪幾項是誰的，就把「品項編號 → 成員」填進 item_assignments、`
+        + `其餘由誰分填 others，🚫 不要自己算 split_details。`
+      : ''
     return `【使用者是在回覆這張還沒存的草稿 nonce=${target.nonce}】這句話是在補充或修正它，`
-      + `請用 propose_expenses 回傳修正後的完整一筆，corrects_draft 填 ${target.nonce}（只是在問問題就用 reply）。\n\n`
+      + `請用 propose_expenses 回傳修正後的完整一筆，corrects_draft 填 ${target.nonce}（只是在問問題就用 reply）。${itemsNote}\n\n`
   }
   return `【使用者是在回覆已存檔的支出 ref=${expenseRef(target.id)}${target.label ? `（${target.label}）` : ''}】`
     + `這句話指的就是這一筆：要改用 propose_expense_update、要刪用 propose_expense_delete、問收據用 analyze_receipt，expense_ref 填 ${expenseRef(target.id)}。\n\n`
@@ -272,7 +278,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
       if (retried.call.name === 'propose_expenses') result = retried
     }
 
-    console.log(`[AI] ${result.model} → ${result.call.name}`)
+    console.log(`[AI] ${result.model} → ${result.call.name} ${JSON.stringify(result.call.args).substring(0, 600)}`)
     const { args, name } = result.call
 
     if (name === 'propose_expenses') {
@@ -368,7 +374,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
     }
 
     if (name === 'analyze_receipt') {
-      const answer = await analyzeReceipt(scope, args, text, precision)
+      const answer = await analyzeReceipt(scope, args, text, precision, photoDraft)
       return { blocks: withNotice([{ type: 'text', text: answer.text }]), history: [userTurn, { role: 'model', content: answer.history }] }
     }
 
@@ -390,12 +396,24 @@ async function analyzeReceipt(
   args: ToolArgs,
   text: string,
   precision: Record<string, number>,
+  photoDraft: OutstandingDraft | null,
 ): Promise<{ text: string; history: string }> {
   const { db, trip } = scope
   const question = optionalString(args.question) ?? '請詳細描述此收據的所有品項與金額'
   const label = (e: RecentExpense) => `${e.description} ${formatAmount(e.amount, e.currency, precision)} ${e.currency}`
 
   const byRef = await findExpenseByRef(db, trip.id, args.expense_ref)
+  // 沒指名已存的那一筆、而聊天室裡有一張還沒存的收據草稿：問的就是那一張（LINE 只能找已存的）
+  if (!byRef && photoDraft) {
+    const d = photoDraft.exp
+    const draftLabel = `${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''}`.trim()
+    try {
+      const content = await analyzeReceiptPhoto(ai, photoDraft.photoIds.map(p => photoUrl(db, p)), question, draftLabel)
+      return { text: `🔍 ${draftLabel}（還沒存）\n\n${content}`, history: `[收據分析 草稿 ${photoDraft.nonce}] ${content}` }
+    } catch (err) {
+      console.error('[ANALYZE_DRAFT_PHOTO_ERROR]', err)
+    }
+  }
   let chosen: RecentExpense | null = byRef && (byRef.photo_urls?.length ?? 0) > 0 ? byRef as RecentExpense : null
   if (!chosen) {
     const { data: all } = await db.from('expenses')
