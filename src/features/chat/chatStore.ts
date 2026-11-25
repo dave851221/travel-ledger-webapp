@@ -30,7 +30,9 @@ export function loadChat(tripId: string): ChatState {
     if (!raw) return emptyChat();
     const parsed = JSON.parse(raw);
     if (parsed?.v !== VERSION || !Array.isArray(parsed.items)) return emptyChat();
-    return { items: parsed.items, history: Array.isArray(parsed.history) ? parsed.history : [] };
+    // 上傳到一半就關掉頁面的照片：沒有路徑、預覽網址也失效了，留著只是一個破圖
+    const items = (parsed.items as ChatItem[]).filter(i => !(i.kind === 'photo' && !i.path));
+    return { items, history: Array.isArray(parsed.history) ? parsed.history : [] };
   } catch {
     return emptyChat();
   }

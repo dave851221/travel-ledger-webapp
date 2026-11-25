@@ -79,7 +79,8 @@ interface Base {
 
 export type ChatItem =
   | (Base & { role: 'user'; kind: 'text'; text: string; replyLabel?: string })
-  | (Base & { role: 'user'; kind: 'photo'; path: string })
+  /** path 是空的＝還在上傳；localUrl 只在這次開著的頁面有效（重新整理就沒了） */
+  | (Base & { role: 'user'; kind: 'photo'; path: string; localUrl?: string; status?: 'uploading' | 'reading' | 'failed' })
   | (Base & { role: 'bot'; kind: 'text'; text: string })
   | (Base & {
     role: 'bot';

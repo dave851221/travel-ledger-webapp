@@ -70,6 +70,8 @@ const Dashboard: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [recapOpen, setRecapOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  // 開過一次就一直掛著：關掉聊天室時還在等的回覆（AI、照片辨識）才不會跟著不見
+  const [chatMounted, setChatMounted] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // 「我是誰」由資料推導，不另外存一份會過期的 state。
@@ -333,7 +335,7 @@ const Dashboard: React.FC = () => {
   const readOnly = trip.is_archived;
   const goHome = () => navigate('/');
   const openRecap = readOnly ? () => setRecapOpen(true) : undefined;
-  const openChat = () => setChatOpen(true);
+  const openChat = () => { setChatMounted(true); setChatOpen(true); };
   const goCategory = () => { if (trip.category) navigate(`/#cat-${encodeURIComponent(trip.category)}`); };
 
   const chromeProps = {
@@ -565,7 +567,7 @@ const Dashboard: React.FC = () => {
       )}
 
       <ExpenseModal isOpen={isExpenseModalOpen} onClose={closeExpenseModal} trip={trip} currentUser={currentUser} onSuccess={() => { refetchExpenses(); }} showToast={showToast} editData={editingExpense} />
-      {chatOpen && (
+      {chatMounted && (
         <Suspense fallback={null}>
           <ChatPanel
             open={chatOpen}

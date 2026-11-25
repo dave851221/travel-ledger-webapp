@@ -9,8 +9,16 @@ import type { ActionReply, ChatReply, DraftExpense, HistoryTurn, ReplyTarget, We
 
 type Base = { tripId: string; memberName: string | null };
 
+/** 函式自己最多想 45 秒；超過這個時間多半是網路斷在半路，不要讓人一直等 */
+const TIMEOUT_MS = 75_000;
+
 async function invoke<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke('web-chat', { body });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('等太久了，網路可能不太穩，請再試一次。')), TIMEOUT_MS);
+  });
+  const { data, error } = await Promise.race([supabase.functions.invoke('web-chat', { body }), timeout])
+    .finally(() => clearTimeout(timer));
   if (error) {
     // 離線或函式掛了：給一句看得懂的話，不要把 FunctionsFetchError 原文丟給使用者
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;

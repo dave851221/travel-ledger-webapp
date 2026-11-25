@@ -88,7 +88,6 @@ const ChatPanel: React.FC<Props> = ({
   const [replyTo, setReplyTo] = useState<{ target: ReplyTarget; label: string } | null>(null);
   /** 等 AI 回覆中（文字一次一則；照片各自上傳） */
   const [thinking, setThinking] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(0);
   const [busy, setBusy] = useState<Busy>({});
   const [formFor, setFormFor] = useState<{ itemId: string; expense: Expense } | null>(null);
   const [itemsFor, setItemsFor] = useState<DraftItem | null>(null);
@@ -100,6 +99,10 @@ const ChatPanel: React.FC<Props> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef(chat);
   chatRef.current = chat;
+  const openRef = useRef(open);
+  openRef.current = open;
+  /** 聊天室關著的時候回覆到了：跳一個提示，不然使用者不知道要回來看 */
+  const notifyIfClosed = () => { if (!openRef.current) showToast(`${ASSISTANT_NAME}回覆了，打開聊天就看得到`); };
   const readOnly = trip.is_archived;
 
   // 換旅程時讀那一趟自己的對話
@@ -123,7 +126,7 @@ const ChatPanel: React.FC<Props> = ({
     if (!open) return;
     const el = scrollRef.current;
     if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
-  }, [open, itemCount, thinking, uploading]);
+  }, [open, itemCount, thinking]);
 
   const update = useCallback((fn: (s: ChatState) => ChatState) => setChat(prev => fn(prev)), []);
   const addItems = useCallback((items: ChatItem[]) => update(s => ({ ...s, items: [...s.items, ...items] })), [update]);
@@ -191,32 +194,60 @@ const ChatPanel: React.FC<Props> = ({
         items: applyBlocks(cur.items, reply.blocks),
         history: [...cur.history, ...reply.history].slice(-MAX_HISTORY),
       }));
+      notifyIfClosed();
     } catch (e) {
-      addItems([botText(`😵 ${e instanceof Error ? e.message : '發生錯誤，請稍後再試。'}`)]);
+      addItems([botText(`😵 ${e instanceof Error ? e.message : '發生錯誤，請稍後再試。'}剛剛那句放回輸入框了，按送出就能再試一次。`)]);
+      // 沒送出去的那句放回輸入框（使用者還沒開始打新的才放），回覆的卡片也接回去
+      setText(cur => (cur.trim() ? cur : t));
+      if (target) setReplyTo(prev => prev ?? target);
     } finally {
       setThinking(null);
     }
   };
 
+  /** 這次開著的頁面裡選的照片（失敗時按「重試」用，重新整理就沒了） */
+  const photoFiles = useRef(new Map<string, File>());
+
+  /** 一張照片：上傳 → 辨識 → 出卡。照片泡泡一選就出現（本機預覽），不必等上傳完 */
+  const processPhoto = async (bubbleId: string, file: File) => {
+    patch(bubbleId, { status: 'uploading' });
+    try {
+      const path = await api.uploadChatPhoto(trip.id, file);
+      patch(bubbleId, { path, status: 'reading' });
+      const reply = await api.sendPhoto({ ...base, photoPath: path });
+      patch(bubbleId, { status: undefined });
+      photoFiles.current.delete(bubbleId);
+      update(cur => ({
+        items: applyBlocks(cur.items, reply.blocks),
+        history: [...cur.history, ...reply.history].slice(-MAX_HISTORY),
+      }));
+      notifyIfClosed();
+    } catch (e) {
+      patch(bubbleId, { status: 'failed' });
+      addItems([botText(`😵 有一張照片沒處理好：${e instanceof Error ? e.message : '請再試一次'}（按照片上的「重試」）`)]);
+    }
+  };
+
   const sendPhotos = async (files: File[]) => {
     if (files.length === 0 || readOnly) return;
-    setUploading(n => n + files.length);
-    // 一張一張來：每張各出一張卡，順序跟選的一樣
-    for (const file of files) {
-      try {
-        const path = await api.uploadChatPhoto(trip.id, file);
-        addItems([{ id: newId(), at: Date.now(), role: 'user', kind: 'photo', path }]);
-        const reply = await api.sendPhoto({ ...base, photoPath: path });
-        update(cur => ({
-          items: applyBlocks(cur.items, reply.blocks),
-          history: [...cur.history, ...reply.history].slice(-MAX_HISTORY),
-        }));
-      } catch (e) {
-        addItems([botText(`😵 照片沒有傳成功：${e instanceof Error ? e.message : '請再試一次'}`)]);
-      } finally {
-        setUploading(n => n - 1);
-      }
-    }
+    const now = Date.now();
+    const bubbles = files.map((file, i) => {
+      const id = newId();
+      photoFiles.current.set(id, file);
+      return { id, file, item: { id, at: now + i, role: 'user' as const, kind: 'photo' as const, path: '', localUrl: URL.createObjectURL(file), status: 'uploading' as const } };
+    });
+    addItems(bubbles.map(b => b.item));
+    // 同時最多處理 3 張：一張要十幾秒，一張一張來的話選 5 張要等一分鐘
+    const queue = [...bubbles];
+    const worker = async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) await processPhoto(next.id, next.file);
+    };
+    await Promise.all([worker(), worker(), worker()]);
+  };
+
+  const retryPhoto = (bubbleId: string) => {
+    const file = photoFiles.current.get(bubbleId);
+    if (file) processPhoto(bubbleId, file);
   };
 
   // ── 卡片上的按鈕 ───────────────────────────────
@@ -376,6 +407,23 @@ const ChatPanel: React.FC<Props> = ({
     setChat(emptyChat());
   };
 
+  // 想超過 12 秒（查行程、上網、看收據）就換一句，讓人知道還在動
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!thinking) return;
+    const id = setTimeout(() => setSlow(true), 12_000);
+    return () => clearTimeout(id);
+  }, [thinking]);
+
+  // 輸入框跟著內容長高（Safari 還不支援 field-sizing），最多 5 行
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+  }, [text, open]);
+
   const pendingCount = useMemo(() => chat.items.filter(i => i.kind === 'draft' && i.status === 'pending').length, [chat.items]);
 
   if (!open) return null;
@@ -383,10 +431,28 @@ const ChatPanel: React.FC<Props> = ({
   const renderItem = (item: ChatItem) => {
     if (item.role === 'user') {
       if (item.kind === 'photo') {
+        const src = item.path ? photoUrl(item.path) : item.localUrl;
         return (
-          <button onClick={() => setLightbox(item.path)} className="ml-auto block w-36 rounded-2xl overflow-hidden border border-line bg-sunk">
-            <img src={photoUrl(item.path)} alt="傳出的照片" className="w-full h-36 object-cover" loading="lazy" />
-          </button>
+          <div className="ml-auto relative w-36 h-36 rounded-2xl overflow-hidden border border-line bg-sunk">
+            {src && (
+              <button onClick={() => item.path && setLightbox(item.path)} className="block w-full h-full" aria-label="看照片">
+                <img src={src} alt="傳出的照片" className={`w-full h-full object-cover ${item.status && item.status !== 'failed' ? 'opacity-70' : ''}`} loading="lazy" />
+              </button>
+            )}
+            {(item.status === 'uploading' || item.status === 'reading') && (
+              <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-scrim text-white text-xs py-1.5">
+                <Loader2 size={13} className="animate-spin" />{item.status === 'uploading' ? '上傳中…' : '讀收據中…'}
+              </span>
+            )}
+            {item.status === 'failed' && (
+              <span className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-scrim text-white text-xs">
+                沒處理好
+                {photoFiles.current.has(item.id) && (
+                  <button onClick={() => retryPhoto(item.id)} className="rounded-full bg-surface text-ink px-3 py-1 font-bold">重試</button>
+                )}
+              </span>
+            )}
+          </div>
         );
       }
       return (
@@ -491,16 +557,11 @@ const ChatPanel: React.FC<Props> = ({
               )}
             </div>
           )}
-          {!currentUser && (
-            <button onClick={onPickUser} className={`${ui.warnBox} w-full text-left`}>
-              先選「我是誰」，記帳時「我付的」才知道是誰。點這裡選。
-            </button>
-          )}
           {chat.items.map(item => <div key={item.id} className="flex">{renderItem(item)}</div>)}
-          {(thinking || uploading > 0) && (
+          {thinking && (
             <p className="inline-flex items-center gap-2 rounded-2xl bg-surface border border-line px-3.5 py-2 text-sm text-ink-2">
               <Loader2 size={15} className="animate-spin" />
-              {uploading > 0 ? `正在看照片${uploading > 1 ? `（還有 ${uploading} 張）` : ''}…` : thinking}
+              {slow ? '還在查，再等一下下…' : thinking}
             </p>
           )}
         </div>
@@ -513,6 +574,11 @@ const ChatPanel: React.FC<Props> = ({
             ))}
             <button onClick={() => addItems([botText(HELP_TEXT)])} className={`${ui.chip} ${ui.chipOff}`}>❓ 說明</button>
           </div>
+          {!currentUser && (
+            <button onClick={onPickUser} className="w-full text-left rounded-xl bg-warn/10 text-warn px-3 py-1.5 text-xs">
+              先選「我是誰」，記帳時「我付的」才知道是誰 → 點這裡選
+            </button>
+          )}
           {replyTo && (
             <div className="flex items-center gap-2 rounded-xl bg-sunk px-3 py-1.5 text-xs text-ink-2">
               <CornerUpLeft size={13} className="shrink-0" />

@@ -226,10 +226,6 @@ export const DraftCard: React.FC<DraftCardProps> = ({
           </div>
         )}
 
-        {item.resultText && (
-          <p className="whitespace-pre-wrap text-xs text-ink-2 bg-sunk rounded-xl px-3 py-2">{item.resultText}</p>
-        )}
-
         {/* 收據的幣別這趟沒有匯率：先選一個 */}
         {pending && item.currencies && !readOnly && (
           <div className="space-y-1.5">
