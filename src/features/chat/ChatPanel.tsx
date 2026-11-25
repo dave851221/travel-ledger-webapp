@@ -160,6 +160,7 @@ const ChatPanel: React.FC<Props> = ({
       return;
     }
     if (UNDO_KEYWORDS.includes(t)) {
+      if (readOnly) { addItems([botText('🔒 這趟旅程已封存，不能撤銷或刪除支出。')]); return; }
       const last = lastSavedDraft(chatRef.current.items);
       if (!last) { addItems([botText('這裡沒有剛存入、可以撤銷的支出。要刪其他筆，打「刪除支出」從清單挑。')]); return; }
       const result = await undo(last);
@@ -275,9 +276,11 @@ const ChatPanel: React.FC<Props> = ({
     if (inFlight.current.has(item.id)) return;
     inFlight.current.add(item.id);
     const draft = exp ? { ...item.draft, exp } : item.draft;
+    const saveId = item.saveId ?? crypto.randomUUID();
+    if (!item.saveId) patch<DraftItem>(item.id, { saveId });
     setBusyFor(item.id, true);
     try {
-      const res = await api.saveDraft({ ...base, draft });
+      const res = await api.saveDraft({ ...base, draft, saveId });
       if (res.ok) {
         patch<DraftItem>(item.id, { draft, status: 'saved', expenseId: res.expenseId, resultText: res.text });
         remember(`[已存入${refOf(res.expenseId)}] ${draft.exp.d} ${draft.exp.a} ${draft.exp.c}（使用者按了確認存入，這筆已經在帳本裡，要改請用 propose_expense_update）`);
@@ -511,6 +514,7 @@ const ChatPanel: React.FC<Props> = ({
         return (
           <UpdateCard
             item={item}
+            trip={trip}
             busy={!!busy[item.id]}
             readOnly={readOnly}
             onApply={() => applyUpdateCard(item)}
@@ -547,7 +551,8 @@ const ChatPanel: React.FC<Props> = ({
         role="dialog"
       >
         {/* 標題列 */}
-        <header className="shrink-0 flex items-center gap-2 px-3 h-14 border-b border-line bg-surface" style={{ paddingTop: 'env(safe-area-inset-top)', boxSizing: 'content-box' }}>
+        {/* 離線提示條在最上面（--app-top-offset），標題列要讓開，不然 ✕ 點不到 */}
+        <header className="shrink-0 flex items-center gap-2 px-3 h-14 border-b border-line bg-surface" style={{ paddingTop: 'max(env(safe-area-inset-top), var(--app-top-offset, 0px))', boxSizing: 'content-box' }}>
           <BrandMark />
           <div className="flex-1 min-w-0 leading-tight">
             <p className="text-[15px] font-bold truncate">{ASSISTANT_CHAT_TITLE}</p>
@@ -674,6 +679,7 @@ const ChatPanel: React.FC<Props> = ({
             remember(`[已存入${refOf(savedId ?? undefined)}] ${formFor?.expense.description ?? ''}（用完整表單存的）`);
           } else if (formItem?.kind === 'update') {
             patch(formItem.id, { status: 'done', resultText: '✏️ 已用表單修改，內容以帳目裡的為準。' });
+            remember(`[已修改${refOf(formItem.expenseId)}] ${formItem.existing.description}（用完整表單改的）`);
           }
         }}
       />

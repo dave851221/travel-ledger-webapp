@@ -275,15 +275,22 @@ export const DraftCard: React.FC<DraftCardProps> = ({
 
 // ── 修改預覽、確認刪除 ───────────────────────────────
 
+/** 後端給的是照精度格式化好的金額字串（「12670」），畫面上一律加千分位與幣別符號 */
+const money = (amount: string, currency: string, trip: Trip) => {
+  const n = Number(String(amount).replace(/,/g, ''));
+  return Number.isFinite(n) && String(amount).trim() !== '' ? formatMoney(n, currency, trip.precision_config) : `${amount} ${currency}`;
+};
+
 export const UpdateCard: React.FC<{
   item: Extract<ChatItem, { kind: 'update' }>;
+  trip: Trip;
   busy: boolean;
   readOnly: boolean;
   onApply: () => void;
   onEdit: () => void;
   onCancel: () => void;
   onReply?: () => void;
-}> = ({ item, busy, readOnly, onApply, onEdit, onCancel, onReply }) => (
+}> = ({ item, trip, busy, readOnly, onApply, onEdit, onCancel, onReply }) => (
   <div className={`${ui.card} w-full max-w-[400px] px-4 py-3 space-y-3`}>
     <div className="flex items-center justify-between gap-2">
       <span className="text-xs font-bold text-warn">✏️ 修改預覽</span>
@@ -292,13 +299,17 @@ export const UpdateCard: React.FC<{
     </div>
     <div>
       <p className="text-base font-bold break-words">{item.existing.description}</p>
-      <p className="text-xs text-muted num">{item.existing.date} · 原本 {item.existing.amount} {item.existing.currency}</p>
+      <p className="text-xs text-muted num">{item.existing.date} · 原本 {money(item.existing.amount, item.existing.currency, trip)}</p>
     </div>
     <div className="space-y-2">
       {item.changes.map(c => (
         <div key={c.field} className="text-sm">
           <p className="text-[11px] text-muted">{c.label}</p>
-          <p className="break-words"><span className="text-muted line-through">{c.before}</span> <span className="text-muted">→</span> <b>{c.after}</b></p>
+          <p className="break-words">
+            <span className="text-muted line-through">{c.field === 'amount' ? money(c.before, item.existing.currency, trip) : c.before}</span>{' '}
+            <span className="text-muted">→</span>{' '}
+            <b>{c.field === 'amount' ? money(c.after, item.exp.c, trip) : c.after}</b>
+          </p>
         </div>
       ))}
     </div>
@@ -323,7 +334,7 @@ export const DeleteCard: React.FC<{
   readOnly: boolean;
   onConfirm: () => void;
   onCancel: () => void;
-}> = ({ item, busy, readOnly, onConfirm, onCancel }) => (
+}> = ({ item, trip, busy, readOnly, onConfirm, onCancel }) => (
   <div className={`${ui.card} w-full max-w-[400px] px-4 py-3 space-y-3`}>
     <div className="flex items-center justify-between gap-2">
       <span className="text-xs font-bold text-neg">🗑 確認刪除？</span>
@@ -332,7 +343,7 @@ export const DeleteCard: React.FC<{
     </div>
     <div>
       <p className="text-base font-bold break-words">{item.existing.description}</p>
-      <p className="text-xs text-muted num">{item.existing.date} · {item.existing.category} · {item.existing.amount} {item.existing.currency}</p>
+      <p className="text-xs text-muted num">{item.existing.date} · {item.existing.category} · {money(item.existing.amount, item.existing.currency, trip)}</p>
     </div>
     {item.resultText && <p className="whitespace-pre-wrap text-xs text-ink-2 bg-sunk rounded-xl px-3 py-2">{item.resultText}</p>}
     {item.status === 'pending' && !readOnly && (

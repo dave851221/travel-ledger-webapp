@@ -33,7 +33,7 @@ export const sendMessage = (b: Base & { text: string; history: HistoryTurn[]; dr
 export const sendPhoto = (b: Base & { photoPath: string }) =>
   invoke<ChatReply>({ action: 'photo', ...b });
 
-export const saveDraft = (b: Base & { draft: WebDraft }) =>
+export const saveDraft = (b: Base & { draft: WebDraft; saveId: string }) =>
   invoke<ActionReply>({ action: 'save', ...b });
 
 export const applyUpdate = (b: Base & { expenseId: string; exp: DraftExpense }) =>

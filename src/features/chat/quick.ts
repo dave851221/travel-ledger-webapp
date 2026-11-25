@@ -33,13 +33,37 @@ export const EDIT_LIST_KEYWORDS = ['編輯支出', '編輯紀錄', '編輯記錄
 export const DELETE_LIST_KEYWORDS = ['刪除支出', '刪除紀錄', '刪除記錄', '管理支出', '刪除哪一筆'];
 export const CANCEL_DRAFT_KEYWORDS = ['取消', '不要記', '不用記', '算了', '取消這筆', '取消剛剛那筆'];
 
-/** 這趟旅程的「今天」：有設時區用旅程的時區，沒有就用這台裝置的 */
-export function tripTodayString(trip: Pick<Trip, 'timezone'>, now: Date = new Date()): string {
-  const tz = trip.timezone?.trim();
-  try {
-    if (tz) return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
-  } catch { /* 時區字串壞掉就退回裝置時間 */ }
-  return new Intl.DateTimeFormat('en-CA').format(now);
+/**
+ * 幣別 → 時區的猜法，與 Edge Function 的 `_shared/assistant/time.ts` 同一份表：
+ * 旅程沒設時區時兩邊都這樣猜，「今日支出」才會跟機器人記的日期是同一天。
+ */
+const CURRENCY_TIMEZONE: Record<string, string> = {
+  TWD: 'Asia/Taipei', JPY: 'Asia/Tokyo', KRW: 'Asia/Seoul',
+  HKD: 'Asia/Hong_Kong', SGD: 'Asia/Singapore', MYR: 'Asia/Kuala_Lumpur',
+  THB: 'Asia/Bangkok', VND: 'Asia/Ho_Chi_Minh', IDR: 'Asia/Jakarta',
+  PHP: 'Asia/Manila', CNY: 'Asia/Shanghai',
+  AUD: 'Australia/Sydney', NZD: 'Pacific/Auckland',
+  GBP: 'Europe/London', EUR: 'Europe/Paris', CHF: 'Europe/Zurich',
+  USD: 'America/New_York', CAD: 'America/Toronto',
+};
+
+const validTimezone = (tz: string) => {
+  try { new Intl.DateTimeFormat('en-CA', { timeZone: tz }); return true; } catch { return false; }
+};
+
+/** 這趟旅程的時區：設定的 → 依主幣別、匯率表猜 → UTC（與後端 getTripTimezone 相同） */
+export function tripTimezone(trip: Pick<Trip, 'timezone' | 'base_currency' | 'rates'>): string {
+  const explicit = trip.timezone?.trim();
+  if (explicit && validTimezone(explicit)) return explicit;
+  for (const cur of [trip.base_currency, ...Object.keys(trip.rates ?? {})]) {
+    if (cur && CURRENCY_TIMEZONE[cur]) return CURRENCY_TIMEZONE[cur];
+  }
+  return 'UTC';
+}
+
+/** 這趟旅程的「今天」 */
+export function tripTodayString(trip: Pick<Trip, 'timezone' | 'base_currency' | 'rates'>, now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tripTimezone(trip) }).format(now);
 }
 
 const shortDate = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;

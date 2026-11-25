@@ -197,6 +197,11 @@ export interface CommitOptions {
    * 不在 `photoUrls` 裡的路徑會被丟掉。
    */
   receiptPhotoUrls?: string[]
+  /**
+   * 呼叫端先配好的支出 id（網頁聊天）。回應在路上斷掉、使用者再按一次時用同一個 id，
+   * 主鍵衝突就代表上一次其實已經存進去了，回傳成功而不是多存一筆。
+   */
+  id?: string
 }
 
 /**
@@ -260,6 +265,7 @@ export async function commitExpense(
   }
 
   const { data: saved, error: insertError } = await ctx.db.from('expenses').insert({
+    ...(opts.id ? { id: opts.id } : {}),
     trip_id: trip.id,
     description: prepared.description,
     amount: numAmount,
@@ -274,6 +280,14 @@ export async function commitExpense(
   }).select('id').single()
 
   // 寫入失敗不能當成存入：以前這裡不看 error，LINE 會回「✅ 已存入」而帳本裡什麼都沒有
+  if (insertError && opts.id && insertError.code === '23505') {
+    // 同一個 id 已經存過了（上一次的回應沒送到）：當成存好了，不要再多一筆
+    console.log(`[SAVE] Expense ${opts.id} already saved, treating the resend as done`)
+    return {
+      ok: true, id: opts.id, adjustment_member: adjustMember,
+      amount: numAmount, payer_data: finalPayerData, split_data: finalSplitData,
+    }
+  }
   if (insertError) {
     console.error(`[SAVE] Insert failed. trip=${trip.id}`, insertError)
     return { ok: false, reason: 'insert_failed' }
@@ -452,7 +466,11 @@ export async function commitExpenseUpdate(
       category: prepared.category,
       payer_data: prepared.payer_data,
       split_data: prepared.split_details,
-      adjustment_member: prepared.adjustment_member,
+      // 卡片沒帶（LINE 的 upd、網頁的確認修改都是 null）就照新的付款與分攤重挑，
+      // 寫 null 的話之後在表單裡除不盡的餘數沒有人吸收
+      adjustment_member: prepared.adjustment_member && splitMembers.includes(prepared.adjustment_member)
+        ? prepared.adjustment_member
+        : pickAdjustmentMember(payerMembers, splitMembers),
     })
     .eq('id', expenseId)
     .eq('trip_id', trip.id)

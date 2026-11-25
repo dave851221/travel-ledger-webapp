@@ -43,6 +43,8 @@ export interface ChatRequest {
   expenseId?: string
   exp?: unknown
   photoIds?: unknown
+  /** save：前端為這張卡配好的支出 id（重送不會多存一筆） */
+  saveId?: string
 }
 
 export const MAX_TEXT_LENGTH = 2000

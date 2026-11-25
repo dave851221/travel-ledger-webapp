@@ -556,6 +556,15 @@ describe('commitExpense', () => {
     expect(result).toEqual({ ok: false, reason: 'insert_failed' });
   });
 
+  it('帶 id 重送、主鍵衝突（上一次其實已經存進去）：回成功，不多存一筆', async () => {
+    const rows: Record<string, unknown>[] = [];
+    const result = await commitExpense(PREPARED, makeInsertDb({ data: null, error: { code: '23505', message: 'dup' } }, rows), { id: 'fixed-id' });
+    expect(result).toMatchObject({ ok: true, id: 'fixed-id' });
+    expect(rows[0].id).toBe('fixed-id');
+    // 沒帶 id 的主鍵衝突仍是失敗（LINE 路徑行為不變）
+    expect(await commitExpense(PREPARED, makeInsertDb({ data: null, error: { code: '23505' } }))).toEqual({ ok: false, reason: 'insert_failed' });
+  });
+
   it('金額為 0 的不寫入', async () => {
     const zero = { ...PREPARED, amount: 0, payer_data: { 代杰: 0 }, split_details: { 代杰: 0 } };
     const result = await commitExpense(zero, makeInsertDb({ data: { id: 'new-1' }, error: null }));
@@ -573,5 +582,20 @@ describe('commitExpenseUpdate', () => {
       adjustment_member: null,
     }, ctxFor());
     expect(result).toEqual({ ok: false, reason: 'dropped_members', dropped: ['路人甲'] });
+  });
+
+  it('卡片沒帶 adjustment_member 時重挑一個，不寫 null', async () => {
+    const updates: Record<string, unknown>[] = [];
+    const builder: Record<string, unknown> = {};
+    for (const m of ['from', 'eq', 'is']) builder[m] = () => builder;
+    builder.update = (row: Record<string, unknown>) => { updates.push(row); return builder; };
+    builder.select = () => Promise.resolve({ data: [{ id: 'x1' }], error: null });
+    const result = await commitExpenseUpdate('x1', {
+      description: '晚餐', amount: 900, currency: 'JPY', date: TODAY, category: '餐飲',
+      payer_data: { 小明: 900 }, split_details: { 代杰: 450, 小明: 450 },
+      adjustment_member: null,
+    }, { db: builder, trip: TRIP, today: TODAY, actorName: null } as unknown as ToolContext);
+    expect(result).toEqual({ ok: true, id: 'x1' });
+    expect(updates[0].adjustment_member).toBe('小明');
   });
 });

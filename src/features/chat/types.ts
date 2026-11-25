@@ -93,6 +93,8 @@ export type ChatItem =
     currencies?: string[];
     status: DraftStatus;
     expenseId?: string;
+    /** 第一次按存入時配好的支出 id，回應沒收到再按一次也用同一個（不會存成兩筆） */
+    saveId?: string;
     /** 存入後的完整明細（與 LINE 的「✅ 已存入」同一份格式） */
     resultText?: string;
   })

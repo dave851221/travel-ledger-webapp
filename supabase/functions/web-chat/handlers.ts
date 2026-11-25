@@ -137,6 +137,24 @@ export interface ChatScope {
   trip: TripRow
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * 刪掉網頁聊天自己上傳、而且還沒有支出用到的照片。
+ * 同一個資料夾裡還有 LINE 草稿與表單的照片，只靠「路徑在這趟旅程底下」不夠 ——
+ * 這支函式只認旅程 id，不能讓人拿它刪掉已經存好的收據。
+ */
+async function removeChatPhotos(db: SupabaseClient, tripId: string, candidates: string[]): Promise<void> {
+  const paths = candidates
+    .filter((p) => isTripPhotoPath(p, tripId) && p.slice(p.lastIndexOf('/') + 1).startsWith('chat_'))
+    .slice(0, 10)
+  if (paths.length === 0) return
+  const { data: used } = await db.from('expenses').select('photo_urls').eq('trip_id', tripId).overlaps('photo_urls', paths)
+  const keep = new Set(((used ?? []) as { photo_urls: string[] }[]).flatMap(r => r.photo_urls ?? []))
+  const removable = paths.filter(p => !keep.has(p))
+  if (removable.length > 0) await db.storage.from(RECEIPTS_BUCKET).remove(removable)
+}
+
 function newNonce(): string {
   return Math.random().toString(36).substring(2, 10)
 }
@@ -459,7 +477,7 @@ export async function handlePhoto(scope: ChatScope, req: ChatRequest): Promise<C
     return { blocks: [{ type: 'text', text: '❌ 照片路徑不正確，請重新上傳。' }], history: [] }
   }
   if (trip.is_archived) {
-    await db.storage.from(RECEIPTS_BUCKET).remove([path])
+    await removeChatPhotos(db, trip.id, [path])
     return { blocks: [{ type: 'text', text: '🔒 此旅程已封存，無法新增支出（照片未儲存）。' }], history: [] }
   }
   const memberName = cleanMemberName(req.memberName)
@@ -501,7 +519,7 @@ export async function handlePhoto(scope: ChatScope, req: ChatRequest): Promise<C
     }
   } catch (e) {
     console.error('[OCR_ERROR]', e)
-    await db.storage.from(RECEIPTS_BUCKET).remove([path])
+    await removeChatPhotos(db, trip.id, [path])
     const msg = aiUnavailableMessage(e) ?? '😵 處理圖片時發生錯誤，請稍後再試。'
     return { blocks: [{ type: 'text', text: msg }], history: [] }
   }
@@ -529,10 +547,12 @@ export async function handleSave(scope: ChatScope, req: ChatRequest): Promise<Ac
   const { db, trip } = scope
   const draft = cleanDraft(req.draft, trip.id)
   if (!draft) return { ok: false, text: '❌ 找不到這張卡片的內容，請重新記帳。' }
+  // 前端為這張卡配好的支出 id：重送時主鍵衝突＝上一次已經存進去（commitExpense）
+  const saveId = typeof req.saveId === 'string' && UUID_RE.test(req.saveId) ? req.saveId : undefined
   const memberName = cleanMemberName(req.memberName)
   const result = await commitExpense(draftToPrepared(draft.exp), {
     db, trip, today: tripToday(trip), actorName: memberName,
-  }, { photoUrls: draft.photoIds, receiptPhotoUrls: draft.receipt ? draft.photoIds : [] })
+  }, { photoUrls: draft.photoIds, receiptPhotoUrls: draft.receipt ? draft.photoIds : [], id: saveId })
 
   if (!result.ok) {
     const text = result.reason === 'archived'
@@ -610,6 +630,8 @@ export async function handleUpdate(scope: ChatScope, req: ChatRequest): Promise<
 export async function handleDelete(scope: ChatScope, req: ChatRequest, mode: 'delete' | 'undo'): Promise<ActionReply> {
   const { db, trip } = scope
   if (!req.expenseId) return { ok: false, text: '❌ 找不到這筆支出。' }
+  // 存入、修改都會擋封存，刪除與撤銷也要（deleteExpense 本身不看旅程狀態）
+  if (trip.is_archived) return { ok: false, text: `❌ 此旅程已封存，無法${mode === 'undo' ? '撤銷' : '刪除'}支出。` }
   const result = await deleteExpense(req.expenseId, { db, trip: { id: trip.id } })
   if (!result.ok) {
     const text = result.reason === 'already_deleted'
@@ -631,16 +653,7 @@ export async function handleDelete(scope: ChatScope, req: ChatRequest, mode: 'de
 /** ❌ 取消草稿：把已經上傳的照片刪掉（只收這趟旅程資料夾裡的） */
 export async function handleDiscard(scope: ChatScope, req: ChatRequest): Promise<ActionReply> {
   const { db, trip } = scope
-  // 只刪網頁聊天自己上傳的（chat_ 開頭）：同一個資料夾裡還有 LINE 草稿與表單的照片，不能被這裡刪掉
-  const paths = (Array.isArray(req.photoIds) ? req.photoIds : [])
-    .filter((p): p is string => isTripPhotoPath(p, trip.id) && p.slice(p.lastIndexOf('/') + 1).startsWith('chat_'))
-    .slice(0, 10)
-  if (paths.length > 0) {
-    // 已經存進某一筆支出的照片不能刪（例如先在表單裡存過、又回來按取消）
-    const { data: used } = await db.from('expenses').select('photo_urls').eq('trip_id', trip.id).overlaps('photo_urls', paths)
-    const keep = new Set(((used ?? []) as { photo_urls: string[] }[]).flatMap(r => r.photo_urls ?? []))
-    const removable = paths.filter(p => !keep.has(p))
-    if (removable.length > 0) await db.storage.from(RECEIPTS_BUCKET).remove(removable)
-  }
-  return { ok: true, text: paths.length > 0 ? '❌ 已取消並刪除照片。' : '❌ 已取消。' }
+  const paths = (Array.isArray(req.photoIds) ? req.photoIds : []).filter((p): p is string => typeof p === 'string')
+  await removeChatPhotos(db, trip.id, paths)
+  return { ok: true, text: '❌ 已取消。' }
 }

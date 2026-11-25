@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Expense, Trip } from '../../types';
 import { changeAmount, changeCurrency, canGoSolo, soloDraft, toggleMember, draftToExpense } from './draftOps';
 import { applyBlocks, lastSavedDraft, pendingDrafts } from './chatStore';
-import { matchQuickCommand, runQuickCommand } from './quick';
+import { matchQuickCommand, runQuickCommand, tripTodayString } from './quick';
 import type { ChatItem, DraftExpense, WebDraft } from './types';
 
 const trip: Trip = {
@@ -116,6 +116,12 @@ describe('quick', () => {
       expect(card.totals[0]).toContain('2 筆');
       expect(card.totals[0]).toContain('¥2,000');
     }
+  });
+
+  it('旅程沒設時區時跟機器人一樣依幣別猜（JPY → 東京），不是用手機的時區', () => {
+    const noTz = { ...trip, timezone: null, base_currency: 'JPY' };
+    expect(tripTodayString(noTz, new Date('2026-11-20T15:30:00Z'))).toBe('2026-11-21');
+    expect(tripTodayString({ ...noTz, base_currency: 'XXX', rates: {} }, new Date('2026-11-20T15:30:00Z'))).toBe('2026-11-20');
   });
 
   it('沒有資料時回一句話；已結清時說不用轉帳', () => {

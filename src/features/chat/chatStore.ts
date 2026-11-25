@@ -34,7 +34,12 @@ export function loadChat(tripId: string): ChatState {
     // 本機預覽的 blob 網址也只在上次那個頁面有效
     const items = (parsed.items as ChatItem[])
       .filter(i => !(i.kind === 'photo' && !i.path))
-      .map(i => (i.kind === 'photo' && i.localUrl ? { ...i, localUrl: undefined } : i));
+      .map(i => (i.kind === 'photo' && (i.localUrl || i.status) ? {
+        ...i,
+        localUrl: undefined,
+        // 處理到一半就重新整理（PWA 更新也會）：那個請求已經沒人在等了，標成失敗才有「重試」可按
+        status: i.status === 'uploading' || i.status === 'reading' || i.status === 'failed' ? 'failed' as const : undefined,
+      } : i));
     return { items, history: Array.isArray(parsed.history) ? parsed.history : [] };
   } catch {
     return emptyChat();
