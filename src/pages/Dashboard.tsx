@@ -53,7 +53,7 @@ const Dashboard: React.FC = () => {
   const authed = useTripAuthGuard(id);
 
   const {
-    trip, expenses, deletedExpenses, siblingTrips, loading,
+    trip, expenses, deletedExpenses, siblingTrips, loading, syncing,
     refetchTrip, refetchExpenses, refetchDeleted,
   } = useTripData(authed ? id : undefined, useCallback(() => navigate('/'), [navigate]));
   // 目前的分頁記在網址（?tab=ledger）：重新整理、或 PWA 自動更新重新載入之後還留在同一頁。
@@ -81,7 +81,9 @@ const Dashboard: React.FC = () => {
   // 還沒選身分就請使用者先選一次；關掉之後不再自己跳出來（頭像選單隨時可以改）
   const [welcomeRequested, setWelcomeRequested] = useState(false);
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
-  const isWelcomeSelectorOpen = welcomeRequested || (!loading && !!trip && !currentUser && !welcomeDismissed);
+  // 畫面還是手機上的舊資料時，記住的名字可能只是還沒出現在舊的成員清單裡 —— 等對完再決定要不要問
+  const isWelcomeSelectorOpen = welcomeRequested
+    || (!loading && !!trip && !currentUser && !welcomeDismissed && (!syncing || !storedUser));
   const closeWelcome = () => { setWelcomeRequested(false); setWelcomeDismissed(true); };
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
@@ -114,10 +116,10 @@ const Dashboard: React.FC = () => {
 
   // 記住的身分已經不是成員了（被移除）就清掉，下次不會再讀到
   useEffect(() => {
-    if (!loading && trip && storedUser && !trip.members.includes(storedUser)) {
+    if (!loading && !syncing && trip && storedUser && !trip.members.includes(storedUser)) {
       localStorage.removeItem(`me_${id}`);
     }
-  }, [loading, trip, storedUser, id]);
+  }, [loading, syncing, trip, storedUser, id]);
 
   useEffect(() => {
     if (trip?.name) document.title = `${trip.name} · ${APP_NAME}`;
@@ -356,6 +358,12 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-canvas text-ink md:flex">
+      {/* 先畫的是手機上的舊資料、背景正在更新：頂端一條細線，不擋操作 */}
+      {syncing && (
+        <div aria-hidden className="fixed left-0 right-0 sync-line-top z-[60] h-0.5 overflow-hidden pointer-events-none">
+          <div className="h-full w-1/3 bg-accent anim-sync" />
+        </div>
+      )}
       <SideNav {...chromeProps} />
       <MobileTopBar {...chromeProps} />
 
