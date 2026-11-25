@@ -111,7 +111,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   帳目標「待上傳」並先算進餘額；恢復連線、回到前景、打開 Dashboard 時上傳。每筆排隊時就配好 id、
   上傳用 upsert + `ignoreDuplicates`，重送不會變兩筆。**新增支出的寫入一律走 `insertExpenseOrQueue()`**
   （LIFF 草稿例外，它要通知機器人）。修改、刪除、照片需要連線。
-  `useTripData` 會把上次成功載入的旅程與帳目存在 `trip_cache_{id}`，離線冷開也看得到。
+  `useTripData` 會把上次成功載入的旅程與帳目存在 `trip_cache_{id}`：**有快取就先畫快取**（`syncing` 為 true，頂端一條細線），
+  同樣的查詢在背景跑完再換上最新的，國外連雪梨的 Supabase 不必每次盯著載入畫面；離線冷開也看得到。
+  垃圾桶（`list_trip_trash` 與逾期清理）不擋首屏。`syncing` 期間不判斷「記住的身分已不是成員」、不自動跳出選身分（舊快取可能還沒有新成員）。
+  首頁旅程清單同樣先畫 `trips_list_cache`（只有 `TRIP_COLUMNS`）。**這些都沒有多打任何請求**（Supabase 免費方案 Disk IO 很緊）。
+  Google Fonts 的 CSS 不擋首屏（`media="print"` onload 切換），CSS 與字型檔由 PWA runtime cache 快取。
 - **PWA 更新**是 `registerType: 'autoUpdate'`：新版本裝好就直接換上並重新整理，正在填的表單會被清掉
   （使用者明確接受）。曾改成 prompt（按橫幅才換），大家都停在舊版，2026-10-30 改回來。
   `App.tsx` 在回到前景與每小時主動檢查一次。

@@ -225,7 +225,15 @@ select,
   to { transform: translateY(0); opacity: 1; }
 }
 .anim-calc { animation: calc-in 0.16s ease-out; }
+/* Dashboard's thin "refreshing cached data" line */
+@keyframes sync-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.anim-sync { animation: sync-slide 1.1s ease-in-out infinite; }
+.sync-line-top { top: max(var(--app-top-offset, 0px), env(safe-area-inset-top, 0px)); }
 
 @media (prefers-reduced-motion: reduce) {
   .anim-sheet, .anim-fade, .anim-calc { animation: none; }
+  .anim-sync { animation: none; width: 100%; opacity: 0.5; }
 }

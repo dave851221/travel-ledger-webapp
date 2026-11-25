@@ -67,11 +67,29 @@ const TripRow: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick 
   </button>
 );
 
+/**
+ * 首頁旅程清單的本機快取（只有 TRIP_COLUMNS，不含通行碼）。
+ * 打開首頁先畫這份，同一支查詢照舊在背景跑一次，不多打任何請求。
+ */
+const TRIPS_CACHE_KEY = 'trips_list_cache';
+const readTripsCache = (): Trip[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TRIPS_CACHE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+const writeTripsCache = (list: Trip[]) => {
+  try { localStorage.setItem(TRIPS_CACHE_KEY, JSON.stringify(list)); } catch { /* 空間不足：只是少了快取 */ }
+};
+
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [trips, setTrips] = useState<Trip[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 先畫上次存在手機上的清單，再到背景更新：國外網路慢時不必盯著骨架等
+  const [trips, setTrips] = useState<Trip[]>(readTripsCache);
+  const [loading, setLoading] = useState(() => readTripsCache().length === 0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -96,7 +114,8 @@ const Home: React.FC = () => {
   const fetchTrips = async () => {
     if (!supabase) return;
     try {
-      setLoading(true);
+      // 手上已經有清單（快取）就不換回骨架，畫面保持可點
+      setLoading(prev => prev && readTripsCache().length === 0);
       setError(null);
       const { data, error } = await supabase
         .from('trips')
@@ -105,9 +124,11 @@ const Home: React.FC = () => {
 
       if (error) throw error;
       setTrips(data || []);
+      writeTripsCache(data || []);
     } catch (err) {
       console.error('Error fetching trips:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      // 已經畫出快取的清單時不蓋上錯誤：離線或網路慢時照樣能點進旅程
+      if (readTripsCache().length === 0) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

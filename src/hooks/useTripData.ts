@@ -10,6 +10,11 @@ export interface UseTripDataResult {
   deletedExpenses: Expense[];
   siblingTrips: Trip[];
   loading: boolean;
+  /**
+   * 畫面上是上次存在手機上的那份、正在背景跟伺服器對一次。
+   * 對完（成功或失敗）就回到 false。
+   */
+  syncing: boolean;
   /** 首次載入完成後回傳 localStorage 中記住的身分，沒有則為 null */
   savedUser: string | null;
   refetchTrip: () => Promise<boolean>;
@@ -57,6 +62,7 @@ export const useTripData = (
   const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
   const [siblingTrips, setSiblingTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [savedUser, setSavedUser] = useState<string | null>(null);
 
   // 逾期垃圾桶紀錄的清理，每次載入頁面只執行一次。
@@ -173,17 +179,31 @@ export const useTripData = (
     let cancelled = false;
 
     const init = async () => {
-      setLoading(true);
-      const [tripOk, expensesOk] = await Promise.all([refetchTrip(), refetchExpenses(), refetchDeleted()]);
+      // 先畫上次存在手機上的那份（國外網路慢、往返 Supabase 要好幾秒），同樣的查詢照舊在背景跑，
+      // 回來就換上最新的。沒有快取才顯示載入畫面。
+      const cached = readCache(id);
+      const hasCache = !!cached.trip && !!cached.expenses;
+      if (hasCache) {
+        setTrip(cached.trip!);
+        setExpenses(cached.expenses!);
+        setSavedUser(localStorage.getItem(`me_${id}`));
+        setLoading(false);
+        setSyncing(true);
+      } else {
+        setLoading(true);
+      }
+      // 垃圾桶（含逾期清理）不擋首屏：只影響垃圾桶分頁與它的數字
+      refetchDeleted();
+      const [tripOk, expensesOk] = await Promise.all([refetchTrip(), refetchExpenses()]);
       if (cancelled) return;
       // 連不上就拿上次存在手機上的那份（離線也能看、也能記）
-      if (!tripOk || !expensesOk) {
-        const cached = readCache(id);
+      if (!hasCache && (!tripOk || !expensesOk)) {
         if (!tripOk && cached.trip) setTrip(cached.trip);
         if (!expensesOk && cached.expenses) setExpenses(cached.expenses);
       }
       setSavedUser(localStorage.getItem(`me_${id}`));
       setLoading(false);
+      setSyncing(false);
     };
     init();
 
@@ -228,6 +248,7 @@ export const useTripData = (
     deletedExpenses,
     siblingTrips,
     loading,
+    syncing,
     savedUser,
     refetchTrip,
     refetchExpenses,

@@ -58,6 +58,27 @@ export default defineConfig({
         globIgnores: ['**/vendor-video-*.js'],
         // Ensure Supabase storage images are handled correctly or cached if needed
         runtimeCaching: [
+          // Google Fonts：以前每次開啟都要先連到 Google 拿 CSS 才畫得出畫面（國外網路慢時整頁空白好幾秒）。
+          // CSS 先用快取、背景更新；字型檔網址帶版本雜湊、內容不會變，直接用快取。
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts',
+              // Noto Sans TC 依 unicode-range 切成上百個小檔，三種字重
+              expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // 只快取不帶查詢字串的網址。回顧影片用 `?recap=1` 以 CORS 抓原圖：相簿的 <img> 是 no-cors，
             // 快取裡存的是 opaque 回應，CORS 請求拿到它會直接失敗（影片裡的照片就變成全黑）。
