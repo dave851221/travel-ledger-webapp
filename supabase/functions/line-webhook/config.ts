@@ -40,31 +40,8 @@ export const LIFF_ID = Deno.env.get('LIFF_ID') ?? '2012713943-msELyw4c'
 // supabase/scripts/delete_trip.sql 依賴這個前綴清理照片，勿隨意更名。
 export const RECEIPTS_BUCKET = 'travel-images'
 
-export const RATE_LIMIT_MSG = '⚠️ AI 服務暫時達到免費使用量上限，請隔天再試。'
-export const AI_BUSY_MSG = '⏳ AI 服務目前忙碌中，請過幾分鐘再試一次。'
-export const AI_QUOTA_MSG = '⚠️ AI 本月的使用額度已經用完了，請管理員到 Anthropic Console 調整上限或儲值。'
-
-/**
- * AI 失敗時（錯誤前綴的定義見 `_shared/ai/types.ts`）要回給使用者的話；
- * 其他錯誤回傳 null，由呼叫端用自己的訊息。
- */
-export const aiUnavailableMessage = (e: unknown): string | null => {
-  const message = String((e as { message?: unknown } | null)?.message)
-  if (message.startsWith('RATE_LIMIT:')) return RATE_LIMIT_MSG
-  if (message.startsWith('AI_QUOTA:')) return AI_QUOTA_MSG
-  if (message.startsWith('AI_BUSY:')) return AI_BUSY_MSG
-  return null
-}
-
-/**
- * 主要的 AI 失敗、這次改由備援（Gemini 免費版）回答時，放在回覆最前面的一句話。
- * LINE 的 replyToken 只能用一次，沒辦法先回一則「請稍候」再補答案（那要用推播，免費方案每月只有 200 則），
- * 所以併在同一則裡講。
- */
-export const FALLBACK_NOTICES = {
-  quota: '⚠️ Claude 本月額度已用完，這次改用免費版 Gemini 回覆（可能比較慢、也比較不準）。',
-  error: '⚠️ Claude 暫時連不上，這次改用免費版 Gemini 回覆。',
-} as const
+// AI 失敗與改用備援時的說法，網頁聊天也用同一份（_shared/assistant/notices.ts）
+export { AI_BUSY_MSG, AI_QUOTA_MSG, aiUnavailableMessage, FALLBACK_NOTICES, RATE_LIMIT_MSG } from "../_shared/assistant/notices.ts"
 
 /** 餵給 AI 的對話輪數。太多會稀釋掉當下這句話的份量。 */
 export const CHAT_HISTORY_TURNS = 8

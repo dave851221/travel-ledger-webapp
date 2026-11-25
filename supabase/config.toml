@@ -40,6 +40,10 @@ inspector_port = 8083
 [functions.line-webhook]
 verify_jwt = false
 
+# 網頁聊天：前端用 publishable key（不是 JWT），誰能用哪一趟旅程由 web-chat/auth.ts 決定
+[functions.web-chat]
+verify_jwt = false
+
 # 由網頁端透過 supabase.functions.invoke() 呼叫。
 # ⚠️ 這裡必須是 false。invoke() 帶的是 VITE_SUPABASE_ANON_KEY，而本專案用的是
 #    新格式的 sb_publishable_… 金鑰 —— 它不是 JWT，開啟驗證會直接被擋掉，

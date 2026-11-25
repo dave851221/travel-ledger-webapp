@@ -38,7 +38,8 @@ interface ExpenseModalProps {
   onClose: () => void;
   trip: Trip;
   currentUser: string | null;
-  onSuccess: () => void;
+  /** 存好之後呼叫；新增的那一筆有 id 時帶上（離線排隊的也有，聊天卡片的「撤銷」要用） */
+  onSuccess: (savedId?: string | null) => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   editData?: Expense | null; // Pass this to enter Edit Mode
   /** The form is the whole page (LIFF): only ✕ closes it, see Modal's `standalone` */
@@ -575,7 +576,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         }
       }
 
-      onSuccess();
+      onSuccess(savedExpenseId);
       onClose();
     } catch (err) {
       if (uploadedPaths.length > 0) {
