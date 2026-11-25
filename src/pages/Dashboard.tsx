@@ -570,6 +570,8 @@ const Dashboard: React.FC = () => {
       {chatMounted && (
         <Suspense fallback={null}>
           <ChatPanel
+            // 換旅程就換一個新的聊天室：上一趟還在等的回覆不能落到這一趟（卡片按存入會記錯旅程）
+            key={trip.id}
             open={chatOpen}
             onClose={() => setChatOpen(false)}
             trip={trip}

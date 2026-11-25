@@ -105,12 +105,7 @@ const ChatPanel: React.FC<Props> = ({
   const notifyIfClosed = () => { if (!openRef.current) showToast(`${ASSISTANT_NAME}回覆了，打開聊天就看得到`); };
   const readOnly = trip.is_archived;
 
-  // 換旅程時讀那一趟自己的對話
-  const [loadedFor, setLoadedFor] = useState(trip.id);
-  if (loadedFor !== trip.id) {
-    setLoadedFor(trip.id);
-    setChat(loadChat(trip.id));
-  }
+  // 換旅程時 Dashboard 會用 key 換一個新的 ChatPanel（上一趟還在等的回覆不會落到這一趟）
   useEffect(() => { saveChat(trip.id, chat); }, [trip.id, chat]);
 
   useBackClose(open, onClose);
@@ -200,6 +195,7 @@ const ChatPanel: React.FC<Props> = ({
       // 沒送出去的那句放回輸入框（使用者還沒開始打新的才放），回覆的卡片也接回去
       setText(cur => (cur.trim() ? cur : t));
       if (target) setReplyTo(prev => prev ?? target);
+      if (!openRef.current) showToast('剛剛那句沒送出去，打開聊天再送一次', 'error');
     } finally {
       setThinking(null);
     }
@@ -210,20 +206,33 @@ const ChatPanel: React.FC<Props> = ({
 
   /** 一張照片：上傳 → 辨識 → 出卡。照片泡泡一選就出現（本機預覽），不必等上傳完 */
   const processPhoto = async (bubbleId: string, file: File) => {
-    patch(bubbleId, { status: 'uploading' });
+    const bubble = chatRef.current.items.find(i => i.id === bubbleId);
+    // 重試時，已經傳上去的照片不再傳一次（不然 Storage 會多一張沒人用的）
+    let path = bubble?.kind === 'photo' ? bubble.path : '';
     try {
-      const path = await api.uploadChatPhoto(trip.id, file);
+      if (!path) {
+        patch(bubbleId, { status: 'uploading' });
+        path = await api.uploadChatPhoto(trip.id, file);
+      }
       patch(bubbleId, { path, status: 'reading' });
       const reply = await api.sendPhoto({ ...base, photoPath: path });
-      patch(bubbleId, { status: undefined });
-      photoFiles.current.delete(bubbleId);
+      const gotCard = reply.blocks.some(b => b.type === 'draft' || b.type === 'currency');
       update(cur => ({
         items: applyBlocks(cur.items, reply.blocks),
         history: [...cur.history, ...reply.history].slice(-MAX_HISTORY),
       }));
-      notifyIfClosed();
+      if (gotCard) {
+        patch(bubbleId, { status: undefined });
+        photoFiles.current.delete(bubbleId);
+        notifyIfClosed();
+      } else {
+        // 函式那邊處理失敗會把照片刪掉、只回一句話：這張要從頭再傳一次才行
+        patch(bubbleId, { path: '', status: 'failed' });
+      }
     } catch (e) {
+      // 網路斷在半路：照片（如果傳上去了）留著，重試時直接拿它辨識
       patch(bubbleId, { status: 'failed' });
+      if (!openRef.current) showToast('有一張照片沒處理好，打開聊天按「重試」', 'error');
       addItems([botText(`😵 有一張照片沒處理好：${e instanceof Error ? e.message : '請再試一次'}（按照片上的「重試」）`)]);
     }
   };
@@ -245,9 +254,11 @@ const ChatPanel: React.FC<Props> = ({
     await Promise.all([worker(), worker(), worker()]);
   };
 
+  /** 重試：照片已經在 Storage（網路斷在辨識那一步）就直接辨識，重新整理過也行；不然要有這次選的檔案 */
+  const canRetryPhoto = (item: Extract<ChatItem, { kind: 'photo' }>) => !!item.path || photoFiles.current.has(item.id);
   const retryPhoto = (bubbleId: string) => {
-    const file = photoFiles.current.get(bubbleId);
-    if (file) processPhoto(bubbleId, file);
+    const file = photoFiles.current.get(bubbleId) ?? new File([], 'already-uploaded.jpg');
+    processPhoto(bubbleId, file);
   };
 
   // ── 卡片上的按鈕 ───────────────────────────────
@@ -294,8 +305,12 @@ const ChatPanel: React.FC<Props> = ({
   async function cancelDraft(item: DraftItem) {
     patch<DraftItem>(item.id, { status: 'cancelled' });
     remember(`[已取消草稿 nonce=${item.draft.nonce}] ${item.draft.exp.d}（沒有存入）`);
-    if (item.draft.photoIds.length > 0) {
-      try { await api.discardPhotos({ ...base, photoIds: item.draft.photoIds }); } catch { /* 照片留著只佔空間，之後的孤兒清理會收 */ }
+    // 同一張照片可能還掛在另一張沒處理的卡上（例如重試辨識多出一張），那張還要用就不刪
+    const stillUsed = new Set(chatRef.current.items.flatMap(i =>
+      i.kind === 'draft' && i.id !== item.id && i.status === 'pending' ? i.draft.photoIds : []));
+    const photos = item.draft.photoIds.filter(p => !stillUsed.has(p));
+    if (photos.length > 0) {
+      try { await api.discardPhotos({ ...base, photoIds: photos }); } catch { /* 照片留著只佔空間，之後的孤兒清理會收 */ }
     }
   }
 
@@ -431,7 +446,8 @@ const ChatPanel: React.FC<Props> = ({
   const renderItem = (item: ChatItem) => {
     if (item.role === 'user') {
       if (item.kind === 'photo') {
-        const src = item.path ? photoUrl(item.path) : item.localUrl;
+        // 這次選的照片先用本機預覽（換成網路上的那張會閃一下白），重新整理後才讀 Storage
+        const src = item.localUrl ?? (item.path ? photoUrl(item.path) : undefined);
         return (
           <div className="ml-auto relative w-36 h-36 rounded-2xl overflow-hidden border border-line bg-sunk">
             {src && (
@@ -447,7 +463,7 @@ const ChatPanel: React.FC<Props> = ({
             {item.status === 'failed' && (
               <span className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-scrim text-white text-xs">
                 沒處理好
-                {photoFiles.current.has(item.id) && (
+                {canRetryPhoto(item) && (
                   <button onClick={() => retryPhoto(item.id)} className="rounded-full bg-surface text-ink px-3 py-1 font-bold">重試</button>
                 )}
               </span>

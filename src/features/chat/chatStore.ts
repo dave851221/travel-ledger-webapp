@@ -31,7 +31,10 @@ export function loadChat(tripId: string): ChatState {
     const parsed = JSON.parse(raw);
     if (parsed?.v !== VERSION || !Array.isArray(parsed.items)) return emptyChat();
     // 上傳到一半就關掉頁面的照片：沒有路徑、預覽網址也失效了，留著只是一個破圖
-    const items = (parsed.items as ChatItem[]).filter(i => !(i.kind === 'photo' && !i.path));
+    // 本機預覽的 blob 網址也只在上次那個頁面有效
+    const items = (parsed.items as ChatItem[])
+      .filter(i => !(i.kind === 'photo' && !i.path))
+      .map(i => (i.kind === 'photo' && i.localUrl ? { ...i, localUrl: undefined } : i));
     return { items, history: Array.isArray(parsed.history) ? parsed.history : [] };
   } catch {
     return emptyChat();
