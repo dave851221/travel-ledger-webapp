@@ -75,7 +75,7 @@ export const AMOUNT_LIST_SCHEMA: JsonSchema = {
 export const EXPENSE_DATA_SCHEMA: JsonSchema = {
   type: 'object',
   properties: {
-    description: { type: 'string', description: '品項或商店名稱。外文請保留原文並在括號附繁體中文' },
+    description: { type: 'string', description: '帳本上的標題，20 字內：店名或品項，外文保留原文並在括號附 2～6 字中文；不寫分店名、地址' },
     amount: { type: 'number', description: '總金額' },
     currency: { type: 'string', description: 'ISO 幣別代碼，例如 TWD / JPY / USD。只在 currency_source 不是 none 時才有意義' },
     // 幣別由程式決定而不是靠 prompt 記性（T3）：模型只需誠實回報「這個幣別是哪裡來的」，
