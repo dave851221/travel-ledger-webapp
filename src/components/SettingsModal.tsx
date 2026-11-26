@@ -20,6 +20,8 @@ import {
 import Modal from './Modal';
 import { ui } from './ui';
 import { supabase } from '../api/supabase';
+import { IS_PUBLIC, meKey } from '../config/mode';
+import ShareSettings from '../features/auth/ShareSettings';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
 import { isSubmitEnter } from '../utils/keyboard';
@@ -142,7 +144,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       // maybeSingle: a trip without a mapping returns null instead of a 406 in the console.
       setLineBotId('');
       const fetchLineBotId = async () => {
-        if (!supabase) return;
+        // 開放版的 LINE 綁定改用「把機器人拉進群組就選旅程」，沒有短碼表
+        if (!supabase || IS_PUBLIC) return;
         const { data, error: fetchErr } = await supabase
           .from('line_trip_id_mapping')
           .select('linebot_id')
@@ -280,7 +283,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       // 改名要把成員清單與所有支出 JSONB 的 key 一起改，必須在同一個 transaction 裡完成：
       // 以前是前端先存 trips 再一筆一筆改支出，中途斷線就會留下一半舊名字的支出，
       // 那些錢從結算裡消失（calculateMemberBalances 只算成員清單裡的人）。
-      if (renamePairs.length > 0) {
+      const membersChanged = renamePairs.length > 0
+        || finalMembers.length !== trip.members.length
+        || finalMembers.some((m, i) => m !== trip.members[i]);
+      if (IS_PUBLIC && membersChanged) {
+        // 開放版：成員清單沒有直接寫入的權限，改名、增減成員一律走 RPC
+        // （資料庫會檢查是成員、名字合法，並讓認領該名字的帳號跟著改名）
+        const { error: membersErr } = await supabase.rpc('update_trip_members', {
+          p_trip_id: trip.id,
+          p_members: finalMembers,
+          p_renames: Object.fromEntries(renamePairs),
+        });
+        if (membersErr) {
+          if (membersErr.message.includes('member_claimed')) throw new Error('有成員已經用這個名字加入，不能直接移除。請他先在「我是誰」換成別人');
+          if (membersErr.message.includes('invalid_name')) throw new Error('成員名字要 1～20 個字');
+          if (membersErr.message.includes('invalid_members')) throw new Error('成員名稱不能重複，最多 30 位');
+          throw new Error(membersErr.message);
+        }
+        setMemberOrigins(finalMembers);
+      } else if (renamePairs.length > 0) {
         const { error: renameErr } = await supabase.rpc('rename_trip_members', {
           p_trip_id: trip.id,
           p_members: finalMembers,
@@ -292,19 +313,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         // 不能再套一次同樣的改名（A、B 互換名字時會被換回去）
         setMemberOrigins(finalMembers);
 
-        const savedMe = localStorage.getItem(`me_${trip.id}`);
+        const savedMe = localStorage.getItem(meKey(trip.id));
         const renamedMe = savedMe ? renamePairs.find(([oldN]) => oldN === savedMe)?.[1] : undefined;
-        if (renamedMe) localStorage.setItem(`me_${trip.id}`, renamedMe);
+        if (renamedMe) localStorage.setItem(meKey(trip.id), renamedMe);
       }
 
       const { error: updateError } = await supabase
         .from('trips')
         .update({
           name: finalName,
-          // 留空即代表移除密碼；統一存成 NULL，避免出現兩種「無密碼」表示法
-          access_code: accessCode.trim() || null,
+          // 開放版沒有 access_code，成員清單也已經由上面的 RPC 寫好（沒有直接寫入的權限）
+          ...(IS_PUBLIC ? {} : {
+            // 留空即代表移除密碼；統一存成 NULL，避免出現兩種「無密碼」表示法
+            access_code: accessCode.trim() || null,
+            members: finalMembers,
+          }),
           is_archived: isArchived,
-          members: finalMembers,
           categories,
           category: tripCategory.trim() || null,
           // 留空即代表沒有偏好；與 access_code 同樣的正規化慣例，統一存成 NULL
@@ -525,7 +549,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <label htmlFor="set-name" className={ui.label}>旅程名稱</label>
                 <input id="set-name" type="text" className={ui.input} value={name} onChange={e => setName(e.target.value)} />
               </div>
-              <div>
+              {IS_PUBLIC && <ShareSettings trip={trip} onChanged={onSuccess} />}
+              {!IS_PUBLIC && <div>
                 <label htmlFor="set-code" className={ui.label}>進入密碼 <span className="text-muted font-normal">· 選填</span></label>
                 <div className="relative">
                   {accessCode.trim()
@@ -538,7 +563,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     ? '儲存後，還沒驗證過的人進入這趟旅程時要輸入密碼。清空這一欄就能取消密碼。'
                     : '目前免密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}
                 </p>
-              </div>
+              </div>}
               <div>
                 <label htmlFor="set-tripcat" className={ui.label}>旅程分類 <span className="text-muted font-normal">· 選填</span></label>
                 <input
@@ -595,8 +620,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 </p>
               </section>
 
-              {/* LineBot Binding Section */}
-              <section className="rounded-2xl border border-line p-4 space-y-3">
+              {/* LineBot Binding Section（開放版的 LINE 綁定在下一階段做：把機器人拉進群組就選旅程） */}
+              {!IS_PUBLIC && <section className="rounded-2xl border border-line p-4 space-y-3">
                 <div className="flex items-start gap-3">
                   <span className="w-9 h-9 rounded-xl bg-[#06c755]/12 text-[#06a147] flex items-center justify-center shrink-0"><MessageCircle size={18} /></span>
                   <div className="flex-1 min-w-0">
@@ -620,7 +645,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     {copied ? <Check size={18} className="text-pos" /> : <Copy size={18} />}
                   </button>
                 </div>
-              </section>
+              </section>}
 
               <section className="rounded-2xl border border-line divide-y divide-line">
                 <div className="flex items-center gap-3 p-4">

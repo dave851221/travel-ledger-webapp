@@ -3,6 +3,7 @@ import { CalendarDays, ChevronRight, Clapperboard, Images, LayoutGrid, Receipt, 
 import type { Expense, Trip } from '../../types';
 import { albumCounts, albumDays, type AlbumPhoto, type PhotoKind } from '../../utils/album';
 import { photoUrl } from '../../utils/storage';
+import { usePhotoUrlVersion } from '../../utils/signedPhotos';
 import { formatMoney } from '../../utils/money';
 import { dateParts } from '../itinerary/plan';
 import { useGridZoom } from './useGridZoom';
@@ -73,7 +74,10 @@ const AlbumTab: React.FC<Props> = ({ trip, expenses, onOpenExpense, onOpenRecap 
   const days = useMemo(() => albumDays(expenses, kind), [expenses, kind]);
   const counts = useMemo(() => albumCounts(expenses), [expenses]);
   const flat = useMemo(() => days.flatMap(d => d.photos), [days]);
-  const flatUrls = useMemo(() => flat.map(p => photoUrl(p.path)), [flat]);
+  // 開放版的網址是簽名網址，簽好時 photoVersion 會變，要重算
+  const photoVersion = usePhotoUrlVersion();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const flatUrls = useMemo(() => flat.map(p => photoUrl(p.path)), [flat, photoVersion]);
   // The lightbox indexes into the flat list, so each thumbnail needs its position in it.
   const offsets = useMemo(
     () => days.map((_, i) => days.slice(0, i).reduce<number>((n, d) => n + d.photos.length, 0)),

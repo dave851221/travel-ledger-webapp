@@ -1,4 +1,5 @@
-import { HashRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { IS_PUBLIC } from './config/mode';
 import { useState, useEffect, useLayoutEffect, useRef, lazy, Suspense } from 'react';
 import Home from './pages/Home';
 import TripPortal from './pages/TripPortal';
@@ -9,6 +10,10 @@ import { WifiOff, Wifi, Loader2 } from 'lucide-react';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const LiffEdit = lazy(() => import('./pages/LiffEdit'));
 const LiffPreference = lazy(() => import('./pages/LiffPreference'));
+// 開放版才有：登入收尾與邀請頁（舊版建置不會用到，也就不會下載）
+const AuthBootstrap = lazy(() => import('./features/auth/AuthBootstrap'));
+const JoinTrip = lazy(() => import('./pages/JoinTrip'));
+const SharedTrip = lazy(() => import('./pages/SharedTrip'));
 
 const PageLoading = () => (
   <div className="min-h-screen bg-canvas flex items-center justify-center">
@@ -94,13 +99,19 @@ function App() {
           </div>
         )}
 
+        {IS_PUBLIC && <Suspense fallback={null}><AuthBootstrap /></Suspense>}
+
         <Suspense fallback={<PageLoading />}>
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/trip/:id" element={<TripPortal />} />
+            {/* 開放版沒有通行碼頁：權限由登入與成員資格決定，直接進 Dashboard */}
+            <Route path="/trip/:id" element={IS_PUBLIC ? <Navigate to="dashboard" replace /> : <TripPortal />} />
+            {IS_PUBLIC && <Route path="/join/:id/:token" element={<JoinTrip />} />}
+            {IS_PUBLIC && <Route path="/s/:id/:token" element={<SharedTrip />} />}
             <Route path="/trip/:id/dashboard" element={<Dashboard />} />
-            <Route path="/liff/edit" element={<LiffEdit />} />
-            <Route path="/liff/preference" element={<LiffPreference />} />
+            {/* LIFF 頁面讀寫舊版的 LINE 表；開放版的 LINE 機器人在下一階段做，先不開放 */}
+            {!IS_PUBLIC && <Route path="/liff/edit" element={<LiffEdit />} />}
+            {!IS_PUBLIC && <Route path="/liff/preference" element={<LiffPreference />} />}
           </Routes>
         </Suspense>
       </div>

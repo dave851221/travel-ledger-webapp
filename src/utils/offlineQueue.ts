@@ -1,4 +1,5 @@
 import { supabase } from '../api/supabase';
+import { globalStorageKey } from '../config/mode';
 import type { Expense } from '../types';
 
 /**
@@ -12,7 +13,8 @@ import type { Expense } from '../types';
  * localStorage 在隱私模式或空間不足時會丟例外，讀寫一律包 try/catch。
  */
 
-const KEY = 'offline_expense_queue_v1';
+// 開放版加前綴：兩版在開發期同一個網址，共用 localStorage（見 src/config/mode.ts）
+const KEY = globalStorageKey('offline_expense_queue_v1');
 
 /** 寫進 expenses 的欄位（不含 id、created_at、deleted_at） */
 export type NewExpenseRecord = Omit<Expense, 'id' | 'created_at' | 'deleted_at' | 'pending_sync'>;

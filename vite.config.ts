@@ -40,9 +40,15 @@ function itineraryJson(): Plugin {
   }
 }
 
+// 開放版（旅行小本本）：建置時設環境變數 VITE_APP_MODE=public（見 src/config/mode.ts）。
+// 開發與封測期放在同一個 GitHub Pages 網站的 /next/ 底下。
+const IS_PUBLIC_BUILD = process.env.VITE_APP_MODE === 'public';
+const BASE = IS_PUBLIC_BUILD ? '/travel-ledger-webapp/next/' : '/travel-ledger-webapp/';
+const PRODUCT = IS_PUBLIC_BUILD ? '旅行小本本' : '旅遊小本本';
+
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/travel-ledger-webapp/',
+  base: BASE,
   plugins: [
     react(),
     itineraryJson(),
@@ -56,6 +62,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // The recap video encoder (~1.7 MB) is only fetched when someone makes a video; don't make every install download it
         globIgnores: ['**/vendor-video-*.js'],
+        // 舊版的 Service Worker 管整個 /travel-ledger-webapp/，開放版放在 /next/ 底下：
+        // 不讓開的話，舊版會把 /next/ 的頁面也回成舊版的 index.html
+        navigateFallbackDenylist: IS_PUBLIC_BUILD ? [] : [/^\/travel-ledger-webapp\/next\//],
         // Ensure Supabase storage images are handled correctly or cached if needed
         runtimeCaching: [
           // Google Fonts：以前每次開啟都要先連到 Google 拿 CSS 才畫得出畫面（國外網路慢時整頁空白好幾秒）。
@@ -98,8 +107,8 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: '旅遊小本本',
-        short_name: '旅遊小本本',
+        name: PRODUCT,
+        short_name: PRODUCT,
         description: '多人旅遊記帳：一起記帳、多幣別換算，自動算出誰該給誰多少。',
         theme_color: '#14213d',
         background_color: '#edf0f4',

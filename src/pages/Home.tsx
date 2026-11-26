@@ -7,10 +7,14 @@ import BrandMark from '../components/BrandMark';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getCurrencyPrecision } from '../utils/finance';
+import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
+import { peekReturnTo, signOut, useSession } from '../features/auth/session';
+import SignInPanel from '../features/auth/SignInPanel';
 
 const UNCATEGORIZED = '未分類';
 const TRIPS_PER_GROUP = 3;
-const APP_NAME = '旅遊小本本';
+const APP_NAME = PRODUCT_NAME;
+const DEFAULT_CATEGORIES = ['餐飲', '交通', '住宿', '購物', '景點', '其他'];
 
 const categorySlug = (name: string) => `cat-${encodeURIComponent(name)}`;
 
@@ -71,7 +75,7 @@ const TripRow: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick 
  * 首頁旅程清單的本機快取（只有 TRIP_COLUMNS，不含通行碼）。
  * 打開首頁先畫這份，同一支查詢照舊在背景跑一次，不多打任何請求。
  */
-const TRIPS_CACHE_KEY = 'trips_list_cache';
+const TRIPS_CACHE_KEY = globalStorageKey('trips_list_cache');
 const readTripsCache = (): Trip[] => {
   try {
     const parsed = JSON.parse(localStorage.getItem(TRIPS_CACHE_KEY) || '[]');
@@ -88,8 +92,10 @@ const Home: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   // 先畫上次存在手機上的清單，再到背景更新：國外網路慢時不必盯著骨架等
-  const [trips, setTrips] = useState<Trip[]>(readTripsCache);
-  const [loading, setLoading] = useState(() => readTripsCache().length === 0);
+  // 開放版不在一開始讀快取：那時還不知道是誰登入，快取可能是上一個人的（等登入狀態確定、
+  // ensureCacheOwner 清過之後才讀，見下面的 effect）
+  const [trips, setTrips] = useState<Trip[]>(() => (IS_PUBLIC ? [] : readTripsCache()));
+  const [loading, setLoading] = useState(() => IS_PUBLIC || readTripsCache().length === 0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -100,16 +106,38 @@ const Home: React.FC = () => {
     members: '',
     access_code: '',
     base_currency: 'TWD',
-    category: ''
+    category: '',
+    // 開放版：建立者自己在這趟的名字（必須是參與人員之一）
+    my_name: ''
   });
   const [submitting, setSubmitting] = useState(false);
   // 建立旅程的錯誤顯示在表單裡；專案禁用原生 alert()
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // 開放版：要登入才有「我的旅程」。舊版沒有登入，session 永遠是 null、也不會等
+  const { session, loading: sessionLoading } = useSession();
+  const userId = session?.user.id ?? null;
+
   useEffect(() => {
-    fetchTrips();
     document.title = APP_NAME;
-  }, []);
+    // 開放版沒登入時不查（RLS 也只會回空的）；換帳號登入時重查
+    if (IS_PUBLIC && !userId) return;
+    if (IS_PUBLIC) showCachedTrips();
+    fetchTrips();
+  }, [userId]);
+
+  // 開放版：登入狀態確定後（快取已經確認是這個人的）先畫快取
+  function showCachedTrips() {
+    const cached = readTripsCache();
+    setTrips(cached);
+    setLoading(cached.length === 0);
+  }
+
+  const handleSignOut = async () => {
+    // 快取由 ensureCacheOwner 在登出時整批清掉（session.ts），這裡只清畫面
+    setTrips([]);
+    await signOut();
+  };
 
   const fetchTrips = async () => {
     if (!supabase) return;
@@ -203,6 +231,39 @@ const Home: React.FC = () => {
     if (!tripName) { setCreateError('請輸入旅程名稱'); return; }
     if (membersArray.length === 0) { setCreateError('請至少輸入一位參與人員'); return; }
 
+    if (IS_PUBLIC) {
+      // 開放版：trips 沒有 INSERT 權限，一律走 app.create_trip（建立者成為 owner 並加入）
+      const myName = newTrip.my_name.trim() || membersArray[0];
+      if (!membersArray.includes(myName)) { setCreateError('「你的名字」要是參與人員之一'); return; }
+      try {
+        setSubmitting(true);
+        const { data: newId, error } = await supabase.rpc('create_trip', {
+          p_name: tripName,
+          p_members: membersArray,
+          p_my_name: myName,
+          p_base_currency: newTrip.base_currency,
+          p_categories: DEFAULT_CATEGORIES,
+          p_category: newTrip.category.trim() || null,
+          // 精度與舊版建立時一致，跟建立一起寫進去
+          p_precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) },
+        });
+        if (error) throw error;
+        setIsModalOpen(false);
+        setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
+        navigate(`/trip/${newId}/dashboard`);
+      } catch (err) {
+        // supabase 的錯誤不是 Error 的實例，但有 message
+        const msg = (err as { message?: string } | null)?.message ?? String(err);
+        setCreateError(msg.includes('invalid_name') ? '每位成員的名字要 1～20 個字'
+          : msg.includes('too_many_members') ? '成員最多 30 位'
+          : msg.includes('trips_name_check') ? '旅程名稱最多 60 個字'
+          : '建立失敗，請再試一次');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     try {
       setSubmitting(true);
       const { data, error } = await supabase
@@ -213,7 +274,7 @@ const Home: React.FC = () => {
           access_code: newTrip.access_code.trim() || null,
           base_currency: newTrip.base_currency,
           category: newTrip.category.trim() || null,
-          categories: ['餐飲', '交通', '住宿', '購物', '景點', '其他'],
+          categories: DEFAULT_CATEGORIES,
           rates: { [newTrip.base_currency]: 1 },
           // 以前只有 TWD 給 0 位，JPY 主幣的旅程會顯示成 ¥1,000.00、分帳拆出 333.33
           precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) }
@@ -224,7 +285,7 @@ const Home: React.FC = () => {
 
       setTrips([data[0], ...trips]);
       setIsModalOpen(false);
-      setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '' });
+      setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
     } catch (err) {
       setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -232,7 +293,32 @@ const Home: React.FC = () => {
     }
   };
 
-  const openTrip = (trip: Trip) => navigate(`/trip/${trip.id}`);
+  // 開放版沒有通行碼頁，直接進 Dashboard
+  const openTrip = (trip: Trip) => navigate(IS_PUBLIC ? `/trip/${trip.id}/dashboard` : `/trip/${trip.id}`);
+
+  if (IS_PUBLIC && !session) {
+    return (
+      <div className="min-h-screen bg-canvas text-ink">
+        <main className="w-full max-w-5xl mx-auto px-4 sm:px-8 pt-[max(16px,env(safe-area-inset-top))] pb-10">
+          <header className="flex items-center gap-3 py-3 sm:py-6">
+            <BrandMark />
+            <span className="text-lg sm:text-xl font-bold">{APP_NAME}</span>
+          </header>
+          {sessionLoading ? (
+            <div className="flex justify-center py-20 text-muted"><Loader2 className="animate-spin" size={24} /></div>
+          ) : (
+            <div className="mt-6 sm:mt-10 space-y-6">
+              <div className="text-center px-2">
+                <h1 className="text-2xl font-bold text-balance">在 LINE 群組裡拍收據，帳就分好了</h1>
+                <p className="text-sm text-muted mt-2">一起出去玩的旅伴都能記帳，回來還有一支回顧影片。</p>
+              </div>
+              <SignInPanel returnTo={peekReturnTo() ?? '/'} />
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -243,6 +329,11 @@ const Home: React.FC = () => {
           <button onClick={() => setIsModalOpen(true)} className={`${ui.btnPrimary} ml-auto`}>
             <Plus size={16} strokeWidth={2.6} />新旅程
           </button>
+          {IS_PUBLIC && (
+            <button onClick={handleSignOut} className="text-xs text-muted hover:text-ink underline-offset-2 hover:underline">
+              登出
+            </button>
+          )}
         </header>
 
         {error && (
@@ -372,8 +463,28 @@ const Home: React.FC = () => {
               {knownCategories.map(c => <option key={c} value={c} />)}
             </datalist>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          {IS_PUBLIC && (
             <div>
+              <label htmlFor="trip-my-name" className={ui.label}>
+                你的名字 <span className="text-muted font-normal">· 要是上面的參與人員之一，留空就用第一位</span>
+              </label>
+              <input
+                id="trip-my-name"
+                type="text"
+                maxLength={20}
+                list="home-trip-members"
+                placeholder="例如：小明"
+                className={ui.input}
+                value={newTrip.my_name}
+                onChange={e => setNewTrip({ ...newTrip, my_name: e.target.value })}
+              />
+              <datalist id="home-trip-members">
+                {newTrip.members.split(/[,，、]/).map(m => m.trim()).filter(Boolean).map(m => <option key={m} value={m} />)}
+              </datalist>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div className={IS_PUBLIC ? 'col-span-2' : undefined}>
               <label htmlFor="trip-currency" className={ui.label}>主幣別</label>
               <select
                 id="trip-currency"
@@ -387,7 +498,7 @@ const Home: React.FC = () => {
                 <option value="EUR">EUR 歐元</option>
               </select>
             </div>
-            <div>
+            {!IS_PUBLIC && <div>
               <label htmlFor="trip-code" className={ui.label}>
                 進入密碼 <span className="text-muted font-normal">· 選填</span>
               </label>
@@ -406,12 +517,14 @@ const Home: React.FC = () => {
                   onChange={e => setNewTrip({ ...newTrip, access_code: e.target.value })}
                 />
               </div>
-            </div>
+            </div>}
           </div>
           <p className={ui.hint}>
-            {newTrip.access_code.trim()
-              ? '進入這趟旅程時需要輸入密碼。'
-              : '沒有設定密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}
+            {IS_PUBLIC
+              ? '建立後只有你看得到。到旅程設定可以拿邀請連結給旅伴，或開放分享給沒登入的人看。'
+              : newTrip.access_code.trim()
+                ? '進入這趟旅程時需要輸入密碼。'
+                : '沒有設定密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}
           </p>
           {createError && (
             <div className={ui.errorBox}>

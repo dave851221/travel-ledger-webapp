@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { DB_SCHEMA, IS_PUBLIC } from '../config/mode';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -18,6 +19,26 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // 必須是單一字串字面值：supabase-js 從 select 字串推導回傳型別，串接出來的 string 它讀不懂
 export const TRIP_COLUMNS = 'id, name, members, categories, category, base_currency, timezone, rates, precision_config, is_archived, default_currency, default_category, default_payer, default_split_members, ai_preference, created_at';
 
+/**
+ * Dashboard 抓「自己這一趟」用的欄位。
+ * 舊版：`*`（含 access_code，設定頁要顯示與修改）。
+ * 開放版：沒有 access_code；分享設定與連結給成員看（owner 才能改），密碼雜湊誰都讀不到 ——
+ * 開放版的 trips 是欄位級權限，`*` 會因為碰到 view_password_hash 而被拒絕。
+ */
+export const TRIP_DETAIL_COLUMNS: string = IS_PUBLIC
+  ? `${TRIP_COLUMNS}, visibility, share_token, invite_token, created_by`
+  : '*';
+
+/**
+ * 舊版：沒有登入，資料在 public（跟以前完全一樣）。
+ * 開放版：資料在 app schema；登入走 PKCE（回來時網址帶 ?code=，不會跟 HashRouter 的 # 打架）。
+ * 見 src/config/mode.ts。
+ */
 export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? (IS_PUBLIC
+      ? createClient(supabaseUrl, supabaseAnonKey, {
+          db: { schema: DB_SCHEMA },
+          auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+        }) as unknown as SupabaseClient
+      : createClient(supabaseUrl, supabaseAnonKey))
   : (null as unknown as SupabaseClient);

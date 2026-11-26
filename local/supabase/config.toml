@@ -1,0 +1,78 @@
+# ============================================================
+# 本機開發用的 Supabase（需要 Docker Desktop）
+#
+# 這是獨立的 CLI 工作目錄，不會連到正式專案，也不跑 supabase/migrations/
+# （那些是給既有正式資料庫的增量變更，在空資料庫上不保證能跑）。
+# 開機時直接灌兩份完整 schema：舊版 public + 開放版 app。
+#
+#   npx supabase start   --workdir local     # 第一次會下載映像檔，要等一陣子
+#   npx supabase db reset --workdir local     # 改了 schema 之後重灌（先 npm run db:build）
+#   npx supabase test db  --workdir local     # 跑 supabase/app/tests 的權限測試（見 package.json 的 db:test）
+#   npx supabase stop    --workdir local
+# ============================================================
+
+project_id = "travel-ledger-local"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public", "app"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.seed]
+enabled = false
+# npm run db:build 產生（舊版 + 開放版接在一起）；CLI 讀不到工作目錄以外的檔案
+sql_paths = ["./seed.generated.sql"]
+
+# 本機不需要 log 分析；開著的話 Windows 上 vector 容器常常殘留，下次 start 會撞名失敗
+[analytics]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173/**"]
+jwt_expiry = 3600
+enable_signup = true
+
+# 本機測試用：用 Email 一次性密碼登入（信件在 http://localhost:54324 看）。
+# 正式環境只開 LINE 與 Google，見 docs/SECURITY.md。
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+# Google 登入：金鑰放在 local/supabase/.env（TLB_GOOGLE_CLIENT_ID／TLB_GOOGLE_CLIENT_SECRET，不進 git）。
+# 名字加 TLB_ 前綴：系統環境變數會蓋過 .env，這台電腦別的專案已經有 GOOGLE_CLIENT_SECRET。
+# Google Cloud 的 Authorized redirect URI 要有 http://127.0.0.1:54321/auth/v1/callback
+[auth.external.google]
+enabled = true
+client_id = "env(TLB_GOOGLE_CLIENT_ID)"
+secret = "env(TLB_GOOGLE_CLIENT_SECRET)"
+
+# 開放版的 LINE 登入（Edge Function）：本機用 `npm run db:functions` 跑，
+# local/supabase/functions 是指向 supabase/functions 的連結（npm run db:link 建立，不進 git）
+[functions.auth-line]
+verify_jwt = false
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+inspector_port = 8083

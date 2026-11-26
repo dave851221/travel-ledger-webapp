@@ -6,6 +6,12 @@ export interface Trip {
    * 只有 Dashboard 抓自己這一趟時才會有這個欄位，其餘查詢用 TRIP_COLUMNS 不帶它。
    */
   access_code?: string | null;
+  /** 開放版才有：沒登入的人能不能看（members／link／password） */
+  visibility?: 'members' | 'link' | 'password';
+  /** 開放版才有：分享連結與邀請連結裡的隨機字串（成員看得到，owner 才能重設） */
+  share_token?: string;
+  invite_token?: string;
+  created_by?: string | null;
   members: string[];
   categories: string[];
   category?: string | null;

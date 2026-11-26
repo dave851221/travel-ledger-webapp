@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase, TRIP_COLUMNS } from '../api/supabase';
+import { supabase, TRIP_COLUMNS, TRIP_DETAIL_COLUMNS } from '../api/supabase';
+import { DB_SCHEMA, IS_PUBLIC, meKey, tripStorageKey } from '../config/mode';
+import { primePhotoUrls } from '../utils/signedPhotos';
 import type { Trip, Expense } from '../types';
 import { RECEIPTS_BUCKET } from '../utils/storage';
 import { isNotFoundError } from '../utils/supabaseErrors';
@@ -26,7 +28,7 @@ export interface UseTripDataResult {
  * 上次成功載入的旅程與帳目，存在這支手機上。
  * 離線時直接打開 App 也看得到帳、也能記帳（記的會排進 offlineQueue）。
  */
-const cacheKey = (id: string) => `trip_cache_${id}`;
+const cacheKey = (id: string) => tripStorageKey('trip_cache', id);
 
 const readCache = (id: string): { trip?: Trip; expenses?: Expense[] } => {
   try {
@@ -99,9 +101,12 @@ export const useTripData = (
   const refetchTrip = useCallback(async (): Promise<boolean> => {
     if (!supabase || !id) return false;
     try {
-      // 已經通過通行碼關卡，`*` 含 access_code（設定頁要顯示）。其他地方一律用 TRIP_COLUMNS
-      const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
+      // 舊版：已經通過通行碼關卡，`*` 含 access_code（設定頁要顯示）。其他地方一律用 TRIP_COLUMNS。
+      // 開放版沒有 access_code，欄位見 TRIP_DETAIL_COLUMNS
+      const { data: row, error } = await supabase.from('trips').select(TRIP_DETAIL_COLUMNS).eq('id', id).single();
       if (error) throw error;
+      // 欄位清單不是字面值，supabase-js 推不出型別；兩版的欄位都是 Trip 的子集合
+      const data = row as unknown as Trip;
       setTrip(data);
       writeCache(id, { trip: data });
       fetchSiblingTrips(data?.category, id);
@@ -126,6 +131,8 @@ export const useTripData = (
         .order('date', { ascending: false })
         .order('created_at', { ascending: false });
       if (error) throw error;
+      // 開放版：整趟的照片一次簽好網址（私有 bucket），舊版什麼都不做
+      if (IS_PUBLIC) primePhotoUrls((data || []).flatMap((e: Expense) => e.photo_urls || []));
       setExpenses(data || []);
       writeCache(id, { expenses: data || [] });
       return true;
@@ -186,7 +193,7 @@ export const useTripData = (
       if (hasCache) {
         setTrip(cached.trip!);
         setExpenses(cached.expenses!);
-        setSavedUser(localStorage.getItem(`me_${id}`));
+        setSavedUser(localStorage.getItem(meKey(id)));
         setLoading(false);
         setSyncing(true);
       } else {
@@ -201,7 +208,7 @@ export const useTripData = (
         if (!tripOk && cached.trip) setTrip(cached.trip);
         if (!expensesOk && cached.expenses) setExpenses(cached.expenses);
       }
-      setSavedUser(localStorage.getItem(`me_${id}`));
+      setSavedUser(localStorage.getItem(meKey(id)));
       setLoading(false);
       setSyncing(false);
     };
@@ -213,12 +220,13 @@ export const useTripData = (
       .channel(`trip_changes_${id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'expenses', filter: `trip_id=eq.${id}` },
+        // 開放版的表在 app schema（src/config/mode.ts）
+        { event: '*', schema: DB_SCHEMA, table: 'expenses', filter: `trip_id=eq.${id}` },
         () => { refetchExpenses(); refetchDeleted(); },
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${id}` },
+        { event: 'UPDATE', schema: DB_SCHEMA, table: 'trips', filter: `id=eq.${id}` },
         () => { refetchTrip(); },
       )
       .subscribe();

@@ -49,6 +49,17 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
+      # 開放版（旅行小本本）：同一份程式碼用 VITE_APP_MODE=public 再建一次，放在 /next/ 底下。
+      # 舊版的建置不受影響（上一步照舊）。見 src/config/mode.ts、docs/SECURITY.md。
+      - name: Build public version (/next/)
+        run: npx vite build --outDir dist/next --emptyOutDir
+        env:
+          VITE_APP_MODE: public
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # LINE Login 的 Channel ID 本來就會出現在登入網址裡，不是秘密
+          VITE_LINE_LOGIN_CHANNEL_ID: '2012815845'
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
 

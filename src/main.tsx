@@ -1,3 +1,5 @@
+// 一定要排第一個：開放版 LINE 登入回來的 ?code= 要在 Supabase client 建立前收走（見檔案開頭說明）
+import './features/auth/lineCallback'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
