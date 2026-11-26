@@ -79,5 +79,12 @@ const appBody = appParts
   .join('\n\n');
 
 writeFileSync(join(appDir, 'app.generated.sql'), `${appHeader}${appBody}\n`, 'utf8');
+
+// 本機 Supabase（local/supabase）的初始化：舊版 + 開放版接在一起，當成唯一一支 migration。
+// 必須是 migration 而不是 seed：API 啟動時 app schema 就要存在，seed 跑得比較晚。
+// Supabase CLI 讀不到工作目錄以外的檔案，所以放一份在 local/supabase/migrations/（已 gitignore）
+const localSeed = join(dirname(fileURLToPath(import.meta.url)), '..', 'local', 'supabase', 'migrations', '00000000000000_bootstrap.generated.sql');
+writeFileSync(localSeed, `${header}${body}\n\n${appHeader}${appBody}\n`, 'utf8');
+console.log('已產生 → local/supabase/migrations/00000000000000_bootstrap.generated.sql（本機測試用）');
 console.log(`已產生 ${appParts.length} 個片段 → supabase/app/app.generated.sql`);
 appParts.forEach((p) => console.log(`  · ${p}`));

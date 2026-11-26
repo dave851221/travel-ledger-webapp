@@ -58,8 +58,13 @@
 ```bash
 npm run db:local          # 第一次：啟動本機 Supabase（需要 Docker Desktop）
 npm run db:local:reset    # 改了 schema 之後：重新產生並重灌
-npm run db:test           # 跑權限測試
+npm run db:test           # 跑權限測試（pgTAP）+ 透過 API 的整段流程（scripts/local-flow-test.mjs）
 ```
 
-本機的設定在 `local/supabase/config.toml`，開機時灌 `supabase/schema/bootstrap.generated.sql`（舊版）
-與 `supabase/app/app.generated.sql`（開放版）。新增表或 RPC 時，在測試裡補一條「不該做到的人做不到」。
+本機的設定在 `local/supabase/config.toml`；`npm run db:build` 把舊版與開放版的 schema 接成
+`local/supabase/migrations/00000000000000_bootstrap.generated.sql`，開機時當成唯一一支 migration 跑
+（要比 API 先建好 app schema，所以不能用 seed）。新增表或 RPC 時，兩邊的測試都補一條「不該做到的人做不到」。
+
+看畫面：`VITE_APP_MODE=public`、`VITE_SUPABASE_URL=http://127.0.0.1:54321`、`VITE_SUPABASE_ANON_KEY=<supabase status 的 ANON_KEY>`
+跑 `npx vite`，開 `http://localhost:5173/travel-ledger-webapp/next/`，用登入框下面的「本機開發專用」Email 登入，
+信在 http://localhost:54324。

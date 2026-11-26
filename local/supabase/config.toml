@@ -26,8 +26,9 @@ shadow_port = 54320
 major_version = 15
 
 [db.seed]
-enabled = true
-sql_paths = ["../../supabase/schema/bootstrap.generated.sql", "../../supabase/app/app.generated.sql"]
+enabled = false
+# npm run db:build 產生（舊版 + 開放版接在一起）；CLI 讀不到工作目錄以外的檔案
+sql_paths = ["./seed.generated.sql"]
 
 [studio]
 enabled = true

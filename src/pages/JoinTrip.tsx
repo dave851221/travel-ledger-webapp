@@ -23,8 +23,17 @@ const JoinTrip: React.FC = () => {
   const { session, loading: sessionLoading } = useSession();
   const [preview, setPreview] = useState<{ name: string; members: string[] } | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'invalid'>(() => (id && token ? 'loading' : 'invalid'));
-  const [picked, setPicked] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
+  // 選好「我是誰」再去登入，回來時要記得剛剛選的（登入會整頁跳走），存在這個分頁的 sessionStorage
+  const choiceKey = `tlb:join_choice_${id}`;
+  const savedChoice = (() => {
+    try { return JSON.parse(sessionStorage.getItem(choiceKey) || 'null') as { picked: string | null; newName: string } | null; } catch { return null; }
+  })();
+  const [picked, setPickedState] = useState<string | null>(savedChoice?.picked ?? null);
+  const [newName, setNewNameState] = useState(savedChoice?.newName ?? '');
+  const remember = (p: string | null, n: string) => {
+    try { sessionStorage.setItem(choiceKey, JSON.stringify({ picked: p, newName: n })); } catch { /* 隱私模式：回來再選一次 */ }
+  };
+  const choose = (p: string | null, n: string) => { setPickedState(p); setNewNameState(n); remember(p, n); };
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +68,7 @@ const JoinTrip: React.FC = () => {
         : '加入失敗，請再試一次');
       return;
     }
+    try { sessionStorage.removeItem(choiceKey); } catch { /* ignore */ }
     navigate(`/trip/${id}/dashboard`, { replace: true });
   };
 
@@ -94,7 +104,7 @@ const JoinTrip: React.FC = () => {
                   <button
                     key={m}
                     type="button"
-                    onClick={() => { setPicked(m); setNewName(''); }}
+                    onClick={() => choose(m, '')}
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm ${picked === m ? 'border-ink bg-sunk' : 'border-line hover:bg-sunk'}`}
                   >
                     <MemberAvatar name={m} size={26} isMe={picked === m} />
@@ -110,7 +120,7 @@ const JoinTrip: React.FC = () => {
                 maxLength={20}
                 placeholder="例如：小美"
                 value={newName}
-                onChange={e => { setNewName(e.target.value); setPicked(null); }}
+                onChange={e => choose(null, e.target.value)}
               />
             </div>
 
