@@ -7,7 +7,7 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(45);
+SELECT plan(52);
 
 -- ── 測試用帳號：A 建立旅程、B 被邀請、C 是路人 ─────────────────
 INSERT INTO auth.users (id, email, aud, role)
@@ -71,7 +71,7 @@ SELECT is((SELECT count(*) FROM app.list_trip_trash((SELECT v::uuid FROM ids WHE
 SELECT throws_ok($$ SELECT app.set_my_member((SELECT v::uuid FROM ids WHERE k = 'trip'), '代杰') $$,
                  'not_member', '路人不能把自己設成成員');
 SELECT throws_ok($$ SELECT app.update_trip_members((SELECT v::uuid FROM ids WHERE k = 'trip'), ARRAY['x'], '{}') $$,
-                 'not_member', '路人不能改成員清單');
+                 'not_admin', '路人不能改成員清單');
 SELECT throws_ok($$ SELECT app.accept_invite((SELECT v::uuid FROM ids WHERE k = 'trip'), 'wrong', '路人') $$,
                  'invalid_invite', '錯的邀請碼加入不了');
 SELECT is(app.invite_preview((SELECT v::uuid FROM ids WHERE k = 'trip'), 'wrong'), NULL,
@@ -110,11 +110,27 @@ SELECT throws_ok($$ SELECT view_password_hash FROM app.trips $$, '42501', NULL, 
 SELECT throws_ok($$ UPDATE app.trips SET visibility = 'link' $$, '42501', NULL, '不能直接改分享設定');
 SELECT throws_ok($$ UPDATE app.trips SET members = ARRAY['x'] $$, '42501', NULL, '不能繞過 RPC 直接改成員清單');
 SELECT throws_ok($$ SELECT app.set_trip_visibility((SELECT v::uuid FROM ids WHERE k = 'trip'), 'link') $$,
-                 'not_owner', 'editor 不能改分享設定');
+                 'not_admin', '一般成員不能改分享設定');
 SELECT throws_ok($$ SELECT app.rotate_trip_token((SELECT v::uuid FROM ids WHERE k = 'trip'), 'invite') $$,
-                 'not_owner', 'editor 不能重設邀請連結');
+                 'not_admin', '一般成員不能重設邀請連結');
 DELETE FROM app.trip_members WHERE user_id = 'aaaaaaaa-0000-0000-0000-000000000001';
 SELECT is((SELECT count(*) FROM app.trip_members), 2::bigint, 'editor 移除不了別人（RLS 擋掉，owner 還在）');
+UPDATE app.trips SET rates = '{"JPY": 1, "TWD": 4.8}';
+SELECT is((SELECT rates ->> 'TWD' FROM app.trips), '4.8', '一般成員可以改匯率');
+SELECT throws_ok($$ UPDATE app.trips SET name = '偷改名' $$, 'not_admin', '一般成員不能改旅程名稱');
+SELECT throws_ok($$ SELECT app.update_trip_members((SELECT v::uuid FROM ids WHERE k = 'trip'), ARRAY['代杰', '賢佑', '小美', '新人'], '{}') $$,
+                 'not_admin', '一般成員不能改成員名單');
+SELECT throws_ok($$ SELECT app.set_member_role((SELECT v::uuid FROM ids WHERE k = 'trip'), auth.uid(), 'admin') $$,
+                 'not_owner', '一般成員不能把自己升成管理員');
+RESET ROLE;
+SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+SELECT lives_ok($$ SELECT app.set_member_role((SELECT v::uuid FROM ids WHERE k = 'trip'), 'bbbbbbbb-0000-0000-0000-000000000002', 'admin') $$,
+                '建立者可以指定管理員');
+RESET ROLE;
+SELECT pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+SELECT lives_ok($$ UPDATE app.trips SET name = '大阪' $$, '管理員可以改旅程名稱');
+SELECT throws_ok($$ SELECT app.set_member_role((SELECT v::uuid FROM ids WHERE k = 'trip'), 'aaaaaaaa-0000-0000-0000-000000000001', 'editor') $$,
+                 'not_owner', '管理員不能動建立者的角色');
 RESET ROLE;
 
 -- ── 5. 改名會連帶改帳與認領 ───────────────────────────────────

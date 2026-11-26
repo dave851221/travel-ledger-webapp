@@ -32,7 +32,8 @@ async function copyText(text: string): Promise<boolean> {
 const ShareSettings: React.FC<{ trip: Trip; onChanged: () => void }> = ({ trip, onChanged }) => {
   const { session } = useSession();
   const { membership } = useMyMembership(trip.id, session?.user.id ?? null);
-  const isOwner = membership?.role === 'owner';
+  // 隱私與連結：建立者與管理員可以改（資料庫的 set_trip_visibility／rotate_trip_token 用 is_admin 檢查）
+  const isOwner = membership?.role === 'owner' || membership?.role === 'admin';
 
   const [visibility, setVisibility] = useState<Visibility>(trip.visibility ?? 'members');
   const [password, setPassword] = useState('');
@@ -106,7 +107,7 @@ const ShareSettings: React.FC<{ trip: Trip; onChanged: () => void }> = ({ trip, 
           <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Link2 size={18} /></span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold">沒登入的人能不能看</p>
-            <p className="text-xs text-muted mt-0.5">{isOwner ? '只有建立旅程的人可以改' : '由建立旅程的人決定'}</p>
+            <p className="text-xs text-muted mt-0.5">{isOwner ? '建立者與管理員可以改' : '由建立者或管理員決定'}</p>
           </div>
         </div>
         <div className="space-y-2" role="radiogroup" aria-label="分享設定">

@@ -1,8 +1,26 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 
-const TINTS = ['#4a6fc0', '#2e9a80', '#8a68c4', '#d9822b', '#c2527a', '#3f9aa6'];
+// 8 個彼此分得開的顏色。一趟旅程依成員順序輪著用，8 人以內一定不重複。
+const TINTS = ['#4a6fc0', '#2e9a80', '#c2527a', '#d9822b', '#8a68c4', '#3f9aa6', '#7a8b2e', '#b5603b'];
 
 const hashName = (name: string) => name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+
+/**
+ * 這趟旅程的成員順序。以前顏色由名字的字碼加總決定，不同的名字常常撞到同一色
+ * （「代均」和「爸爸」一樣紅）；有成員清單時改依順序配色，8 人以內保證不同。
+ * Dashboard 與邀請頁用 MemberColorProvider 包起來；沒有包的地方退回舊的雜湊。
+ */
+const MemberOrderContext = createContext<string[] | null>(null);
+
+export const MemberColorProvider: React.FC<{ members: string[]; children: React.ReactNode }> = ({ members, children }) => (
+  <MemberOrderContext.Provider value={members}>{children}</MemberOrderContext.Provider>
+);
+
+/** 成員的代表色 */
+function memberTint(name: string, members: string[] | null): string {
+  const i = members ? members.indexOf(name) : -1;
+  return TINTS[(i >= 0 ? i : hashName(name)) % TINTS.length];
+}
 
 /** First character of a member's name in a round tile. "Me" is drawn solid. */
 const MemberAvatar: React.FC<{ name: string; size?: number; isMe?: boolean; ring?: boolean }> = ({
@@ -11,7 +29,7 @@ const MemberAvatar: React.FC<{ name: string; size?: number; isMe?: boolean; ring
   isMe = false,
   ring = false,
 }) => {
-  const tint = TINTS[hashName(name) % TINTS.length];
+  const tint = memberTint(name, useContext(MemberOrderContext));
   return (
     <span
       className={`inline-flex items-center justify-center rounded-full font-bold shrink-0 select-none ${

@@ -37,10 +37,36 @@ AS $$
     );
 $$;
 
+-- 管理員以上（owner 或 admin）
+CREATE OR REPLACE FUNCTION app.is_admin(p_trip_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM app.trip_members
+        WHERE trip_id = p_trip_id AND user_id = auth.uid() AND role IN ('owner', 'admin')
+    );
+$$;
+
 REVOKE ALL ON FUNCTION app.is_member(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION app.is_owner(UUID)  FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION app.is_admin(UUID)  FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION app.is_member(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION app.is_owner(UUID)  TO authenticated;
+GRANT EXECUTE ON FUNCTION app.is_admin(UUID)  TO authenticated;
+
+-- 一趟旅程最多幾位成員（成員清單的名字數）
+CREATE OR REPLACE FUNCTION app.max_members()
+RETURNS INT
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $$ SELECT 50 $$;
+
+REVOKE ALL ON FUNCTION app.max_members() FROM PUBLIC, anon, authenticated;
 
 -- Storage 路徑 expenses/{tripId}/{檔名} → tripId；格式不對回 NULL（不要讓轉型錯誤變成 500）
 CREATE OR REPLACE FUNCTION app.trip_id_from_path(p_name TEXT)
@@ -123,7 +149,7 @@ BEGIN
     IF v_members IS NULL OR NOT (v_me = ANY (v_members)) THEN
         RAISE EXCEPTION 'my_name_not_in_members' USING ERRCODE = '22023';
     END IF;
-    IF cardinality(v_members) > 30 THEN
+    IF cardinality(v_members) > app.max_members() THEN
         RAISE EXCEPTION 'too_many_members' USING ERRCODE = '22023';
     END IF;
 
@@ -188,7 +214,7 @@ BEGIN
     END IF;
 
     IF NOT (v_name = ANY (v_trip.members)) THEN
-        IF cardinality(v_trip.members) >= 30 THEN
+        IF cardinality(v_trip.members) >= app.max_members() THEN
             RAISE EXCEPTION 'too_many_members' USING ERRCODE = '22023';
         END IF;
         UPDATE app.trips SET members = array_append(members, v_name) WHERE id = p_trip_id;
@@ -236,8 +262,8 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
-    IF NOT app.is_owner(p_trip_id) THEN
-        RAISE EXCEPTION 'not_owner' USING ERRCODE = '42501';
+    IF NOT app.is_admin(p_trip_id) THEN
+        RAISE EXCEPTION 'not_admin' USING ERRCODE = '42501';
     END IF;
     IF p_visibility NOT IN ('members', 'link', 'password') THEN
         RAISE EXCEPTION 'invalid_visibility' USING ERRCODE = '22023';
@@ -270,8 +296,8 @@ AS $$
 DECLARE
     v_token TEXT := app.random_token();
 BEGIN
-    IF NOT app.is_owner(p_trip_id) THEN
-        RAISE EXCEPTION 'not_owner' USING ERRCODE = '42501';
+    IF NOT app.is_admin(p_trip_id) THEN
+        RAISE EXCEPTION 'not_admin' USING ERRCODE = '42501';
     END IF;
     IF p_kind = 'share' THEN
         UPDATE app.trips SET share_token = v_token WHERE id = p_trip_id;
@@ -374,8 +400,8 @@ DECLARE
     v_old     TEXT[];
     v_members TEXT[];
 BEGIN
-    IF NOT app.is_member(p_trip_id) THEN
-        RAISE EXCEPTION 'not_member' USING ERRCODE = '42501';
+    IF NOT app.is_admin(p_trip_id) THEN
+        RAISE EXCEPTION 'not_admin' USING ERRCODE = '42501';
     END IF;
     IF p_renames IS NULL OR jsonb_typeof(p_renames) <> 'object' THEN
         RAISE EXCEPTION 'invalid_renames' USING ERRCODE = '22023';
@@ -383,7 +409,7 @@ BEGIN
 
     SELECT array_agg(app.clean_name(m) ORDER BY ord) INTO v_members
     FROM unnest(p_members) WITH ORDINALITY AS u(m, ord);
-    IF v_members IS NULL OR cardinality(v_members) > 30
+    IF v_members IS NULL OR cardinality(v_members) > app.max_members()
        OR cardinality(v_members) <> (SELECT count(DISTINCT m) FROM unnest(v_members) AS m) THEN
         RAISE EXCEPTION 'invalid_members' USING ERRCODE = '22023';
     END IF;
@@ -505,5 +531,62 @@ DROP TRIGGER IF EXISTS tr_app_keep_one_owner ON app.trip_members;
 CREATE TRIGGER tr_app_keep_one_owner
     BEFORE DELETE ON app.trip_members
     FOR EACH ROW EXECUTE FUNCTION app.keep_one_owner();
+
+-- ── 權限分級（David 2026-11-26）────────────────────────────────
+-- 一般成員能改：記帳、預設值、匯率與小數位數、分類、AI 記帳偏好
+-- 管理員以上才能改：旅程名稱、旅程分組、主幣別、時區、封存（以及隱私、連結、成員名單，走各自的 RPC）
+-- 欄位級權限只分得出「登入的人」，分不出角色，所以用 trigger 擋。
+CREATE OR REPLACE FUNCTION app.trips_guard_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+    -- service role（Edge Function）與 SECURITY DEFINER 的 RPC 不受限（它們自己檢查過了）
+    IF auth.uid() IS NULL OR current_user NOT IN ('authenticated', 'anon') THEN
+        RETURN NEW;
+    END IF;
+    IF NOT app.is_admin(OLD.id) AND (
+           NEW.name IS DISTINCT FROM OLD.name
+        OR NEW.category IS DISTINCT FROM OLD.category
+        OR NEW.base_currency IS DISTINCT FROM OLD.base_currency
+        OR NEW.timezone IS DISTINCT FROM OLD.timezone
+        OR NEW.is_archived IS DISTINCT FROM OLD.is_archived
+    ) THEN
+        RAISE EXCEPTION 'not_admin' USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_app_trips_guard_update ON app.trips;
+CREATE TRIGGER tr_app_trips_guard_update
+    BEFORE UPDATE ON app.trips
+    FOR EACH ROW EXECUTE FUNCTION app.trips_guard_update();
+
+-- 建立者指定或取消管理員（p_role：'admin' 或 'editor'）。建立者自己的角色不能用這支改（要轉移請用 transfer_owner）
+CREATE OR REPLACE FUNCTION app.set_member_role(p_trip_id UUID, p_user_id UUID, p_role TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF NOT app.is_owner(p_trip_id) THEN
+        RAISE EXCEPTION 'not_owner' USING ERRCODE = '42501';
+    END IF;
+    IF p_role NOT IN ('admin', 'editor') THEN
+        RAISE EXCEPTION 'invalid_role' USING ERRCODE = '22023';
+    END IF;
+    UPDATE app.trip_members SET role = p_role
+    WHERE trip_id = p_trip_id AND user_id = p_user_id AND role <> 'owner';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'not_member' USING ERRCODE = '22023';
+    END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app.set_member_role(UUID, UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION app.set_member_role(UUID, UUID, TEXT) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';

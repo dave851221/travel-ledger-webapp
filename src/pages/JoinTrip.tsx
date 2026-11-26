@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, Check, Loader2, UserPlus } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import { ui } from '../components/ui';
-import MemberAvatar from '../features/dashboard/MemberAvatar';
+import MemberAvatar, { MemberColorProvider } from '../features/dashboard/MemberAvatar';
 import BrandMark from '../components/BrandMark';
 import SignInPanel from '../features/auth/SignInPanel';
 import { useSession } from '../features/auth/session';
@@ -99,6 +99,7 @@ const JoinTrip: React.FC = () => {
               <h1 className="text-xl font-bold mt-1">{preview.name}</h1>
 
               <p className={`${ui.label} mt-5`}>你是哪一位？</p>
+              <MemberColorProvider members={preview.members}>
               <div className="grid grid-cols-2 gap-2">
                 {preview.members.map(m => (
                   <button
@@ -113,6 +114,7 @@ const JoinTrip: React.FC = () => {
                   </button>
                 ))}
               </div>
+              </MemberColorProvider>
               <label htmlFor="join-new-name" className={`${ui.label} mt-4`}>不在名單上？用新名字加入</label>
               <input
                 id="join-new-name"

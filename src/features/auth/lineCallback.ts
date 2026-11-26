@@ -14,6 +14,8 @@ export const LINE_PENDING_KEY = 'tlb:line_pending';
 
 export interface LineOAuthState {
   state: string;
+  /** 建立時間（ms）。超過 15 分鐘的不認 */
+  at: number;
   nonce: string;
   redirectUri: string;
 }
@@ -50,10 +52,12 @@ function capture(): void {
   if (!code || !state) return;
 
   let saved: LineOAuthState | null = null;
-  try { saved = JSON.parse(sessionStorage.getItem(LINE_STATE_KEY) || 'null'); } catch { saved = null; }
-  if (!saved || saved.state !== state) return;
+  // 存在 localStorage 而不是 sessionStorage：手機上 LINE 授權完常常回到新分頁（或從 LINE App 跳回瀏覽器），
+  // 新分頁看不到原本分頁的 sessionStorage，以前就因此停在登入頁（2026-11-26 David 手機實測）
+  try { saved = JSON.parse(localStorage.getItem(LINE_STATE_KEY) || 'null'); } catch { saved = null; }
+  if (!saved || saved.state !== state || Date.now() - (saved.at || 0) > 15 * 60 * 1000) return;
 
-  sessionStorage.removeItem(LINE_STATE_KEY);
+  localStorage.removeItem(LINE_STATE_KEY);
   const pending: LinePending = { code, nonce: saved.nonce, redirectUri: saved.redirectUri };
   sessionStorage.setItem(LINE_PENDING_KEY, JSON.stringify(pending));
 

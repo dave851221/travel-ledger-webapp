@@ -55,3 +55,7 @@ verify_jwt = false
 # 開放版的 LINE 登入：登入前還沒有 JWT，身分由函式自己向 LINE 驗（見 auth-line/index.ts）
 [functions.auth-line]
 verify_jwt = false
+
+# 開放版的 LINE 機器人「旅行喵喵」：LINE 的 webhook 不帶 JWT
+[functions.tlb-line-webhook]
+verify_jwt = false
