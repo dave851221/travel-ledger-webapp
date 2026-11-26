@@ -24,9 +24,27 @@ export interface LinePending {
   redirectUri: string;
 }
 
+export const AUTH_ERROR_KEY = 'tlb:auth_error';
+
+/**
+ * 登入失敗（Google 或 Supabase 回來時帶 ?error=…#error=…）：
+ * `#error=…` 會被 HashRouter 當成路徑，整頁空白。記下來、把網址還原成首頁，由 AuthBootstrap 顯示訊息。
+ */
+function captureAuthError(url: URL): boolean {
+  const hashParams = new URLSearchParams(url.hash.startsWith('#error') ? url.hash.slice(1) : '');
+  const error = url.searchParams.get('error') || hashParams.get('error');
+  if (!error) return false;
+  sessionStorage.setItem(AUTH_ERROR_KEY, error);
+  ['error', 'error_code', 'error_description', 'sb'].forEach(k => url.searchParams.delete(k));
+  url.hash = '#/';
+  window.history.replaceState(window.history.state, '', url.toString());
+  return true;
+}
+
 function capture(): void {
   if (import.meta.env.VITE_APP_MODE !== 'public') return;
   const url = new URL(window.location.href);
+  if (captureAuthError(url)) return;
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   if (!code || !state) return;

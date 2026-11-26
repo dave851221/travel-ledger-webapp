@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { completeLineSignIn, hasPendingLineSignIn } from './lineLogin';
 import { takeReturnTo, useSession } from './session';
+import { AUTH_ERROR_KEY } from './lineCallback';
 
 /**
  * 開放版：登入回來之後的收尾（舊版不會掛這個元件）。
@@ -13,7 +14,16 @@ const AuthBootstrap: React.FC = () => {
   const navigate = useNavigate();
   const { session } = useSession();
   const [lineBusy, setLineBusy] = useState(hasPendingLineSignIn);
-  const [lineError, setLineError] = useState(false);
+  // LINE 登入失敗，或 Google 等登入回來時帶著錯誤（lineCallback.ts 記下來的）
+  const [lineError, setLineError] = useState(() => {
+    try {
+      const had = !!sessionStorage.getItem(AUTH_ERROR_KEY);
+      sessionStorage.removeItem(AUTH_ERROR_KEY);
+      return had;
+    } catch {
+      return false;
+    }
+  });
   const started = useRef(false);
 
   useEffect(() => {
@@ -41,7 +51,7 @@ const AuthBootstrap: React.FC = () => {
   if (lineError) {
     return (
       <div role="alert" className="fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[90] bg-surface border border-line rounded-xl shadow-xl px-4 py-2.5 text-sm text-neg flex items-center gap-2">
-        <AlertCircle size={16} />LINE 登入沒有成功，請再試一次
+        <AlertCircle size={16} />登入沒有成功，請再試一次
         <button className="ml-2 underline text-ink-2" onClick={() => setLineError(false)}>關閉</button>
       </div>
     );

@@ -30,6 +30,10 @@ enabled = false
 # npm run db:build 產生（舊版 + 開放版接在一起）；CLI 讀不到工作目錄以外的檔案
 sql_paths = ["./seed.generated.sql"]
 
+# 本機不需要 log 分析；開著的話 Windows 上 vector 容器常常殘留，下次 start 會撞名失敗
+[analytics]
+enabled = false
+
 [studio]
 enabled = true
 port = 54323
@@ -54,6 +58,19 @@ enable_signup = true
 [auth.email]
 enable_signup = true
 enable_confirmations = false
+
+# Google 登入：金鑰放在 local/supabase/.env（TLB_GOOGLE_CLIENT_ID／TLB_GOOGLE_CLIENT_SECRET，不進 git）。
+# 名字加 TLB_ 前綴：系統環境變數會蓋過 .env，這台電腦別的專案已經有 GOOGLE_CLIENT_SECRET。
+# Google Cloud 的 Authorized redirect URI 要有 http://127.0.0.1:54321/auth/v1/callback
+[auth.external.google]
+enabled = true
+client_id = "env(TLB_GOOGLE_CLIENT_ID)"
+secret = "env(TLB_GOOGLE_CLIENT_SECRET)"
+
+# 開放版的 LINE 登入（Edge Function）：本機用 `npm run db:functions` 跑，
+# local/supabase/functions 是指向 supabase/functions 的連結（npm run db:link 建立，不進 git）
+[functions.auth-line]
+verify_jwt = false
 
 [edge_runtime]
 enabled = true

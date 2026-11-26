@@ -40,3 +40,4 @@ supabase/.branches
 local/supabase/migrations/
 local/supabase/.temp/
 local/supabase/.branches/
+local/supabase/functions
