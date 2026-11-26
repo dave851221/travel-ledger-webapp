@@ -57,6 +57,22 @@ CREATE TABLE IF NOT EXISTS app.profiles (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ── LINE 帳號 ↔ 使用者 ─────────────────────────────────────────
+-- Supabase 沒有內建 LINE 登入，由 Edge Function auth-line 驗過 LINE 的 ID token 後寫入這張表。
+-- line_user_id 是 LINE Login channel 所屬 provider 底下的 userId；
+-- ⚠️ Messaging API（機器人）的 channel 必須在同一個 provider，機器人看到的 userId 才會一樣。
+-- 一個使用者可以連好幾個 LINE 帳號（換手機、換帳號），一個 LINE 帳號只屬於一個使用者。
+-- 只有 service role 寫入；使用者只看得到自己的（不送 LINE ID 給其他成員）。
+CREATE TABLE IF NOT EXISTS app.line_identities (
+    line_user_id TEXT        PRIMARY KEY,
+    user_id      UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    display_name TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS line_identities_user_idx ON app.line_identities (user_id);
+
 -- ── 旅程 ───────────────────────────────────────────────────────
 -- 與 public.trips 相同的欄位（前端與 Edge Function 共用同一套程式），差別：
 --   · 沒有 access_code：進入權限改由 trip_members 決定
@@ -146,6 +162,7 @@ CREATE INDEX IF NOT EXISTS app_expenses_deleted_at_idx ON app.expenses (deleted_
 REVOKE ALL ON ALL TABLES IN SCHEMA app FROM anon, authenticated;
 
 GRANT SELECT, INSERT, UPDATE ON app.profiles TO authenticated;
+GRANT SELECT ON app.line_identities TO authenticated;
 
 GRANT SELECT (id, name, members, categories, category, base_currency, timezone, rates, precision_config,
               is_archived, default_currency, default_category, default_payer, default_split_members,
@@ -684,7 +701,15 @@ NOTIFY pgrst, 'reload schema';
 -- 所以 Edge Function 必須自己檢查身分，見 docs/SECURITY.md 第 3 條。
 -- ============================================================
 
-ALTER TABLE app.profiles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.profiles        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.line_identities ENABLE ROW LEVEL SECURITY;
+
+-- ── line_identities：只看得到自己的，寫入只有 Edge Function（service role）──
+DROP POLICY IF EXISTS line_identities_self ON app.line_identities;
+CREATE POLICY line_identities_self ON app.line_identities
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid());
+
 ALTER TABLE app.trips        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.trip_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.expenses     ENABLE ROW LEVEL SECURITY;

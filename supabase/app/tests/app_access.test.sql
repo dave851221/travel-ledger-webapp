@@ -7,7 +7,7 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(43);
+SELECT plan(45);
 
 -- ── 測試用帳號：A 建立旅程、B 被邀請、C 是路人 ─────────────────
 INSERT INTO auth.users (id, email, aud, role)
@@ -131,7 +131,17 @@ SELECT throws_ok($$ SELECT app.update_trip_members((SELECT v::uuid FROM ids WHER
 SELECT throws_ok($$ DELETE FROM app.trip_members WHERE user_id = auth.uid() $$,
                  'last_owner', '最後一位 owner 不能離開');
 
--- ── 6. 分享連結 ────────────────────────────────────────────────
+-- ── 6. LINE 帳號對應只看得到自己的 ─────────────────────────────
+RESET ROLE;
+INSERT INTO app.line_identities (line_user_id, user_id) VALUES ('Uaaa', 'aaaaaaaa-0000-0000-0000-000000000001');
+SELECT pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+SELECT is((SELECT count(*) FROM app.line_identities), 0::bigint, '看不到別人的 LINE 帳號');
+SELECT throws_ok($$ INSERT INTO app.line_identities (line_user_id, user_id) VALUES ('Ubbb', auth.uid()) $$,
+                 '42501', NULL, '不能自己綁 LINE 帳號（只有 auth-line 能寫）');
+RESET ROLE;
+SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+
+-- ── 7. 分享連結 ────────────────────────────────────────────────
 SELECT lives_ok($$ SELECT app.set_trip_visibility((SELECT v::uuid FROM ids WHERE k = 'trip'), 'password', 'secret1') $$,
                 'owner 可以設成密碼模式');
 RESET ROLE;

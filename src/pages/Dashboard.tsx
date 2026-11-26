@@ -19,6 +19,9 @@ import { useTripData } from '../hooks/useTripData';
 import { useTripStats } from '../hooks/useTripStats';
 import { useTrash } from '../hooks/useTrash';
 import { useTripAuthGuard } from '../hooks/useTripAuthGuard';
+import { IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
+import { useSession } from '../features/auth/session';
+import { useMyMembership } from '../features/auth/membership';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import { insertExpenseOrQueue, withPending } from '../utils/offlineQueue';
 import { isTabType, primaryTabs, type TabType } from '../features/dashboard/tabs';
@@ -45,7 +48,7 @@ const TabLoading = () => (
   <div className="flex justify-center py-20 text-muted"><Loader2 className="animate-spin" size={24} /></div>
 );
 
-const APP_NAME = '旅遊小本本';
+const APP_NAME = PRODUCT_NAME;
 
 const Dashboard: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -79,16 +82,21 @@ const Dashboard: React.FC = () => {
   // 被移除的人留著的話，新增支出會把不存在的人預設成付款人，那筆錢就從結算裡消失。
   const [pickedUser, setPickedUser] = useState<string | null>(null);
   const storedUser = id ? localStorage.getItem(`me_${id}`) : null;
+  // 開放版：以資料庫的成員資格為準（app.trip_members），見 features/auth/membership.ts
+  const { session } = useSession();
+  const { membership, switchMember } = useMyMembership(IS_PUBLIC && authed ? id : undefined, session?.user.id ?? null);
   const currentUser = !loading && trip
-    ? [pickedUser, storedUser].find((m): m is string => !!m && trip.members.includes(m)) ?? null
+    ? [IS_PUBLIC ? membership?.memberName : pickedUser, IS_PUBLIC ? null : storedUser]
+        .find((m): m is string => !!m && trip.members.includes(m)) ?? null
     : null;
 
   // 還沒選身分就請使用者先選一次；關掉之後不再自己跳出來（頭像選單隨時可以改）
   const [welcomeRequested, setWelcomeRequested] = useState(false);
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   // 畫面還是手機上的舊資料時，記住的名字可能只是還沒出現在舊的成員清單裡 —— 等對完再決定要不要問
+  // 開放版不必問：加入旅程時就選過了（成員資格裡有名字），要換再從頭像選單改
   const isWelcomeSelectorOpen = welcomeRequested
-    || (!loading && !!trip && !currentUser && !welcomeDismissed && (!syncing || !storedUser));
+    || (!IS_PUBLIC && !loading && !!trip && !currentUser && !welcomeDismissed && (!syncing || !storedUser));
   const closeWelcome = () => { setWelcomeRequested(false); setWelcomeDismissed(true); };
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
@@ -244,6 +252,12 @@ const Dashboard: React.FC = () => {
   };
 
   const handleSetCurrentUser = (name: string) => {
+    if (IS_PUBLIC) {
+      // 開放版：切換成其他成員要寫進資料庫（LINE 機器人也看這個）
+      closeWelcome();
+      void switchMember(name).then(ok => { if (!ok) showToast('切換失敗，請再試一次', 'error'); });
+      return;
+    }
     localStorage.setItem(`me_${id}`, name);
     setPickedUser(name);
     closeWelcome();

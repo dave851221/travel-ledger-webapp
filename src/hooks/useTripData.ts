@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase, TRIP_COLUMNS } from '../api/supabase';
+import { supabase, TRIP_COLUMNS, TRIP_DETAIL_COLUMNS } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { RECEIPTS_BUCKET } from '../utils/storage';
 import { isNotFoundError } from '../utils/supabaseErrors';
@@ -99,9 +99,12 @@ export const useTripData = (
   const refetchTrip = useCallback(async (): Promise<boolean> => {
     if (!supabase || !id) return false;
     try {
-      // 已經通過通行碼關卡，`*` 含 access_code（設定頁要顯示）。其他地方一律用 TRIP_COLUMNS
-      const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
+      // 舊版：已經通過通行碼關卡，`*` 含 access_code（設定頁要顯示）。其他地方一律用 TRIP_COLUMNS。
+      // 開放版沒有 access_code，欄位見 TRIP_DETAIL_COLUMNS
+      const { data: row, error } = await supabase.from('trips').select(TRIP_DETAIL_COLUMNS).eq('id', id).single();
       if (error) throw error;
+      // 欄位清單不是字面值，supabase-js 推不出型別；兩版的欄位都是 Trip 的子集合
+      const data = row as unknown as Trip;
       setTrip(data);
       writeCache(id, { trip: data });
       fetchSiblingTrips(data?.category, id);

@@ -5,7 +5,15 @@
 -- 所以 Edge Function 必須自己檢查身分，見 docs/SECURITY.md 第 3 條。
 -- ============================================================
 
-ALTER TABLE app.profiles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.profiles        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.line_identities ENABLE ROW LEVEL SECURITY;
+
+-- ── line_identities：只看得到自己的，寫入只有 Edge Function（service role）──
+DROP POLICY IF EXISTS line_identities_self ON app.line_identities;
+CREATE POLICY line_identities_self ON app.line_identities
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid());
+
 ALTER TABLE app.trips        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.trip_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.expenses     ENABLE ROW LEVEL SECURITY;
