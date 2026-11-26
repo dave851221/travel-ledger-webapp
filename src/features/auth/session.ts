@@ -7,7 +7,29 @@
 import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../../api/supabase';
-import { IS_PUBLIC } from '../../config/mode';
+import { clearUserStorage, globalStorageKey, IS_PUBLIC } from '../../config/mode';
+import { clearSignedPhotoUrls } from '../../utils/signedPhotos';
+
+const OWNER_KEY = globalStorageKey('cache_owner');
+
+/**
+ * 共用裝置防護：這台裝置上的快取（旅程清單、帳目、我是誰、聊天、照片簽名網址）屬於誰。
+ * 登入的人換了（換帳號、登出、session 過期後別人登入）就全部清掉，下一個人看不到上一個人的帳。
+ * 在 useSession 拿到登入狀態、交給畫面之前呼叫 —— Dashboard 與首頁都要等登入狀態才讀快取，所以一定清在讀之前。
+ * ⚠️ 上一個人還沒上傳的離線帳也會被清掉（不能用別人的身分上傳）。
+ */
+export function ensureCacheOwner(userId: string | null): void {
+  if (!IS_PUBLIC) return;
+  try {
+    const next = userId ?? '';
+    if (localStorage.getItem(OWNER_KEY) === next) return;
+    clearUserStorage();
+    clearSignedPhotoUrls();
+    localStorage.setItem(OWNER_KEY, next);
+  } catch {
+    // localStorage 不能用：也就沒有快取可以外洩
+  }
+}
 
 export interface SessionState {
   /** 還在讀本機存的登入資料（第一次 render 不知道有沒有登入） */
@@ -22,9 +44,11 @@ export function useSession(): SessionState {
     if (!IS_PUBLIC || !supabase) return;
     let alive = true;
     supabase.auth.getSession().then(({ data }) => {
+      ensureCacheOwner(data.session?.user.id ?? null);
       if (alive) setState({ loading: false, session: data.session });
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      ensureCacheOwner(session?.user.id ?? null);
       if (alive) setState({ loading: false, session });
     });
     return () => { alive = false; sub.subscription.unsubscribe(); };

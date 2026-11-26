@@ -3,7 +3,7 @@
  *
  * 網頁：導到 LINE 授權頁 → 回來時 lineCallback.ts 收起 code → completeLineSignIn() 交給 auth-line →
  *       拿回一次性 token_hash → supabase.auth.verifyOtp 換成正式 session。
- * LIFF：liff.getIDToken() 直接交給 auth-line（不用跳頁），見 signInWithLiffIdToken()。
+ * LIFF：liff.getAccessToken() 直接交給 auth-line（不用跳頁），見 signInWithLiffAccessToken()。
  *
  * state 防 CSRF、nonce 防重放，都存在 sessionStorage，只用一次。
  */
@@ -57,7 +57,10 @@ export async function completeLineSignIn(): Promise<void> {
   await finish({ action: 'signin', code: pending.code, redirectUri: pending.redirectUri, nonce: pending.nonce });
 }
 
-/** LIFF 裡：不跳頁，直接用 LINE 已經登入的身分 */
-export async function signInWithLiffIdToken(idToken: string): Promise<void> {
-  await finish({ action: 'signin', idToken });
+/**
+ * LIFF 裡：不跳頁，直接用 LINE 已經登入的身分。
+ * 送 access token（liff.getAccessToken()），不送 ID token —— 伺服器向 LINE 確認是發給我們 channel 的，見 auth-line/logic.ts
+ */
+export async function signInWithLiffAccessToken(accessToken: string): Promise<void> {
+  await finish({ action: 'signin', accessToken });
 }

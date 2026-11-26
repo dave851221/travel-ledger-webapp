@@ -92,8 +92,10 @@ const Home: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   // 先畫上次存在手機上的清單，再到背景更新：國外網路慢時不必盯著骨架等
-  const [trips, setTrips] = useState<Trip[]>(readTripsCache);
-  const [loading, setLoading] = useState(() => readTripsCache().length === 0);
+  // 開放版不在一開始讀快取：那時還不知道是誰登入，快取可能是上一個人的（等登入狀態確定、
+  // ensureCacheOwner 清過之後才讀，見下面的 effect）
+  const [trips, setTrips] = useState<Trip[]>(() => (IS_PUBLIC ? [] : readTripsCache()));
+  const [loading, setLoading] = useState(() => IS_PUBLIC || readTripsCache().length === 0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -120,12 +122,19 @@ const Home: React.FC = () => {
     document.title = APP_NAME;
     // 開放版沒登入時不查（RLS 也只會回空的）；換帳號登入時重查
     if (IS_PUBLIC && !userId) return;
+    if (IS_PUBLIC) showCachedTrips();
     fetchTrips();
   }, [userId]);
 
+  // 開放版：登入狀態確定後（快取已經確認是這個人的）先畫快取
+  function showCachedTrips() {
+    const cached = readTripsCache();
+    setTrips(cached);
+    setLoading(cached.length === 0);
+  }
+
   const handleSignOut = async () => {
-    // 共用裝置上登出後不該還看得到上一個人的旅程清單
-    try { localStorage.removeItem(TRIPS_CACHE_KEY); } catch { /* ignore */ }
+    // 快取由 ensureCacheOwner 在登出時整批清掉（session.ts），這裡只清畫面
     setTrips([]);
     await signOut();
   };
@@ -235,17 +244,20 @@ const Home: React.FC = () => {
           p_base_currency: newTrip.base_currency,
           p_categories: DEFAULT_CATEGORIES,
           p_category: newTrip.category.trim() || null,
+          // 精度與舊版建立時一致，跟建立一起寫進去
+          p_precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) },
         });
         if (error) throw error;
-        // 精度與舊版建立時一致（RPC 只先放主幣匯率）
-        await supabase.from('trips')
-          .update({ precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) } })
-          .eq('id', newId as string);
         setIsModalOpen(false);
         setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
         navigate(`/trip/${newId}/dashboard`);
       } catch (err) {
-        setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
+        // supabase 的錯誤不是 Error 的實例，但有 message
+        const msg = (err as { message?: string } | null)?.message ?? String(err);
+        setCreateError(msg.includes('invalid_name') ? '每位成員的名字要 1～20 個字'
+          : msg.includes('too_many_members') ? '成員最多 30 位'
+          : msg.includes('trips_name_check') ? '旅程名稱最多 60 個字'
+          : '建立失敗，請再試一次');
       } finally {
         setSubmitting(false);
       }

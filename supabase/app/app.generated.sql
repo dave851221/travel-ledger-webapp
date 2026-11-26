@@ -279,7 +279,9 @@ CREATE OR REPLACE FUNCTION app.create_trip(
     p_base_currency TEXT,
     p_categories    TEXT[],
     p_timezone      TEXT DEFAULT NULL,
-    p_category      TEXT DEFAULT NULL
+    p_category      TEXT DEFAULT NULL,
+    -- 幣別小數位數（例如 {"JPY": 0}），由前端依幣別決定；跟建立一起寫，不另外更新一次
+    p_precision_config JSONB DEFAULT '{}'::jsonb
 )
 RETURNS UUID
 LANGUAGE plpgsql
@@ -315,7 +317,8 @@ BEGIN
                            rates, precision_config)
     VALUES (btrim(p_name), v_members, coalesce(p_categories, '{}'), upper(btrim(p_base_currency)),
             p_timezone, p_category, v_uid,
-            jsonb_build_object(upper(btrim(p_base_currency)), 1), '{}'::jsonb)
+            jsonb_build_object(upper(btrim(p_base_currency)), 1),
+            CASE WHEN jsonb_typeof(p_precision_config) = 'object' THEN p_precision_config ELSE '{}'::jsonb END)
     RETURNING id INTO v_id;
 
     INSERT INTO app.trip_members (trip_id, user_id, member_name, role)
@@ -325,8 +328,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB) TO authenticated;
 
 -- ── 邀請連結 ───────────────────────────────────────────────────
 -- 還沒登入也能先看邀請：回傳旅程名稱與成員清單，讓他選「我是誰」。

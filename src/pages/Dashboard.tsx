@@ -19,9 +19,10 @@ import { useTripData } from '../hooks/useTripData';
 import { useTripStats } from '../hooks/useTripStats';
 import { useTrash } from '../hooks/useTrash';
 import { useTripAuthGuard } from '../hooks/useTripAuthGuard';
-import { IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
+import { IS_PUBLIC, meKey, PRODUCT_NAME } from '../config/mode';
 import { useSession } from '../features/auth/session';
 import { useMyMembership } from '../features/auth/membership';
+import { usePhotoUrlVersion } from '../utils/signedPhotos';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import { insertExpenseOrQueue, withPending } from '../utils/offlineQueue';
 import { isTabType, primaryTabs, type TabType } from '../features/dashboard/tabs';
@@ -81,12 +82,19 @@ const Dashboard: React.FC = () => {
   // localStorage 的 me_{id} 是來源（設定頁改名時會跟著改它），但只認還在成員清單裡的名字 ——
   // 被移除的人留著的話，新增支出會把不存在的人預設成付款人，那筆錢就從結算裡消失。
   const [pickedUser, setPickedUser] = useState<string | null>(null);
-  const storedUser = id ? localStorage.getItem(`me_${id}`) : null;
+  const storedUser = id ? localStorage.getItem(meKey(id)) : null;
   // 開放版：以資料庫的成員資格為準（app.trip_members），見 features/auth/membership.ts
   const { session } = useSession();
-  const { membership, switchMember } = useMyMembership(IS_PUBLIC && authed ? id : undefined, session?.user.id ?? null);
+  // 開放版：照片的簽名網址簽好時整頁重畫一次（舊版的版本號永遠不變）
+  usePhotoUrlVersion();
+  const { membership, switchMember } = useMyMembership(
+    IS_PUBLIC && authed ? id : undefined,
+    session?.user.id ?? null,
+    trip?.members.join('\u0001') ?? '',
+  );
+  // 開放版查不到成員資格時（離線打開）退回上次記在手機上的名字（membership.ts 會寫 meKey）
   const currentUser = !loading && trip
-    ? [IS_PUBLIC ? membership?.memberName : pickedUser, IS_PUBLIC ? null : storedUser]
+    ? [IS_PUBLIC ? membership?.memberName : pickedUser, storedUser]
         .find((m): m is string => !!m && trip.members.includes(m)) ?? null
     : null;
 
@@ -130,7 +138,7 @@ const Dashboard: React.FC = () => {
   // 記住的身分已經不是成員了（被移除）就清掉，下次不會再讀到
   useEffect(() => {
     if (!loading && !syncing && trip && storedUser && !trip.members.includes(storedUser)) {
-      localStorage.removeItem(`me_${id}`);
+      localStorage.removeItem(meKey(id!));
     }
   }, [loading, syncing, trip, storedUser, id]);
 
@@ -258,7 +266,7 @@ const Dashboard: React.FC = () => {
       void switchMember(name).then(ok => { if (!ok) showToast('切換失敗，請再試一次', 'error'); });
       return;
     }
-    localStorage.setItem(`me_${id}`, name);
+    localStorage.setItem(meKey(id!), name);
     setPickedUser(name);
     closeWelcome();
   };
@@ -349,7 +357,8 @@ const Dashboard: React.FC = () => {
   const readOnly = trip.is_archived;
   const goHome = () => navigate('/');
   const openRecap = readOnly ? () => setRecapOpen(true) : undefined;
-  const openChat = () => { setChatMounted(true); setChatOpen(true); };
+  // 開放版的網頁聊天還沒接上登入與額度（後端 web-chat 目前只認舊版的資料），先不顯示入口
+  const openChat = IS_PUBLIC ? undefined : () => { setChatMounted(true); setChatOpen(true); };
   const goCategory = () => { if (trip.category) navigate(`/#cat-${encodeURIComponent(trip.category)}`); };
 
   const chromeProps = {

@@ -3,12 +3,16 @@
 export interface AuthLineRequest {
   /** signin：登入或註冊；link：把 LINE 連到目前登入的帳號 */
   action: 'signin' | 'link'
-  /** LIFF 裡直接拿到的 ID token */
-  idToken?: string
-  /** 網頁 OAuth 回來的 code，要搭配當初送出的 redirectUri */
+  /**
+   * LIFF 裡的 access token（liff.getAccessToken()）。伺服器拿它向 LINE 確認是發給我們這個 channel、
+   * 還沒過期，再用它查 profile 拿 userId。
+   * 刻意不收前端送來的 ID token：ID token 在有效期內可以被重放，又沒辦法要求 LIFF 帶我們指定的 nonce。
+   */
+  accessToken?: string
+  /** 網頁 OAuth 回來的 code，要搭配當初送出的 redirectUri；ID token 由伺服器自己換，不經過前端 */
   code?: string
   redirectUri?: string
-  /** 送去 LINE 授權時帶的 nonce，驗 ID token 時要對得上（防重放） */
+  /** 送去 LINE 授權時帶的 nonce，驗伺服器換回來的 ID token 時要對得上 */
   nonce?: string
 }
 
@@ -23,13 +27,22 @@ export function parseAuthLineRequest(raw: unknown): AuthLineRequest | null {
   const r = raw as Record<string, unknown>
   const action = r.action === 'link' ? 'link' : r.action === 'signin' || r.action === undefined ? 'signin' : null
   if (!action) return null
-  const idToken = str(r.idToken)
+  const accessToken = str(r.accessToken)
   const code = str(r.code)
   const redirectUri = str(r.redirectUri)
   const nonce = str(r.nonce)
-  if (!idToken && !(code && redirectUri)) return null
+  if (!accessToken && !(code && redirectUri)) return null
   if (redirectUri && !/^https?:\/\//.test(redirectUri)) return null
-  return { action, idToken, code, redirectUri, nonce }
+  // 網頁登入一定要有 nonce（防止別處拿到的 code 被拿來換）
+  if (code && !nonce) return null
+  return { action, accessToken, code, redirectUri, nonce }
+}
+
+/** LINE 的 access token 驗證結果：一定要是發給我們這個 channel 的、還沒過期 */
+export function accessTokenIsOurs(verify: unknown, channelId: string): boolean {
+  if (!verify || typeof verify !== 'object') return false
+  const v = verify as Record<string, unknown>
+  return String(v.client_id ?? '') === channelId && Number(v.expires_in ?? 0) > 0
 }
 
 /**

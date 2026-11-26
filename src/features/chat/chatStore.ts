@@ -8,8 +8,10 @@
  * 純函式為主（chatStore.test.ts），讀寫 localStorage 的那兩支包 try/catch（無痕模式會丟例外）。
  */
 import type { ChatBlock, ChatItem, DraftItem, HistoryTurn, WebDraft } from './types';
+import { tripStorageKey } from '../../config/mode';
 
-const KEY = (tripId: string) => `chat_${tripId}`;
+// 開放版加前綴（換帳號登入時會被清掉），見 src/config/mode.ts
+const KEY = (tripId: string) => tripStorageKey('chat', tripId);
 const VERSION = 1;
 /** 畫面上留多少則（太多 localStorage 會滿；照片只存路徑，不佔空間） */
 export const MAX_ITEMS = 150;

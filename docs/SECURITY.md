@@ -31,6 +31,26 @@
 - 建立後 `REVOKE ALL ... FROM PUBLIC`，再只 `GRANT EXECUTE` 給需要的角色。
 - 錯誤用固定的英文代碼（`not_member`、`not_owner`、`invalid_invite`…），前端依代碼顯示中文。
 
+## 前端的防護（開放版）
+
+- **共用裝置**：這台裝置上屬於某個帳號的資料（旅程清單快取、帳目快取、我是誰、聊天、照片簽名網址）
+  一律用 `tlb:` 開頭的鍵（`src/config/mode.ts` 的 `globalStorageKey` / `tripStorageKey` / `meKey`）。
+  登入的人換了或登出時，`ensureCacheOwner`（`features/auth/session.ts`）整批清掉；
+  上一個人還沒上傳的離線帳也會被清掉（不能用別人的身分上傳）。新增任何存在裝置上的資料都要用這些 helper。
+- **照片**：私有 bucket `app-images`，畫面用簽名網址（`utils/signedPhotos.ts`，12 小時），分享頁不顯示照片。
+- **LINE 登入**：只收網頁 OAuth 的 code（伺服器自己換 ID token、驗 nonce）或 LIFF 的 access token
+  （伺服器向 LINE 確認是發給我們 channel 的）；前端送來的 ID token 一律不收（有效期內可以重放）。
+  `auth-line` 的 CORS 只對 `APP_ALLOWED_ORIGINS` 裡的網站回 Allow-Origin。
+
+## 上線時要做的設定（還沒做）
+
+- 正式資料庫：把 `supabase/app/app.generated.sql` 當成第一支 migration 跑一次（之後的變更照 CLAUDE.md 寫成 `supabase/migrations/`）；
+  Dashboard → API 的 Exposed schemas 加上 `app`。
+- Supabase Auth：開 Google、關 Email 註冊；Redirect URLs 加開放版網址。
+- Edge Function secrets：`LINE_LOGIN_CHANNEL_ID`、`LINE_LOGIN_CHANNEL_SECRET`、`APP_ALLOWED_ORIGINS`；部署 `auth-line --no-verify-jwt`。
+- 前端建置：`VITE_APP_MODE=public`、`VITE_LINE_LOGIN_CHANNEL_ID`，輸出到 GitHub Pages 的 `/next/`。
+- LINE：新的 provider 底下建 LINE Login channel（callback 填開放版網址）與新官方帳號的 Messaging API channel，兩個要在**同一個 provider**。
+
 ## 怎麼測
 
 權限測試在 `supabase/app/tests/`（pgTAP），在本機 Supabase 跑，不碰正式資料庫：

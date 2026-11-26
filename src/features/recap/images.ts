@@ -1,4 +1,4 @@
-import { photoUrl } from '../../utils/storage';
+import { resolvePhotoUrl } from '../../utils/storage';
 import { VIDEO_H, VIDEO_W } from './render';
 
 /**
@@ -66,7 +66,11 @@ export const targetSize = (w: number, h: number): { width: number; height: numbe
  * 那正是「影片裡有些照片全黑」的原因。萬一還是拿到 opaque／錯誤，再換一個網址、略過 HTTP 快取重抓一次。
  */
 const fetchPhoto = async (path: string, signal?: AbortSignal): Promise<Response> => {
-  const attempt = (suffix: string, init: RequestInit) => fetch(`${photoUrl(path)}?${suffix}`, { ...init, signal, mode: 'cors' });
+  // 開放版是簽名網址（本來就帶 ?token=），要等簽好；查詢字串用 & 接在後面
+  const base = await resolvePhotoUrl(path);
+  if (!base) throw new Error('photo_url_unavailable');
+  const sep = base.includes('?') ? '&' : '?';
+  const attempt = (suffix: string, init: RequestInit) => fetch(`${base}${sep}${suffix}`, { ...init, signal, mode: 'cors' });
   try {
     const res = await attempt('recap=1', {});
     if (res.ok && res.type !== 'opaque') return res;

@@ -20,7 +20,7 @@ import {
 import Modal from './Modal';
 import { ui } from './ui';
 import { supabase } from '../api/supabase';
-import { IS_PUBLIC } from '../config/mode';
+import { IS_PUBLIC, meKey } from '../config/mode';
 import ShareSettings from '../features/auth/ShareSettings';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
@@ -296,7 +296,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         });
         if (membersErr) {
           if (membersErr.message.includes('member_claimed')) throw new Error('有成員已經用這個名字加入，不能直接移除。請他先在「我是誰」換成別人');
-          throw membersErr;
+          if (membersErr.message.includes('invalid_name')) throw new Error('成員名字要 1～20 個字');
+          if (membersErr.message.includes('invalid_members')) throw new Error('成員名稱不能重複，最多 30 位');
+          throw new Error(membersErr.message);
         }
         setMemberOrigins(finalMembers);
       } else if (renamePairs.length > 0) {
@@ -311,9 +313,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         // 不能再套一次同樣的改名（A、B 互換名字時會被換回去）
         setMemberOrigins(finalMembers);
 
-        const savedMe = localStorage.getItem(`me_${trip.id}`);
+        const savedMe = localStorage.getItem(meKey(trip.id));
         const renamedMe = savedMe ? renamePairs.find(([oldN]) => oldN === savedMe)?.[1] : undefined;
-        if (renamedMe) localStorage.setItem(`me_${trip.id}`, renamedMe);
+        if (renamedMe) localStorage.setItem(meKey(trip.id), renamedMe);
       }
 
       const { error: updateError } = await supabase

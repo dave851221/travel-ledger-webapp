@@ -6,6 +6,7 @@ import { useBackClose } from '../../hooks/useBackClose';
 import Modal from '../../components/Modal';
 import { ui } from '../../components/ui';
 import { photoUrl } from '../../utils/storage';
+import { tripStorageKey } from '../../config/mode';
 import { formatMoney } from '../../utils/money';
 import { getItinerary, isPlan } from '../itinerary/registry';
 import {
@@ -38,7 +39,8 @@ interface Saved {
   stats?: string[];
 }
 
-const storageKey = (tripId: string) => `recap_${tripId}`;
+// 開放版加前綴（換帳號登入時會被清掉），見 src/config/mode.ts
+const storageKey = (tripId: string) => tripStorageKey('recap', tripId);
 const readSaved = (tripId: string): Saved => {
   try {
     return JSON.parse(localStorage.getItem(storageKey(tripId)) ?? '{}') as Saved;
