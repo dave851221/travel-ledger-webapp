@@ -63,6 +63,16 @@ CREATE TABLE IF NOT EXISTS public.expenses (
 CREATE INDEX IF NOT EXISTS expenses_trip_id_idx    ON public.expenses (trip_id);
 CREATE INDEX IF NOT EXISTS expenses_deleted_at_idx ON public.expenses (deleted_at);
 
+-- 首頁的自訂排序（舊版沒有登入，大家看同一份旅程清單，所以整個網站只有一列，id 固定是 1）
+--   layout：{ "groups": [分組名稱…], "trips": { 分組名稱: [旅程 id…] } }，NULL = 用預設排法
+--   只有按「完成」才寫一次（Disk IO），格式由前端 features/home/homeLayout.ts 收斂。
+--   開放版不用這張表：每個人的順序存在自己帳號的 user_metadata。
+CREATE TABLE IF NOT EXISTS public.home_layout (
+    id         SMALLINT    PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    layout     JSONB       CHECK (layout IS NULL OR octet_length(layout::text) <= 65536),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ── 既有資料庫相容 ────────────────────────────────────────────
 -- 全新建立時以下皆為 no-op；若把 bootstrap 跑在舊資料庫上則會補正
 ALTER TABLE public.trips ALTER COLUMN access_code DROP NOT NULL;

@@ -14,6 +14,7 @@ ALTER TABLE public.line_trip_id_mapping   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_user_states       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_chat_history      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_processed_actions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.home_layout            ENABLE ROW LEVEL SECURITY;
 -- 刻意**沒有任何政策**：只有 Edge Function（service role，繞過 RLS）讀寫，前端用不到
 ALTER TABLE public.line_bot_messages      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.line_webhook_events    ENABLE ROW LEVEL SECURITY;
@@ -41,4 +42,9 @@ CREATE POLICY "Allow public all on chat_history"            ON public.line_chat_
 
 DROP POLICY IF EXISTS "Allow all on processed_actions"      ON public.line_processed_actions;
 CREATE POLICY "Allow all on processed_actions"              ON public.line_processed_actions
+    FOR ALL USING (true) WITH CHECK (true);
+
+-- 首頁排序：跟 trips 一樣全開（舊版沒有登入，誰都能改大家看到的順序）
+DROP POLICY IF EXISTS "Allow public read/write on home_layout" ON public.home_layout;
+CREATE POLICY "Allow public read/write on home_layout"         ON public.home_layout
     FOR ALL USING (true) WITH CHECK (true);
