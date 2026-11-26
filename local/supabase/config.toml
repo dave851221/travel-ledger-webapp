@@ -1,0 +1,60 @@
+# ============================================================
+# 本機開發用的 Supabase（需要 Docker Desktop）
+#
+# 這是獨立的 CLI 工作目錄，不會連到正式專案，也不跑 supabase/migrations/
+# （那些是給既有正式資料庫的增量變更，在空資料庫上不保證能跑）。
+# 開機時直接灌兩份完整 schema：舊版 public + 開放版 app。
+#
+#   npx supabase start   --workdir local     # 第一次會下載映像檔，要等一陣子
+#   npx supabase db reset --workdir local     # 改了 schema 之後重灌（先 npm run db:build）
+#   npx supabase test db  --workdir local     # 跑 supabase/app/tests 的權限測試（見 package.json 的 db:test）
+#   npx supabase stop    --workdir local
+# ============================================================
+
+project_id = "travel-ledger-local"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public", "app"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["../../supabase/schema/bootstrap.generated.sql", "../../supabase/app/app.generated.sql"]
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173/**"]
+jwt_expiry = 3600
+enable_signup = true
+
+# 本機測試用：用 Email 一次性密碼登入（信件在 http://localhost:54324 看）。
+# 正式環境只開 LINE 與 Google，見 docs/SECURITY.md。
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+inspector_port = 8083

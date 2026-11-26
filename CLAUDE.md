@@ -15,6 +15,10 @@
 | [`docs/AI_TOOLING.md`](docs/AI_TOOLING.md) | 讓 AI 直接操作 Supabase（MCP 設定與風險） | 想請 AI 跑 SQL 或部署函式時 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 待辦、已知風險、未來規劃 | 想知道什麼還沒做、哪裡有雷 |
 | [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md) | MCP server 設計構想 | 規劃 LINE 以外的記帳管道時 |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | 開放版（旅行小本本，`app` schema）的資料防護規則與本機權限測試 | 動開放版的任何資料表、RPC、Edge Function 之前 |
+
+**開放版（旅行小本本）開發中**：與舊版共用同一個 Supabase 專案，資料在獨立的 `app` schema（`supabase/app/schema/`，`npm run db:build` 產生 `supabase/app/app.generated.sql`），
+舊版的 `public` 完全不動。本機測試用 `local/supabase/`（`npm run db:local`、`npm run db:test`，需要 Docker Desktop）。
 
 ---
 

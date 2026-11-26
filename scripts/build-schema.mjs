@@ -49,3 +49,35 @@ const body = parts
 writeFileSync(outFile, `${header}${body}\n`, 'utf8');
 console.log(`已產生 ${parts.length} 個片段 → supabase/schema/bootstrap.generated.sql`);
 parts.forEach((p) => console.log(`  · ${p}`));
+
+// ── 開放版（旅行小本本）的 app schema ───────────────────────────
+// 同樣的做法：supabase/app/schema/NN_*.sql → supabase/app/app.generated.sql
+const appDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'app');
+const appSchemaDir = join(appDir, 'schema');
+const appParts = readdirSync(appSchemaDir)
+  .filter((f) => /^\d{2}_.*\.sql$/.test(f))
+  .sort();
+
+const appHeader = `-- =============================================================================
+-- 旅行小本本（開放版）— app schema 初始化腳本
+--
+-- ⚠️ 自動產生，請勿手動編輯。
+--    來源：supabase/app/schema/NN_*.sql
+--    重新產生：npm run db:build
+--
+-- 舊版（public schema）完全不受影響；兩版共用同一個 Supabase 專案。
+-- 本腳本可重複執行（idempotent）。規則見 docs/SECURITY.md。
+-- =============================================================================
+
+`;
+
+const appBody = appParts
+  .map((file) => {
+    const sql = readFileSync(join(appSchemaDir, file), 'utf8').trimEnd();
+    return `-- <<<<<<<<<< app/${file} <<<<<<<<<<\n\n${sql}\n`;
+  })
+  .join('\n\n');
+
+writeFileSync(join(appDir, 'app.generated.sql'), `${appHeader}${appBody}\n`, 'utf8');
+console.log(`已產生 ${appParts.length} 個片段 → supabase/app/app.generated.sql`);
+appParts.forEach((p) => console.log(`  · ${p}`));

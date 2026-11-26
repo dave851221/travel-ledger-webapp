@@ -1,0 +1,45 @@
+# 開放版（旅行小本本）的資料防護規則
+
+舊版（旅遊小本本，`public` schema）是給親友用的，RLS 全開，見 [`ROADMAP.md`](ROADMAP.md) 風險 1。
+開放版（`app` schema）給陌生人用，**每一個新功能都要對過下面這份清單**，PR 說明裡寫出對過哪幾條。
+
+## 規則
+
+1. **預設拒絕。** `app` 裡每張表建立時就 `ENABLE ROW LEVEL SECURITY`，沒有政策就誰都讀不到。
+   表權限只給需要的角色、需要的動作；`anon` 對任何表都沒有權限。
+   `trips` 用欄位級權限（`supabase/app/schema/01_tables.sql`）：新增欄位時要決定它屬於「成員可改」還是「只有 owner 透過 RPC 改」，
+   並補進 GRANT —— 對整張表 GRANT 再 REVOKE 單一欄位是沒有效果的。
+2. **不信任前端。** 權限、額度、付款狀態只在資料庫（RLS、RPC、trigger）或 Edge Function 判斷。
+   寫入者（`created_by`）由 trigger 蓋上，前端送什麼都不算。
+3. **Edge Function 自己驗身分。** 它們用 service role，RLS 管不到。每支都要先驗
+   （使用者 JWT、LINE 簽章、金流檢查碼），再用同一個共用函式確認是不是這趟旅程的成員，
+   之後的每個查詢都帶著那個 trip id。要有「從 A 旅程拿不到 B 旅程」的測試。
+4. **只給需要的資料。** 不用 `select('*')`；其他成員的 LINE ID、Email、密碼雜湊永遠不送到瀏覽器；
+   log 只記數字與錯誤代碼，不記訊息內容、收據文字。
+5. **照片私有。** 開放版的 bucket 不公開，只發短期簽名網址；上傳限制類型與大小。
+6. **金鑰。** 前端只有公開金鑰；其他都在 Supabase secrets 與 GitHub Secrets。
+   封測前輪換曾經進過 git 的公開金鑰（舊網頁一起更新）。
+7. **外來的東西一律驗過。** AI 的輸出、匯入的行程、使用者的 HTML、webhook 回呼，先驗證再存。
+8. **刪除是真的刪。** 刪帳號、刪旅程時照片一起刪；備份加密、只留 30 天。
+9. **管理功能只有管理者。** 用帳號角色、由伺服器判斷，不靠藏起來的網址。
+10. **每個階段過關前做一次安全檢查。** Supabase 的 security advisors、對整份差異做一次安全審查，問題修完才開放。
+
+## SECURITY DEFINER 函式的寫法
+
+- `SET search_path = ''`，函式裡一律寫完整的 schema 名稱。
+- 第一件事檢查 `auth.uid()` 與身分（`app.is_member` / `app.is_owner`），不過就 `RAISE`。
+- 建立後 `REVOKE ALL ... FROM PUBLIC`，再只 `GRANT EXECUTE` 給需要的角色。
+- 錯誤用固定的英文代碼（`not_member`、`not_owner`、`invalid_invite`…），前端依代碼顯示中文。
+
+## 怎麼測
+
+權限測試在 `supabase/app/tests/`（pgTAP），在本機 Supabase 跑，不碰正式資料庫：
+
+```bash
+npm run db:local          # 第一次：啟動本機 Supabase（需要 Docker Desktop）
+npm run db:local:reset    # 改了 schema 之後：重新產生並重灌
+npm run db:test           # 跑權限測試
+```
+
+本機的設定在 `local/supabase/config.toml`，開機時灌 `supabase/schema/bootstrap.generated.sql`（舊版）
+與 `supabase/app/app.generated.sql`（開放版）。新增表或 RPC 時，在測試裡補一條「不該做到的人做不到」。

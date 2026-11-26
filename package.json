@@ -12,6 +12,9 @@
     "test:watch": "vitest",
     "preview": "vite preview",
     "db:build": "node scripts/build-schema.mjs",
+    "db:local": "supabase start --workdir local",
+    "db:local:reset": "node scripts/build-schema.mjs && supabase db reset --workdir local",
+    "db:test": "supabase test db --workdir local supabase/app/tests",
     "fn:deploy": "supabase functions deploy line-webhook --no-verify-jwt && supabase functions deploy liff-notify && supabase functions deploy web-chat --no-verify-jwt",
     "fn:serve": "supabase functions serve line-webhook"
   },
