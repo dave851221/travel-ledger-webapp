@@ -7,6 +7,10 @@
 export const ART = {
   /** 頭貼：logo、網頁圖示、手機桌面圖示（已有，David 2026-11-27 提供） */
   avatar: 'art/avatar.png',
+  /** 旅行小本本自己的 logo（記帳本，不是喵喵）：左上角、網頁圖示。還沒有時用頭貼 */
+  appLogo: 'art/app-logo.png',
+  /** 「跟旅行喵喵聊天記帳」的按鈕圖（喵喵＋對話框），讓人一看就知道可以叫喵喵 */
+  chatButton: 'art/chat-button.png',
   /** 登入頁主視覺 */
   signinHero: 'art/signin-hero.png',
   /** 首頁：還沒有任何旅程 */
