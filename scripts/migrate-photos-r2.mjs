@@ -73,9 +73,9 @@ for (let i = 0; i < rows.length; i += 6) {
   }));
   // 每批記一次表（有些 owner 已經不存在：created_by 留空）
   if (done.length > 0) {
-    const values = done.splice(0).map(r => `(${quote(r.name)}, ${quote(r.name.split('/')[1])}::uuid, ${r.owner_id ? quote(r.owner_id) + '::uuid' : 'NULL'}, ${quote(r.created_at)}::timestamptz)`).join(',');
+    const values = done.splice(0).map(r => `(${quote(r.name)}, ${quote(r.name.split('/')[1])}::uuid, ${r.owner_id ? quote(r.owner_id) : "NULL::text"}, ${quote(r.created_at)}::timestamptz)`).join(',');
     await sql(`insert into app.trip_photos (path, trip_id, created_by, created_at)
-      select v.path, v.trip_id, (select id from auth.users where id = v.created_by), v.created_at
+      select v.path, v.trip_id, (select id from auth.users where id::text = v.created_by::text), v.created_at
       from (values ${values}) as v(path, trip_id, created_by, created_at)
       on conflict (path) do nothing`);
   }
