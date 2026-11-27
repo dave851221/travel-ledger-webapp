@@ -9,9 +9,9 @@ import { useMyMembership } from './membership';
 type Visibility = 'members' | 'link' | 'password';
 
 const VISIBILITY_OPTIONS: { value: Visibility; label: string; hint: string }[] = [
-  { value: 'members', label: '只有成員', hint: '沒加入的人看不到（預設）' },
-  { value: 'link', label: '有連結就能看', hint: '拿到分享連結的人不用登入就能看帳，但不能改' },
-  { value: 'password', label: '連結 + 密碼', hint: '拿到分享連結還要輸入密碼才能看' },
+  { value: 'members', label: '只有成員', hint: '' },
+  { value: 'link', label: '有連結就能看', hint: '不用登入' },
+  { value: 'password', label: '連結＋密碼', hint: '要輸入密碼' },
 ];
 
 async function copyText(text: string): Promise<boolean> {
@@ -87,7 +87,7 @@ const ShareSettings: React.FC<{ trip: Trip; onChanged: () => void }> = ({ trip, 
         <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><UserPlus size={18} /></span>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold">邀請旅伴</p>
-          <p className="text-xs text-muted mt-0.5">把連結傳給旅伴，他登入後選好自己是誰就能一起記帳</p>
+          <p className="text-xs text-muted mt-0.5">旅伴登入後就能一起記帳</p>
         </div>
       </div>
       <div className="flex gap-2">
@@ -98,7 +98,7 @@ const ShareSettings: React.FC<{ trip: Trip; onChanged: () => void }> = ({ trip, 
       </div>
       {isOwner && (
         <button type="button" disabled={!!busy} onClick={() => rotate('invite')} className="text-xs text-ink-2 inline-flex items-center gap-1 hover:underline">
-          {busy === 'invite' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}重新產生邀請連結（舊連結會失效）
+          {busy === 'invite' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}換一個新連結（舊的失效）
         </button>
       )}
 
@@ -106,8 +106,8 @@ const ShareSettings: React.FC<{ trip: Trip; onChanged: () => void }> = ({ trip, 
         <div className="flex items-start gap-3">
           <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Link2 size={18} /></span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold">沒登入的人能不能看</p>
-            <p className="text-xs text-muted mt-0.5">{isOwner ? '建立者與管理員可以改' : '由建立者或管理員決定'}</p>
+            <p className="text-sm font-bold">分享給別人看</p>
+            <p className="text-xs text-muted mt-0.5">{isOwner ? '對方只能看，不能記帳' : '對方只能看・由管理員設定'}</p>
           </div>
         </div>
         <div className="space-y-2" role="radiogroup" aria-label="分享設定">
@@ -153,7 +153,7 @@ const ShareSettings: React.FC<{ trip: Trip; onChanged: () => void }> = ({ trip, 
             </div>
             {isOwner && (
               <button type="button" disabled={!!busy} onClick={() => rotate('share')} className="text-xs text-ink-2 inline-flex items-center gap-1 hover:underline">
-                {busy === 'share' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}重新產生分享連結（舊連結會失效）
+                {busy === 'share' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}換一個新連結（舊的失效）
               </button>
             )}
           </>

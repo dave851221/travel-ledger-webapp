@@ -98,9 +98,9 @@ SELECT lives_ok($$ INSERT INTO ids SELECT 't3', app.create_trip('三', ARRAY['�
 SELECT throws_ok($$ SELECT app.create_trip('四', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$,
                  'trip_limit', '沒付過費的帳號超過上限就不能建立');
 DELETE FROM app.trips WHERE id = (SELECT v::uuid FROM ids WHERE k = 't3');
-SELECT throws_ok($$ SELECT app.create_trip('四', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$,
-                 'trip_limit', '刪掉旅程不會空出名額（不然可以一直刷免費額度）');
-SELECT is((app.my_trip_allowance() ->> 'created')::int, 3, '看得到自己建立過幾趟');
+SELECT lives_ok($$ SELECT app.create_trip('四', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$,
+                '刪掉旅程會空出名額（David 2026-11-27）');
+SELECT is((app.my_trip_allowance() ->> 'created')::int, 3, '看得到自己現在有幾趟');
 RESET ROLE;
 INSERT INTO app.paid_accounts (user_id) VALUES ('aaaaaaaa-0000-0000-0000-00000000000a');
 SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-00000000000a');

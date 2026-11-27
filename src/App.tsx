@@ -14,6 +14,7 @@ const LiffPreference = lazy(() => import('./pages/LiffPreference'));
 const AuthBootstrap = lazy(() => import('./features/auth/AuthBootstrap'));
 const JoinTrip = lazy(() => import('./pages/JoinTrip'));
 const SharedTrip = lazy(() => import('./pages/SharedTrip'));
+const Admin = lazy(() => import('./pages/Admin'));
 
 const PageLoading = () => (
   <div className="min-h-screen bg-canvas flex items-center justify-center">
@@ -108,6 +109,8 @@ function App() {
             <Route path="/trip/:id" element={IS_PUBLIC ? <Navigate to="dashboard" replace /> : <TripPortal />} />
             {IS_PUBLIC && <Route path="/join/:id/:token" element={<JoinTrip />} />}
             {IS_PUBLIC && <Route path="/s/:id/:token" element={<SharedTrip />} />}
+            {/* 開發者後台：權限在資料庫（app.site_admins），不是管理員只會看到「沒有權限」 */}
+            {IS_PUBLIC && <Route path="/admin" element={<Admin />} />}
             <Route path="/trip/:id/dashboard" element={<Dashboard />} />
             {/* 開放版也有 LIFF（旅行喵喵的卡片按鈕），頁面裡會先用 LINE 身分登入 */}
             <Route path="/liff/edit" element={<LiffEdit />} />

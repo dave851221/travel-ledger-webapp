@@ -45,6 +45,25 @@ function itineraryJson(): Plugin {
 const IS_PUBLIC_BUILD = process.env.VITE_APP_MODE === 'public';
 const BASE = IS_PUBLIC_BUILD ? '/travel-ledger-webapp/next/' : '/travel-ledger-webapp/';
 const PRODUCT = IS_PUBLIC_BUILD ? '旅行小本本' : '旅遊小本本';
+// 開放版的圖示是旅行喵喵的頭貼（David 提供的美術，public/art/avatar.png 縮出來的 public/cat-*），舊版照舊是車票
+const ICON = IS_PUBLIC_BUILD
+  ? { favicon: 'cat-favicon.png', faviconType: 'image/png', apple: 'cat-apple-touch-icon.png', pwa192: 'cat-pwa-192.png', pwa512: 'cat-pwa-512.png', maskable: 'cat-pwa-maskable.png' }
+  : { favicon: 'favicon.svg', faviconType: 'image/svg+xml', apple: 'apple-touch-icon.png', pwa192: 'pwa-192.png', pwa512: 'pwa-512.png', maskable: 'pwa-512.png' };
+
+/** 開放版的 index.html：產品名稱、圖示、分享卡片網址換成旅行小本本 */
+function publicHtml(): Plugin {
+  return {
+    name: 'public-html',
+    transformIndexHtml: { order: 'pre', handler(html) {
+      if (!IS_PUBLIC_BUILD) return html;
+      return html
+        .replaceAll('旅遊小本本', '旅行小本本')
+        .replace('type="image/svg+xml" href="/favicon.svg"', `type="${ICON.faviconType}" href="/${ICON.favicon}"`)
+        .replace('href="/apple-touch-icon.png"', `href="/${ICON.apple}"`)
+        .replace('content="https://dave851221.github.io/travel-ledger-webapp/"', 'content="https://dave851221.github.io/travel-ledger-webapp/next/"');
+    } },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -52,6 +71,7 @@ export default defineConfig({
   plugins: [
     react(),
     itineraryJson(),
+    publicHtml(),
     VitePWA({
       // autoUpdate：新版本裝好就直接換上並重新整理（使用者要求，2026-10-30）。
       // 正在填的表單會被清掉，這是接受的代價；離線佇列存在 localStorage，不受影響。
@@ -115,11 +135,11 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         icons: [
-          { src: 'pwa-192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'pwa-512.png', sizes: '512x512', type: 'image/png' },
+          { src: ICON.pwa192, sizes: '192x192', type: 'image/png' },
+          { src: ICON.pwa512, sizes: '512x512', type: 'image/png' },
           // The tile is full-bleed navy, so it survives the maskable safe-zone crop
-          { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          { src: 'favicon.svg', sizes: 'any', type: 'image/svg+xml' },
+          { src: ICON.maskable, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: ICON.favicon, sizes: 'any', type: ICON.faviconType },
         ],
       },
     }),

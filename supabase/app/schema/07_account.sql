@@ -112,15 +112,6 @@ BEGIN
         RAISE EXCEPTION 'not_confirmed' USING ERRCODE = '22023';
     END IF;
 
-    -- 建立過幾趟、有沒有付過費：跟著登入方式留下來（只存雜湊）
-    SELECT (a ->> 'created')::int, (a ->> 'paid')::boolean INTO v_created, v_paid FROM app.trip_allowance(v_uid) a;
-    INSERT INTO app.deleted_identity_trips (identity_hash, trips_created, paid)
-    SELECT h, v_created, v_paid FROM unnest(app.identity_hashes(v_uid)) h
-    ON CONFLICT (identity_hash) DO UPDATE
-        SET trips_created = GREATEST(app.deleted_identity_trips.trips_created, EXCLUDED.trips_created),
-            paid = app.deleted_identity_trips.paid OR EXCLUDED.paid,
-            deleted_at = now();
-
     FOR r IN SELECT trip_id, role FROM app.trip_members WHERE user_id = v_uid LOOP
         SELECT o.user_id INTO v_next FROM app.trip_members o
         WHERE o.trip_id = r.trip_id AND o.user_id <> v_uid
@@ -132,6 +123,15 @@ BEGIN
             UPDATE app.trip_members SET role = 'owner' WHERE trip_id = r.trip_id AND user_id = v_next;
         END IF;
     END LOOP;
+
+    -- 建立過、而且還留著的旅程數（只剩自己的已經刪掉，空出名額）與有沒有付過費：跟著登入方式留下來（只存雜湊）
+    SELECT (a ->> 'created')::int, (a ->> 'paid')::boolean INTO v_created, v_paid FROM app.trip_allowance(v_uid) a;
+    INSERT INTO app.deleted_identity_trips (identity_hash, trips_created, paid)
+    SELECT h, v_created, v_paid FROM unnest(app.identity_hashes(v_uid)) h
+    ON CONFLICT (identity_hash) DO UPDATE
+        SET trips_created = GREATEST(app.deleted_identity_trips.trips_created, EXCLUDED.trips_created),
+            paid = app.deleted_identity_trips.paid OR EXCLUDED.paid,
+            deleted_at = now();
 
     -- trip_members、line_identities、profiles、auth.identities 都會跟著刪（ON DELETE CASCADE）
     DELETE FROM auth.users WHERE id = v_uid;

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import type { Expense, Trip } from '../../types';
 import QuickAddBar from '../../components/QuickAddBar';
+import MascotArt from '../../components/MascotArt';
 import { ui } from '../../components/ui';
 import { formatMoney } from '../../utils/money';
 import { sumByCurrency } from '../../utils/finance';
@@ -250,6 +251,7 @@ const LedgerTab: React.FC<Props> = ({
 
         {groupedExpenses.length === 0 && (
           <div className="bg-surface border border-line rounded-2xl lg:border-0 px-6 py-12 text-center">
+            {!filtering && !hasAny && <MascotArt slot="emptyLedger" width={150} className="mx-auto mb-3" />}
             <p className="text-sm font-medium text-ink">{filtering ? '沒有符合條件的支出' : hasAny ? '沒有支出' : '還沒有任何支出'}</p>
             <p className="text-xs text-muted mt-1">
               {filtering ? '換個關鍵字或分類試試看。' : readOnly ? '這趟旅程已封存。' : '在上面輸入「拉麵 3000」，或按 ＋ 新增一筆。'}

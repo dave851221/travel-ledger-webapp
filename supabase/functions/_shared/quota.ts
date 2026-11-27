@@ -7,7 +7,7 @@
 import type { SupabaseClient } from './deps.ts'
 
 export type AiKind = 'text' | 'receipt' | 'voice' | 'search'
-export type QuotaReason = 'ai_disabled' | 'trip_limit' | 'no_trip' | 'error'
+export type QuotaReason = 'ai_disabled' | 'trip_limit' | 'suspended' | 'no_trip' | 'error'
 
 export interface QuotaResult {
   ok: boolean
@@ -33,6 +33,8 @@ export function quotaReply(r: QuotaResult): string {
   switch (r.reason) {
     case 'trip_limit':
       return `這趟旅程的 AI 記帳次數用完了（${r.limit ?? ''} 次）喵。還是可以在網頁上自己記帳喔！`
+    case 'suspended':
+      return '這趟旅程的 AI 記帳暫停使用了，還是可以在網頁上自己記帳喔。'
     case 'ai_disabled':
       return '喵喵現在暫停服務中，請先在網頁上記帳，晚點再來找我。'
     case 'no_trip':

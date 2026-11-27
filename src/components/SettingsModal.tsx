@@ -32,7 +32,7 @@ import { isSubmitEnter } from '../utils/keyboard';
 import { normalizeTripDates } from '../utils/tripDates';
 import TripDatesField from './TripDatesField';
 import { EXCHANGE_RATE_SOURCE_URL, fetchLatestRates } from '../utils/exchangeRates';
-import { CURRENCIES, currencyLabel, currencyName, normalizeCurrencyCode } from '../utils/currencies';
+import { CURRENCIES, currencyColor, currencyLabel, currencyName, normalizeCurrencyCode } from '../utils/currencies';
 
 const OTHER_CURRENCY = '__other__';
 import Decimal from 'decimal.js';
@@ -634,7 +634,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <datalist id="settings-trip-categories">
                   {knownTripCategories.map(c => <option key={c} value={c} />)}
                 </datalist>
-                <p className={`${ui.hint} mt-1.5`}>同一個分類的旅程會在首頁排在一起。</p>
+                <p className={`${ui.hint} mt-1.5`}>首頁會依分類分組。</p>
               </div>
 
               <TripDatesField
@@ -655,9 +655,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     <option key={tz.value} value={tz.value}>{tz.label}</option>
                   ))}
                 </select>
-                <p className={`${ui.hint} mt-1.5`}>
-                  LINE 機器人判斷「今天」用的時區。選自動時會從幣別推測，主幣別是台幣的日本旅程會被當成台北時間，深夜記帳容易差一天，建議直接指定。
-                </p>
+                <p className={`${ui.hint} mt-1.5`}>用來判斷記帳的「今天」，建議指定旅遊地的時區。</p>
               </div>
 
               {/* AI 記帳偏好：LINE Bot 解析文字與收據時的參考，整趟旅程共用一份 */}
@@ -666,7 +664,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Bot size={18} /></span>
                   <div>
                     <p className="text-sm font-bold">AI 記帳偏好</p>
-                    <p className="text-xs text-muted mt-0.5">{ASSISTANT_NAME}解析你說的話或收據時，會參考這段描述</p>
+                    <p className="text-xs text-muted mt-0.5">{ASSISTANT_NAME}記帳時會照這段做</p>
                   </div>
                 </div>
                 <textarea
@@ -677,13 +675,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   value={aiPreference}
                   onChange={e => setAiPreference(e.target.value)}
                 />
-                <p className={ui.hint}>
-                  整趟旅程共用一份，在 LINE 裡按「⚙️ 記帳偏好」看到的也是這一份，留空代表沒有偏好。
-                  不要在這裡寫「我是○○」：群組裡每個人看到的都是同一句，{ASSISTANT_NAME}會用 LINE 顯示名稱判斷「我」是誰。
-                </p>
+                <p className={ui.hint}>全團共用一份，不要寫「我是○○」。</p>
               </section>
 
-              {/* LineBot Binding Section（開放版的 LINE 綁定在下一階段做：把機器人拉進群組就選旅程） */}
+              {/* LINE 綁定：舊版輸入 ID（下面），開放版加旅行喵喵好友後輸入「綁定」選旅程 */}
+              {IS_PUBLIC && <section className="rounded-2xl border border-line p-4">
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-[#06c755]/12 text-[#06a147] flex items-center justify-center shrink-0"><MessageCircle size={18} /></span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold">用 LINE 記帳</p>
+                    <p className="text-xs text-muted mt-0.5">加好友後輸入「綁定」，選這趟旅程</p>
+                  </div>
+                  <a href="https://line.me/R/ti/p/%40891jpati" target="_blank" rel="noreferrer"
+                    className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#06c755] text-white text-xs font-bold hover:brightness-95">
+                    <Plus size={14} />加好友
+                  </a>
+                </div>
+              </section>}
               {!IS_PUBLIC && <section className="rounded-2xl border border-line p-4 space-y-3">
                 <div className="flex items-start gap-3">
                   <span className="w-9 h-9 rounded-xl bg-[#06c755]/12 text-[#06a147] flex items-center justify-center shrink-0"><MessageCircle size={18} /></span>
@@ -717,7 +725,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isArchived ? 'bg-warn/15 text-warn' : 'bg-sunk text-ink-2'}`}><Archive size={18} /></span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold">封存旅程</p>
-                    <p className="text-xs text-muted mt-0.5">封存後只能查看，不能新增或修改</p>
+                    <p className="text-xs text-muted mt-0.5">封存後只能看</p>
                   </div>
                   <button
                     role="switch"
@@ -734,7 +742,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <span className="w-9 h-9 rounded-xl bg-sunk text-ink-2 flex items-center justify-center shrink-0"><Download size={18} /></span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold">匯出 CSV</p>
-                    <p className="text-xs text-muted mt-0.5">下載所有支出紀錄，可以用試算表開啟</p>
+                    <p className="text-xs text-muted mt-0.5">下載成試算表</p>
                   </div>
                   <button onClick={() => { void exportExpensesToCSV(expenses, trip.name); }} className={`${ui.btnSecondary} py-2 shrink-0`}>下載</button>
                 </div>
@@ -775,7 +783,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   </li>
                 ))}
               </ul>
-              <p className={ui.hint}>{canAdmin ? '直接點名字就能改名，所有支出紀錄裡的名字會一起更新。' : '只有建立者或管理員可以新增、改名或移除成員。'}</p>
+              <p className={ui.hint}>{canAdmin ? '點名字可以改名，帳裡的名字會一起改。' : '只有建立者或管理員可以改成員。'}</p>
 
               <div className="pt-4 border-t border-line space-y-4">
                 <p className="text-sm font-bold">記帳預設值</p>
@@ -791,7 +799,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                       );
                     })}
                   </div>
-                  <p className={`${ui.hint} mt-1.5`}>沒選的話，以「我是誰」選的人為準；還沒選身分就用第一位成員。</p>
+                  <p className={`${ui.hint} mt-1.5`}>沒選就是記帳的人自己。</p>
                 </div>
                 <div>
                   <p className={ui.label}>預設分攤成員</p>
@@ -805,7 +813,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                       );
                     })}
                   </div>
-                  <p className={`${ui.hint} mt-1.5`}>沒選的話，預設全部成員一起分攤。</p>
+                  <p className={`${ui.hint} mt-1.5`}>沒選就是全員均分。</p>
                 </div>
               </div>
             </div>
@@ -826,12 +834,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
               {baseCurrency !== trip.base_currency && (
                 <div className={ui.warnBox}>
                   <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                  <p>主幣別從 {trip.base_currency} 改成 {baseCurrency}，下面的匯率已經自動換算成「1 單位 = ? {baseCurrency}」，儲存前請確認。</p>
+                  <p>主幣別改成 {baseCurrency}，匯率已經跟著換算，儲存前請確認。</p>
                 </div>
               )}
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <p className="text-sm font-bold">幣別與匯率 <span className="text-xs font-normal text-muted">· 1 單位 = ? {baseCurrency}</span></p>
+                  <p className="text-sm font-bold">幣別與匯率</p>
                   <button
                     onClick={loadTodayRates}
                     disabled={ratesLoading || Object.keys(ratesStr).length <= 1}
@@ -840,28 +848,41 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     <RefreshCw size={13} className={ratesLoading ? 'animate-spin' : ''} />{todayRates ? '重新查詢' : '查看今日匯率'}
                   </button>
                 </div>
-                <div className="grid grid-cols-[76px_minmax(0,1fr)_64px_36px] gap-2 px-1 pb-1 text-[11px] text-muted">
-                  <span>幣別</span><span>匯率</span><span>小數位數</span><span />
-                </div>
                 <ul className="space-y-2">
                   {Object.keys(ratesStr).map(code => {
                     const today = code !== baseCurrency ? todayRates?.[code] : undefined;
                     const same = today !== undefined && parseFloat(today) === parseFloat(ratesStr[code]);
+                    const color = currencyColor(code);
+                    const isBase = code === baseCurrency;
                     return (
-                      <li key={code}>
-                        <div className="grid grid-cols-[76px_minmax(0,1fr)_64px_36px] gap-2 items-center">
-                          <span className="pl-1 min-w-0">
-                            <span className="num font-bold block">{code}</span>
-                            {currencyName(code) && <span className="text-[11px] text-muted block truncate">{currencyName(code)}</span>}
+                      <li key={code} className="rounded-2xl border border-line bg-surface px-3 py-2.5" style={{ borderLeft: `4px solid ${color}` }}>
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 num text-xs font-extrabold"
+                            style={{ background: `${color}1f`, color }}>{code}</span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-sm font-bold truncate">{currencyName(code) || code}</span>
+                            <span className="block text-[11px] text-muted">{isBase ? '主幣別・其他幣別換算成它' : `1 ${code} 換多少 ${baseCurrency}`}</span>
                           </span>
-                          <input type="text" inputMode="decimal" aria-label={`${code} 匯率`} className={`${ui.input} num py-2`} value={ratesStr[code] ?? ''} onChange={e => setRatesStr({ ...ratesStr, [code]: e.target.value })} />
-                          <input type="text" inputMode="numeric" aria-label={`${code} 小數位數`} className={`${ui.input} num py-2`} value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({ ...precisionStr, [code]: e.target.value })} />
-                          {code !== baseCurrency
-                            ? <button onClick={() => removeCurrency(code)} aria-label={`移除 ${code}`} className={`${ui.iconBtn} hover:text-neg`}><X size={16} /></button>
-                            : <span className="text-[11px] text-muted text-center">主</span>}
+                          {isBase
+                            ? <span className="text-xs font-bold rounded-full px-2 py-0.5" style={{ background: `${color}1f`, color }}>主</span>
+                            : <button onClick={() => removeCurrency(code)} aria-label={`移除 ${code}`} className={`${ui.iconBtn} hover:text-neg`}><X size={16} /></button>}
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          {!isBase && (
+                            <label className="flex-1 min-w-0 flex items-center gap-1.5">
+                              <input type="text" inputMode="decimal" aria-label={`${code} 匯率`} className={`${ui.input} num py-1.5`} value={ratesStr[code] ?? ''} onChange={e => setRatesStr({ ...ratesStr, [code]: e.target.value })} />
+                              <span className="text-xs text-muted num shrink-0">{baseCurrency}</span>
+                            </label>
+                          )}
+                          <label className={`flex items-center gap-1.5 shrink-0 ${isBase ? 'ml-auto' : ''}`}>
+                            <span className="text-xs text-muted whitespace-nowrap">小數</span>
+                            <span className="w-14 shrink-0">
+                              <input type="text" inputMode="numeric" aria-label={`${code} 小數位數`} className={`${ui.input} num py-1.5 text-center`} value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({ ...precisionStr, [code]: e.target.value })} />
+                            </span>
+                          </label>
                         </div>
                         {today !== undefined && (
-                          <div className="flex items-center gap-2 pl-[84px] mt-1 text-xs text-muted">
+                          <div className="flex items-center gap-2 mt-1.5 text-xs text-muted">
                             <span>今日 <span className="num text-ink-2">{today}</span></span>
                             {same
                               ? <span className="text-pos inline-flex items-center gap-0.5"><Check size={12} />相同</span>
@@ -875,7 +896,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 {todayNote && <p className={`${ui.hint} mt-2`}>{todayNote}</p>}
                 {ratesNote && <p className={`${ui.hint} mt-2`}>{ratesNote}</p>}
                 <p className="text-[11px] text-muted mt-1.5">
-                  今日匯率來自 <a href={EXCHANGE_RATE_SOURCE_URL} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a>，是市場中間價，和換匯店的牌價會有一點差距。
+                  今日匯率是 <a href={EXCHANGE_RATE_SOURCE_URL} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a> 的市場中間價，跟換匯店會有點差。
                 </p>
               </div>
               <div className="space-y-2">

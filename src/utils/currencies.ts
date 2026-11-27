@@ -47,3 +47,22 @@ export const normalizeCurrencyCode = (raw: string): string | null => {
   const code = raw.trim().toUpperCase();
   return /^[A-Z]{3}$/.test(code) ? code : null;
 };
+
+/**
+ * 每個幣別一個識別色（設定頁的匯率清單用，David 2026-11-27：不同幣別要分得出來）。
+ * 中間調的 hex，淺色深色都看得清楚；背景用時再加透明度。清單外的幣別依代碼雜湊挑一個。
+ */
+const CURRENCY_COLORS: Record<string, string> = {
+  TWD: '#2e9e6a', JPY: '#d9534f', KRW: '#4a6fc0', CNY: '#c2527a', HKD: '#d9822b', MOP: '#a3784a',
+  USD: '#3f8f5f', EUR: '#5c6fd0', GBP: '#7d4fb8', THB: '#c99a1e', SGD: '#d0644a', MYR: '#3f9aa6',
+  VND: '#b0636f', PHP: '#4a8fc0', IDR: '#8a8f3c', AUD: '#c27a3a', NZD: '#5f9a5b', CAD: '#c24a4a',
+  CHF: '#a33b3b', TRY: '#c25a7a', AED: '#6a8a3c',
+};
+const FALLBACK_COLORS = ['#5c7fa8', '#3f9aa6', '#a3784a', '#7d72b8', '#b0636f', '#5f9a5b', '#8a8f3c', '#a86a9c'];
+
+export const currencyColor = (code: string): string => {
+  if (CURRENCY_COLORS[code]) return CURRENCY_COLORS[code];
+  let h = 0;
+  for (const ch of code) h = (Math.imul(31, h) + ch.charCodeAt(0)) | 0;
+  return FALLBACK_COLORS[Math.abs(h) % FALLBACK_COLORS.length];
+};
