@@ -4,6 +4,7 @@ import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
 import { ASSISTANT_CHAT_TITLE, ASSISTANT_NAME } from '../../config/assistant';
 import { ui } from '../../components/ui';
+import { PRODUCT_NAME } from '../../config/mode';
 import { formatTripDates, formatTripDatesShort } from '../../utils/tripDates';
 import Dropdown, { MenuDivider, MenuItem, MenuLabel } from './Dropdown';
 import MemberAvatar from './MemberAvatar';
@@ -119,7 +120,7 @@ export const SideNav: React.FC<ChromeProps> = ({
   return (
     <aside className="hidden md:flex flex-col gap-1 w-[232px] shrink-0 bg-side text-[#c9d0de] px-3.5 py-5 sticky top-offset h-below-offset">
       <button onClick={onBack} className="flex items-center gap-2.5 px-1.5 pb-4 text-white font-bold text-base text-left">
-        <BrandMark inverted />旅遊小本本
+        <BrandMark inverted />{PRODUCT_NAME}
       </button>
       <button onClick={onBack} className="text-left rounded-xl bg-white/[.07] hover:bg-white/10 px-3 py-2.5 mb-3 transition-colors" title="回到所有旅程">
         <span className="block text-[11px] text-[#8f9ab2]">目前旅程</span>
