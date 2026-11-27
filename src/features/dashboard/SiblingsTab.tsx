@@ -2,6 +2,8 @@ import React from 'react';
 import { ChevronRight, Lock, Settings, Tag, Users } from 'lucide-react';
 import type { Trip } from '../../types';
 import { ui } from '../../components/ui';
+import { orderSiblings } from '../home/homeLayout';
+import { readCachedLayout } from '../home/homeLayoutStore';
 
 interface Props {
   trip: Trip;
@@ -11,7 +13,10 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-const SiblingsTab: React.FC<Props> = ({ trip, siblings, onOpenTrip, onOpenCategory, onOpenSettings }) => (
+const SiblingsTab: React.FC<Props> = ({ trip, siblings: unordered, onOpenTrip, onOpenCategory, onOpenSettings }) => {
+  // 照首頁自訂的順序排（讀這台裝置的快取，不另外查資料庫）
+  const siblings = orderSiblings(unordered, trip.category, readCachedLayout());
+  return (
   <div className="space-y-4">
     <div className="flex items-center justify-between gap-3">
       <div>
@@ -58,6 +63,7 @@ const SiblingsTab: React.FC<Props> = ({ trip, siblings, onOpenTrip, onOpenCatego
       </ul>
     )}
   </div>
-);
+  );
+};
 
 export default SiblingsTab;

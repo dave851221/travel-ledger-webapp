@@ -112,6 +112,8 @@ REVOKE ALL ON FUNCTION app.clean_name(TEXT) FROM PUBLIC, anon, authenticated;
 -- ── 建立旅程 ───────────────────────────────────────────────────
 -- 建立者成為 owner，並以 p_my_name 的身分加入（必須是 p_members 之一）。
 -- trips 沒有開 INSERT 權限，這是唯一的建立方式。
+-- 參數多了旅程日期（2026-11-27），舊的 8 個參數版本先拿掉，不然 PostgREST 會看到兩個同名函式
+DROP FUNCTION IF EXISTS app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB);
 CREATE OR REPLACE FUNCTION app.create_trip(
     p_name          TEXT,
     p_members       TEXT[],
@@ -121,7 +123,10 @@ CREATE OR REPLACE FUNCTION app.create_trip(
     p_timezone      TEXT DEFAULT NULL,
     p_category      TEXT DEFAULT NULL,
     -- 幣別小數位數（例如 {"JPY": 0}），由前端依幣別決定；跟建立一起寫，不另外更新一次
-    p_precision_config JSONB DEFAULT '{}'::jsonb
+    p_precision_config JSONB DEFAULT '{}'::jsonb,
+    -- 旅程日期（選填），規則同 trips_dates_check
+    p_start_date    DATE DEFAULT NULL,
+    p_end_date      DATE DEFAULT NULL
 )
 RETURNS UUID
 LANGUAGE plpgsql
@@ -154,11 +159,12 @@ BEGIN
     END IF;
 
     INSERT INTO app.trips (name, members, categories, base_currency, timezone, category, created_by,
-                           rates, precision_config)
+                           rates, precision_config, start_date, end_date)
     VALUES (btrim(p_name), v_members, coalesce(p_categories, '{}'), upper(btrim(p_base_currency)),
             p_timezone, p_category, v_uid,
             jsonb_build_object(upper(btrim(p_base_currency)), 1),
-            CASE WHEN jsonb_typeof(p_precision_config) = 'object' THEN p_precision_config ELSE '{}'::jsonb END)
+            CASE WHEN jsonb_typeof(p_precision_config) = 'object' THEN p_precision_config ELSE '{}'::jsonb END,
+            p_start_date, CASE WHEN p_end_date = p_start_date THEN NULL ELSE p_end_date END)
     RETURNING id INTO v_id;
 
     INSERT INTO app.trip_members (trip_id, user_id, member_name, role)
@@ -168,8 +174,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB) TO authenticated;
+REVOKE ALL ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB, DATE, DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION app.create_trip(TEXT, TEXT[], TEXT, TEXT, TEXT[], TEXT, TEXT, JSONB, DATE, DATE) TO authenticated;
 
 -- ── 邀請連結 ───────────────────────────────────────────────────
 -- 還沒登入也能先看邀請：回傳旅程名稱與成員清單，讓他選「我是誰」。

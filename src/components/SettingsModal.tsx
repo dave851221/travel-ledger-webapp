@@ -28,6 +28,8 @@ import { useMyMembership } from '../features/auth/membership';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
 import { isSubmitEnter } from '../utils/keyboard';
+import { normalizeTripDates } from '../utils/tripDates';
+import TripDatesField from './TripDatesField';
 import { EXCHANGE_RATE_SOURCE_URL, fetchLatestRates } from '../utils/exchangeRates';
 import { CURRENCIES, currencyLabel, currencyName, normalizeCurrencyCode } from '../utils/currencies';
 
@@ -106,6 +108,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [precisionStr, setPrecisionStr] = useState<Record<string, string>>({});
   const [baseCurrency, setBaseCurrency] = useState(trip.base_currency);
   const [timezone, setTimezone] = useState(trip.timezone || '');
+  const [startDate, setStartDate] = useState(trip.start_date || '');
+  const [endDate, setEndDate] = useState(trip.end_date || '');
   const [defaultCurrency, setDefaultCurrency] = useState(trip.default_currency || trip.base_currency);
   const [defaultCategory, setDefaultCategory] = useState(trip.default_category || trip.categories[0] || '');
   const [defaultPayer, setDefaultPayer] = useState<string[]>(trip.default_payer || []);
@@ -139,6 +143,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setTodayRates(null);
       setTodayNote(null);
       setTimezone(trip.timezone || '');
+      setStartDate(trip.start_date || '');
+      setEndDate(trip.end_date || '');
       setDefaultCurrency(trip.default_currency || trip.base_currency);
       setDefaultCategory(trip.default_category || trip.categories[0] || '');
       setDefaultPayer(trip.default_payer || []);
@@ -197,7 +203,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   // 有沒有還沒存的修改：和剛開啟時比（做法同 ExpenseModal）
   const formSignature = JSON.stringify([
     name, accessCode, isArchived, members, categories, tripCategory, aiPreference, ratesStr, precisionStr,
-    baseCurrency, timezone, defaultCurrency, defaultCategory, defaultPayer, defaultSplitMembers,
+    baseCurrency, timezone, defaultCurrency, defaultCategory, defaultPayer, defaultSplitMembers, startDate, endDate,
   ]);
   const [baselineSignature, setBaselineSignature] = useState<string | null>(null);
   const [initTick, setInitTick] = useState(0);
@@ -266,6 +272,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     try {
       const finalName = name.trim();
       if (!finalName) throw new Error('旅程名稱不能是空白');
+      const dates = normalizeTripDates(startDate, endDate);
+      if ('error' in dates) throw new Error(dates.error);
 
       Object.keys(ratesStr).forEach(k => {
         const val = parseFloat(ratesStr[k]);
@@ -354,6 +362,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
           base_currency: baseCurrency,
           // 留空 = 自動（依幣別推測）；與 access_code 同樣的正規化慣例，統一存成 NULL
           timezone: timezone.trim() || null,
+          start_date: dates.start_date,
+          end_date: dates.end_date,
           default_currency: finalDefaultCurrency,
           default_category: finalDefaultCategory,
           default_payer: onlyMembers(defaultPayer),
@@ -625,6 +635,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 </datalist>
                 <p className={`${ui.hint} mt-1.5`}>同一個分類的旅程會在首頁排在一起。</p>
               </div>
+
+              <TripDatesField
+                idPrefix="set-dates"
+                start={startDate}
+                end={endDate}
+                onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+              />
 
               {/* 旅程時區：LINE Bot 判斷「今天」用的就是它（M4）。
                   幣別不等於所在地 —— 主幣 TWD 的日本旅程用台北時間，

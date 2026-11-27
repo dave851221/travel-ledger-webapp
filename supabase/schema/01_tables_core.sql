@@ -10,6 +10,8 @@
 --   ai_preference   ：LINE Bot 解析自然語言與收據時參考的自由文字偏好。
 --                     整趟旅程共用一份（不分 LINE 綁定、不分管道），網頁設定頁與
 --                     LIFF 偏好頁編輯的都是這個欄位。空字串一律存成 NULL。
+--   start_date / end_date：旅程日期（選填）。一天的旅程只填 start_date；end_date 含當天、不早於 start_date。
+--                都沒填時首頁用 created_at 代替。
 --   timezone   ：IANA 時區字串（例如 Asia/Tokyo）。LINE Bot 判斷「今天」用的就是它。
 --                NULL 代表沒設，Bot 會退回舊的「從幣別猜」邏輯（主幣 TWD 的日本旅程
 --                因此會猜成台北時間 —— 那正是加這個欄位的原因，見 ROADMAP 的 M4）。
@@ -23,6 +25,8 @@ CREATE TABLE IF NOT EXISTS public.trips (
     category              TEXT,
     base_currency         TEXT        NOT NULL,
     timezone              TEXT,
+    start_date            DATE,
+    end_date              DATE,
     rates                 JSONB       NOT NULL DEFAULT '{}'::jsonb,
     precision_config      JSONB       NOT NULL DEFAULT '{}'::jsonb,
     is_archived           BOOLEAN     DEFAULT FALSE,
@@ -30,7 +34,8 @@ CREATE TABLE IF NOT EXISTS public.trips (
     default_category      TEXT,
     default_payer         TEXT[]      DEFAULT '{}',
     default_split_members TEXT[]      DEFAULT '{}',
-    created_at            TIMESTAMPTZ DEFAULT NOW()
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT trips_dates_check CHECK (end_date IS NULL OR (start_date IS NOT NULL AND end_date >= start_date))
 );
 
 CREATE INDEX IF NOT EXISTS trips_category_idx ON public.trips (category);
@@ -63,10 +68,22 @@ CREATE TABLE IF NOT EXISTS public.expenses (
 CREATE INDEX IF NOT EXISTS expenses_trip_id_idx    ON public.expenses (trip_id);
 CREATE INDEX IF NOT EXISTS expenses_deleted_at_idx ON public.expenses (deleted_at);
 
+-- 首頁的自訂排序（舊版沒有登入，大家看同一份旅程清單，所以整個網站只有一列，id 固定是 1）
+--   layout：{ "groups": [分組名稱…], "trips": { 分組名稱: [旅程 id…] } }，NULL = 用預設排法
+--   只有按「完成」才寫一次（Disk IO），格式由前端 features/home/homeLayout.ts 收斂。
+--   開放版不用這張表：每個人的順序存在自己帳號的 user_metadata。
+CREATE TABLE IF NOT EXISTS public.home_layout (
+    id         SMALLINT    PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    layout     JSONB       CHECK (layout IS NULL OR octet_length(layout::text) <= 65536),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ── 既有資料庫相容 ────────────────────────────────────────────
 -- 全新建立時以下皆為 no-op；若把 bootstrap 跑在舊資料庫上則會補正
 ALTER TABLE public.trips ALTER COLUMN access_code DROP NOT NULL;
 ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS ai_preference TEXT;
+ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS start_date DATE;
+ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS end_date DATE;
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS receipt_photo_urls TEXT[] DEFAULT '{}';
 
 -- 空白密碼一律正規化為 NULL，避免出現兩種「無密碼」表示法

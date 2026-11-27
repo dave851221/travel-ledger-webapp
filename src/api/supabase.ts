@@ -17,7 +17,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * ⚠️ RLS 仍然全開（docs/ROADMAP.md 風險 1），這只是不主動送出去，不是存取控制。
  */
 // 必須是單一字串字面值：supabase-js 從 select 字串推導回傳型別，串接出來的 string 它讀不懂
-export const TRIP_COLUMNS = 'id, name, members, categories, category, base_currency, timezone, rates, precision_config, is_archived, default_currency, default_category, default_payer, default_split_members, ai_preference, created_at';
+export const TRIP_COLUMNS = 'id, name, members, categories, category, base_currency, timezone, start_date, end_date, rates, precision_config, is_archived, default_currency, default_category, default_payer, default_split_members, ai_preference, created_at';
 
 /**
  * Dashboard 抓「自己這一趟」用的欄位。

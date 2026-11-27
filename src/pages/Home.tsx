@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Users, Lock, Unlock, Loader2, AlertCircle, Archive, ChevronRight, ChevronDown, Plane, X } from 'lucide-react';
+import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check, X } from 'lucide-react';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
 import BrandMark from '../components/BrandMark';
+import Toast from '../components/Toast';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getCurrencyPrecision } from '../utils/finance';
@@ -12,8 +13,16 @@ import { isSubmitEnter } from '../utils/keyboard';
 import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
 import { peekReturnTo, signOut, useSession } from '../features/auth/session';
 import SignInPanel from '../features/auth/SignInPanel';
+import { useToast } from '../hooks/useToast';
+import { useBackClose } from '../hooks/useBackClose';
+import { applyLayout, pickFeatured, defaultGroups, layoutFromGroups, sameOrder, UNCATEGORIZED, type HomeLayout, type TripGroup } from '../features/home/homeLayout';
+import { fetchLayout, readCachedLayout, saveLayout } from '../features/home/homeLayoutStore';
+import { FeaturedTrip, TripRow } from '../features/home/TripCards';
+import SortEditor from '../features/home/SortEditor';
+import TripDatesField from '../components/TripDatesField';
+import { normalizeTripDates } from '../utils/tripDates';
+import { getLocalDateString } from '../utils/date';
 
-const UNCATEGORIZED = '未分類';
 const TRIPS_PER_GROUP = 3;
 const APP_NAME = PRODUCT_NAME;
 const DEFAULT_CATEGORIES = ['餐飲', '交通', '住宿', '購物', '景點', '其他'];
@@ -21,60 +30,18 @@ const DEFAULT_CATEGORIES = ['餐飲', '交通', '住宿', '購物', '景點', '�
 const PUBLIC_DEFAULT_CATEGORIES = ['🍜 餐飲', '🚃 交通', '🏨 住宿', '🛍️ 購物', '🎡 景點', '🎁 伴手禮', '📦 其他'];
 const OTHER_CURRENCY = '__other__';
 
-const categorySlug = (name: string) => `cat-${encodeURIComponent(name)}`;
-
-const currencyList = (trip: Trip) => Object.keys(trip.rates || {}).join(' · ');
-
-const formatCreated = (iso: string) => {
-  const d = new Date(iso);
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+const EMPTY_NEW_TRIP = {
+  name: '',
+  members: '',
+  access_code: '',
+  base_currency: 'TWD',
+  category: '',
+  // 旅程日期（選填）
+  start_date: '',
+  end_date: '',
 };
 
-/** 最近一趟進行中的旅程，做成登機證樣式放在最上面 */
-const FeaturedTrip: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick }) => (
-  <button
-    onClick={onClick}
-    className="group w-full text-left bg-navy text-navy-fg rounded-2xl overflow-hidden transition-transform active:scale-[.99] focus-visible:outline-2 focus-visible:outline-accent"
-  >
-    <div className="px-5 pt-5 pb-4 flex items-start gap-4">
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-navy-sub">{trip.category?.trim() || '最近的旅程'}</p>
-        <h2 className="text-xl sm:text-2xl font-bold leading-snug mt-1 text-balance">{trip.name}</h2>
-      </div>
-      <span className="shrink-0 w-10 h-10 rounded-xl bg-accent text-on-accent flex items-center justify-center transition-transform group-hover:translate-x-0.5">
-        <ChevronRight size={20} strokeWidth={2.4} />
-      </span>
-    </div>
-    <div className="perforation" style={{ ['--notch-bg' as string]: 'var(--app-bg)' }} />
-    <div className="grid grid-cols-3 gap-2 px-5 pt-3.5 pb-4 text-xs text-navy-sub">
-      <div>成員<b className="block num text-sm font-bold text-navy-fg mt-0.5">{trip.members.length} 人</b></div>
-      <div className="min-w-0">幣別<b className="block num text-sm font-bold text-navy-fg mt-0.5 truncate">{currencyList(trip)}</b></div>
-      <div>建立於<b className="block num text-sm font-bold text-navy-fg mt-0.5">{formatCreated(trip.created_at)}</b></div>
-    </div>
-  </button>
-);
-
-const TripRow: React.FC<{ trip: Trip; onClick: () => void }> = ({ trip, onClick }) => (
-  <button
-    onClick={onClick}
-    className="w-full text-left flex items-center gap-3 px-4 py-3.5 hover:bg-sunk transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-  >
-    <div className="min-w-0 flex-1">
-      <p className="text-[15px] font-medium text-ink truncate">{trip.name}</p>
-      <p className="text-xs text-muted mt-0.5 flex items-center gap-2">
-        <span className="inline-flex items-center gap-1"><Users size={12} />{trip.members.length} 人</span>
-        <span className="num">{currencyList(trip)}</span>
-      </p>
-    </div>
-    {trip.is_archived ? (
-      <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-ink-2 bg-sunk border border-line rounded-md px-2 py-0.5">
-        <Archive size={10} />已封存
-      </span>
-    ) : (
-      <ChevronRight size={18} className="shrink-0 text-muted" />
-    )}
-  </button>
-);
+const categorySlug = (name: string) => `cat-${encodeURIComponent(name)}`;
 
 /**
  * 首頁旅程清單的本機快取（只有 TRIP_COLUMNS，不含通行碼）。
@@ -105,16 +72,15 @@ const Home: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const groupRefs = useRef<Record<string, HTMLElement | null>>({});
+  const { toast, showToast, dismissToast } = useToast();
 
-  const [newTrip, setNewTrip] = useState({
-    name: '',
-    members: '',
-    access_code: '',
-    base_currency: 'TWD',
-    category: '',
-    // 開放版：建立者自己在這趟的名字（必須是參與人員之一）
-    my_name: ''
-  });
+  // 自訂排序：先照這台裝置的快取畫，背景再讀最新的（舊版一列 home_layout、開放版帳號的 user_metadata）
+  const [layout, setLayout] = useState<HomeLayout | null>(() => (IS_PUBLIC ? null : readCachedLayout()));
+  // 排序模式的草稿（null = 沒在排序）。按「完成」才存一次
+  const [sortDraft, setSortDraft] = useState<TripGroup[] | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+
+  const [newTrip, setNewTrip] = useState(EMPTY_NEW_TRIP);
   // 開放版：記帳分類（建立時可增減）與自訂主幣別（null = 用選單上的）
   const [newCategories, setNewCategories] = useState<string[]>(PUBLIC_DEFAULT_CATEGORIES);
   const [newCategoryInput, setNewCategoryInput] = useState('');
@@ -138,7 +104,16 @@ const Home: React.FC = () => {
     if (IS_PUBLIC && !userId) return;
     if (IS_PUBLIC) showCachedTrips();
     fetchTrips();
+    if (!IS_PUBLIC) void fetchLayout().then(l => { if (l !== undefined) setLayout(l); });
   }, [userId]);
+
+  // 開放版：順序存在帳號的 user_metadata，登入狀態一來就有
+  const userMetadata = session?.user.user_metadata;
+  useEffect(() => {
+    if (!IS_PUBLIC || !userId) return;
+    setLayout(readCachedLayout());
+    void fetchLayout(userMetadata).then(l => { if (l !== undefined) setLayout(l); });
+  }, [userId, userMetadata]);
 
   // 開放版：登入狀態確定後（快取已經確認是這個人的）先畫快取
   function showCachedTrips() {
@@ -176,38 +151,32 @@ const Home: React.FC = () => {
     }
   };
 
-  // trips 已依建立時間新到舊排序，第一筆沒封存的就是最近的旅程
-  const featuredTrip = useMemo(() => trips.find(t => !t.is_archived) ?? null, [trips]);
+  // 正在進行的旅程優先，否則是日期最新的一趟（沒填日期用建立時間），見 pickFeatured
+  const featuredTrip = useMemo(() => pickFeatured(trips, getLocalDateString()), [trips]);
 
-  // 已封存的旅程和其他旅程一樣放在自己的分類裡（列上會標「已封存」）。
-  // 同一組裡進行中的排前面，收合時先看到的是還在用的旅程。
-  const groupedTrips = useMemo(() => {
-    const buckets = new Map<string, Trip[]>();
-    const ordered = [...trips.filter(t => !t.is_archived), ...trips.filter(t => t.is_archived)];
-    ordered.forEach(t => {
-      const key = (t.category && t.category.trim()) || UNCATEGORIZED;
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key)!.push(t);
-    });
-    const named: { category: string; trips: Trip[] }[] = [];
-    let uncategorized: { category: string; trips: Trip[] } | null = null;
-    buckets.forEach((groupTrips, category) => {
-      const entry = { category, trips: groupTrips };
-      if (category === UNCATEGORIZED) uncategorized = entry;
-      else named.push(entry);
-    });
-    // 分類依「還沒封存的旅程裡最新的建立時間」排序，越新越上面。
-    // 封存的旅程不算 —— 否則剛封存一趟舊旅行就會把整個分類頂到最上面。
-    // 全部都封存的分類排在後面，彼此之間再依最新的建立時間排；未分類永遠最後。
-    const newest = (list: Trip[]) => Math.max(-Infinity, ...list.map(t => new Date(t.created_at).getTime()));
-    named.sort((a, b) => {
-      const aActive = newest(a.trips.filter(t => !t.is_archived));
-      const bActive = newest(b.trips.filter(t => !t.is_archived));
-      if (aActive !== bActive) return bActive - aActive;
-      return newest(b.trips) - newest(a.trips);
-    });
-    return uncategorized ? [...named, uncategorized] : named;
-  }, [trips]);
+  // 分組與排序規則在 features/home/homeLayout.ts：沒有自訂順序時，分組依最近一趟進行中的旅程排，
+  // 組內進行中的在前；有自訂順序就照存下來的，之後才出現的旅程放最上面
+  const groupedTrips = useMemo(() => applyLayout(trips, layout), [trips, layout]);
+
+  const startSorting = () => {
+    setSortDraft(groupedTrips);
+    window.scrollTo({ top: 0 });
+  };
+  const cancelSorting = () => setSortDraft(null);
+  useBackClose(sortDraft !== null, cancelSorting);
+
+  const finishSorting = async () => {
+    if (!sortDraft) return;
+    if (sameOrder(sortDraft, groupedTrips)) { setSortDraft(null); return; }
+    // 跟預設排法一樣就清掉自訂順序：之後新建的旅程照預設規則排
+    const next = sameOrder(sortDraft, defaultGroups(trips)) ? null : layoutFromGroups(sortDraft);
+    setSavingOrder(true);
+    const synced = await saveLayout(next);
+    setSavingOrder(false);
+    setLayout(next);
+    setSortDraft(null);
+    showToast(synced ? '已儲存排序' : '排序只存在這台裝置（沒有連上伺服器）', synced ? 'success' : 'error');
+  };
 
   const knownCategories = useMemo(() => {
     const set = new Set<string>();
@@ -244,15 +213,17 @@ const Home: React.FC = () => {
     // input 的 required 擋不住只打空白或逗號的情況，會建出沒有名字或沒有成員的旅程
     if (!tripName) { setCreateError('請輸入旅程名稱'); return; }
     if (membersArray.length === 0) { setCreateError('請至少輸入一位參與人員'); return; }
+    const dates = normalizeTripDates(newTrip.start_date, newTrip.end_date);
+    if ('error' in dates) { setCreateError(dates.error); return; }
     // 主幣別：選單上的，或「其他」自己輸入的 3 碼代碼
     const baseCurrency = customCurrency !== null ? normalizeCurrencyCode(customCurrency) : newTrip.base_currency;
     if (!baseCurrency) { setCreateError('主幣別請輸入 3 碼英文代碼，例如 CZK'); return; }
 
     if (IS_PUBLIC) {
       if (newCategories.length === 0) { setCreateError('請至少留一個記帳分類'); return; }
-      // 開放版：trips 沒有 INSERT 權限，一律走 app.create_trip（建立者成為 owner 並加入）
-      const myName = newTrip.my_name.trim() || membersArray[0];
-      if (!membersArray.includes(myName)) { setCreateError('「你的名字」要是參與人員之一'); return; }
+      // 開放版：trips 沒有 INSERT 權限，一律走 app.create_trip（建立者成為 owner 並加入）。
+      // 建立時不問「你是哪一位」（David 2026-11-27）：先掛在第一位成員，進旅程後馬上請他選（Dashboard 的 ?who=1）
+      const myName = membersArray[0];
       try {
         setSubmitting(true);
         const { data: newId, error } = await supabase.rpc('create_trip', {
@@ -264,13 +235,15 @@ const Home: React.FC = () => {
           p_category: newTrip.category.trim() || null,
           // 精度與舊版建立時一致，跟建立一起寫進去
           p_precision_config: { [baseCurrency]: getCurrencyPrecision(baseCurrency) },
+          p_start_date: dates.start_date,
+          p_end_date: dates.end_date,
         });
         if (error) throw error;
         setIsModalOpen(false);
-        setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
+        setNewTrip(EMPTY_NEW_TRIP);
         setNewCategories(PUBLIC_DEFAULT_CATEGORIES);
         setCustomCurrency(null);
-        navigate(`/trip/${newId}/dashboard`);
+        navigate(membersArray.length > 1 ? `/trip/${newId}/dashboard?who=1` : `/trip/${newId}/dashboard`);
       } catch (err) {
         // supabase 的錯誤不是 Error 的實例，但有 message
         const msg = (err as { message?: string } | null)?.message ?? String(err);
@@ -294,6 +267,8 @@ const Home: React.FC = () => {
           access_code: newTrip.access_code.trim() || null,
           base_currency: baseCurrency,
           category: newTrip.category.trim() || null,
+          start_date: dates.start_date,
+          end_date: dates.end_date,
           categories: DEFAULT_CATEGORIES,
           rates: { [baseCurrency]: 1 },
           // 以前只有 TWD 給 0 位，JPY 主幣的旅程會顯示成 ¥1,000.00、分帳拆出 333.33
@@ -305,13 +280,19 @@ const Home: React.FC = () => {
 
       setTrips([data[0], ...trips]);
       setIsModalOpen(false);
-      setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
+      setNewTrip(EMPTY_NEW_TRIP);
       setCustomCurrency(null);
     } catch (err) {
       setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // 分類目錄：展開那一組並捲過去
+  const jumpToGroup = (category: string) => {
+    setExpandedGroups(prev => ({ ...prev, [category]: true }));
+    requestAnimationFrame(() => groupRefs.current[category]?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
   // 開放版沒有通行碼頁，直接進 Dashboard
@@ -341,20 +322,64 @@ const Home: React.FC = () => {
     );
   }
 
+  // 排序模式：頂端固定一條操作列，下面是可以拖曳的分組（展開一組再排組內的旅程）
+  if (sortDraft) {
+    const isDefault = sameOrder(sortDraft, defaultGroups(trips));
+    return (
+      <div className="min-h-screen bg-canvas text-ink">
+        <div className="sticky top-offset z-20 bg-canvas/95 backdrop-blur border-b border-line">
+          <div className="max-w-2xl mx-auto px-4 sm:px-8 pt-[max(12px,env(safe-area-inset-top))] pb-3 flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base sm:text-lg font-bold">調整順序</h1>
+              <p className="text-xs text-muted text-pretty">
+                按住 <GripVertical size={12} className="inline -mt-0.5" /> 拖曳，或用箭頭移動{IS_PUBLIC ? '' : '・大家看到的順序會一起改'}
+              </p>
+            </div>
+            <button onClick={cancelSorting} disabled={savingOrder} className={`${ui.btnSecondary} px-3`}>取消</button>
+            <button onClick={finishSorting} disabled={savingOrder} className={`${ui.btnPrimary} px-3.5`}>
+              {savingOrder ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} strokeWidth={2.6} />}完成
+            </button>
+          </div>
+        </div>
+        <main className="max-w-2xl mx-auto px-4 sm:px-8 pt-4 pb-16">
+          <SortEditor groups={sortDraft} onChange={setSortDraft} />
+          <div className="mt-5 flex justify-center">
+            <button
+              onClick={() => setSortDraft(defaultGroups(trips))}
+              disabled={savingOrder || isDefault}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-2 hover:text-ink px-3 py-2 rounded-xl hover:bg-sunk disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <RotateCcw size={13} />還原成預設順序（依建立時間）
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  const showGroupNav = groupedTrips.length >= 2;
+
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <main className="w-full max-w-5xl mx-auto px-4 sm:px-8 pt-[max(16px,env(safe-area-inset-top))] pb-10">
-        <header className="flex items-center gap-3 py-3 sm:py-6">
+        <header className="flex items-center gap-2 sm:gap-3 py-3 sm:py-6">
           <BrandMark />
-          <span className="text-lg sm:text-xl font-bold">{APP_NAME}</span>
-          <button onClick={() => setIsModalOpen(true)} className={`${ui.btnPrimary} ml-auto`}>
-            <Plus size={16} strokeWidth={2.6} />新旅程
-          </button>
-          {IS_PUBLIC && (
-            <button onClick={handleSignOut} className="text-xs text-muted hover:text-ink underline-offset-2 hover:underline">
-              登出
+          <span className="text-lg sm:text-xl font-bold truncate">{APP_NAME}</span>
+          <div className="ml-auto flex items-center gap-2">
+            {trips.length > 1 && !loading && (
+              <button onClick={startSorting} className={`${ui.btnSecondary} px-3`} aria-label="調整旅程順序" title="調整旅程順序">
+                <ArrowDownUp size={15} /><span className="hidden sm:inline">排序</span>
+              </button>
+            )}
+            <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
+              <Plus size={16} strokeWidth={2.6} />新旅程
             </button>
-          )}
+            {IS_PUBLIC && (
+              <button onClick={handleSignOut} className="text-xs text-muted hover:text-ink underline-offset-2 hover:underline">
+                登出
+              </button>
+            )}
+          </div>
         </header>
 
         {error && (
@@ -382,31 +407,59 @@ const Home: React.FC = () => {
             </button>
           </div>
         ) : (
-          <div className="mt-2 sm:mt-0 space-y-8">
-            {featuredTrip && (
-              <section>
-                <h2 className="text-sm font-bold text-ink mb-2.5 px-1">最近的旅程</h2>
-                <div className="md:max-w-xl">
-                  <FeaturedTrip trip={featuredTrip} onClick={() => openTrip(featuredTrip)} />
-                </div>
+          <div className="mt-1 sm:mt-0 space-y-7 sm:space-y-9">
+            {(featuredTrip || showGroupNav) && (
+              <section className={`grid gap-x-6 gap-y-4 ${featuredTrip && showGroupNav ? 'lg:grid-cols-5' : ''}`}>
+                {featuredTrip && (
+                  <div className={`min-w-0 flex flex-col ${showGroupNav ? 'lg:col-span-3' : 'md:max-w-xl'}`}>
+                    <h2 className="text-sm font-bold text-ink mb-2.5 px-1">最近的旅程</h2>
+                    <div className="flex-1"><FeaturedTrip trip={featuredTrip} onClick={() => openTrip(featuredTrip)} /></div>
+                  </div>
+                )}
+                {showGroupNav && (
+                  <nav aria-label="旅程分類" className={`min-w-0 flex flex-col ${featuredTrip ? 'lg:col-span-2' : ''}`}>
+                    <h2 className="text-sm font-bold text-ink mb-2.5 px-1 hidden lg:block">分類</h2>
+                    {/* 手機：一排可以左右滑的分類；電腦：登機證旁邊的分類目錄 */}
+                    <div className="flex lg:flex-col gap-2 lg:gap-0.5 overflow-x-auto lg:overflow-visible no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0 lg:flex-1 lg:bg-surface lg:border lg:border-line lg:rounded-2xl lg:p-1.5">
+                      {groupedTrips.map(({ category, trips: groupTrips }) => {
+                        const active = groupTrips.filter(t => !t.is_archived).length;
+                        return (
+                          <button
+                            key={category}
+                            onClick={() => jumpToGroup(category)}
+                            className="shrink-0 inline-flex items-center gap-2 rounded-full lg:rounded-xl bg-surface lg:bg-transparent border border-line lg:border-0 px-3.5 py-2 lg:px-3 lg:py-2.5 text-sm hover:bg-sunk transition-colors text-left"
+                          >
+                            <span className={`truncate lg:flex-1 ${category === UNCATEGORIZED ? 'text-ink-2' : 'font-medium text-ink'}`}>{category}</span>
+                            {active > 0 && <span className="w-1.5 h-1.5 rounded-full bg-accent" title={`${active} 趟進行中`} />}
+                            <span className="num text-xs text-muted">{groupTrips.length}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </nav>
+                )}
               </section>
             )}
 
-            <div className="grid gap-x-6 gap-y-8 md:grid-cols-2 items-start">
+            {/* 兩欄瀑布流：每組高度不同，用 grid 會在矮的那組下面留一塊空白 */}
+            <div className="md:columns-2 md:gap-6">
               {groupedTrips.map(({ category, trips: groupTrips }) => {
                 const isExpanded = !!expandedGroups[category];
                 const visibleTrips = isExpanded ? groupTrips : groupTrips.slice(0, TRIPS_PER_GROUP);
                 const hiddenCount = groupTrips.length - visibleTrips.length;
+                const archivedCount = groupTrips.filter(t => t.is_archived).length;
                 return (
                   <section
                     key={category}
                     id={categorySlug(category)}
                     ref={el => { groupRefs.current[category] = el; }}
-                    className="scroll-mt-6 min-w-0"
+                    className="scroll-mt-6 min-w-0 break-inside-avoid mb-7 md:mb-6"
                   >
-                    <div className="flex items-baseline justify-between mb-2.5 px-1">
-                      <h2 className={`text-sm font-bold ${category === UNCATEGORIZED ? 'text-ink-2' : 'text-ink'}`}>{category}</h2>
-                      <span className="text-xs text-muted num">{groupTrips.length} 趟</span>
+                    <div className="flex items-baseline justify-between gap-3 mb-2.5 px-1">
+                      <h2 className={`text-[15px] font-bold truncate ${category === UNCATEGORIZED ? 'text-ink-2' : 'text-ink'}`}>{category}</h2>
+                      <span className="shrink-0 text-xs text-muted num">
+                        {groupTrips.length} 趟{archivedCount > 0 && archivedCount < groupTrips.length ? `・${archivedCount} 已封存` : ''}
+                      </span>
                     </div>
                     <div className={`${ui.card} overflow-hidden divide-y divide-line`}>
                       {visibleTrips.map(trip => (
@@ -431,15 +484,17 @@ const Home: React.FC = () => {
         )}
 
         {/* 開放版不放個人名字 */}
-        <footer className="mt-14 text-center text-xs text-muted">{IS_PUBLIC ? PRODUCT_NAME : 'Made by 代杰'}</footer>
+        <footer className="mt-10 text-center text-xs text-muted">{IS_PUBLIC ? PRODUCT_NAME : 'Made by 代杰'}</footer>
       </main>
+
+      <Toast toast={toast} onDismiss={dismissToast} />
 
       {/* 新增旅程 Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setCreateError(null); }}
         title="建立新旅程"
-        dirty={[newTrip.name, newTrip.members, newTrip.category, newTrip.access_code].some(v => v.trim() !== '')}
+        dirty={[newTrip.name, newTrip.members, newTrip.category, newTrip.access_code, newTrip.start_date, newTrip.end_date].some(v => v.trim() !== '')}
       >
         <form onSubmit={handleCreateTrip} className="space-y-4">
           <div>
@@ -485,26 +540,12 @@ const Home: React.FC = () => {
               {knownCategories.map(c => <option key={c} value={c} />)}
             </datalist>
           </div>
-          {IS_PUBLIC && (
-            <div>
-              <label htmlFor="trip-my-name" className={ui.label}>
-                你的名字 <span className="text-muted font-normal">· 要是上面的參與人員之一，留空就用第一位</span>
-              </label>
-              <input
-                id="trip-my-name"
-                type="text"
-                maxLength={20}
-                list="home-trip-members"
-                placeholder="例如：小明"
-                className={ui.input}
-                value={newTrip.my_name}
-                onChange={e => setNewTrip({ ...newTrip, my_name: e.target.value })}
-              />
-              <datalist id="home-trip-members">
-                {newTrip.members.split(/[,，、]/).map(m => m.trim()).filter(Boolean).map(m => <option key={m} value={m} />)}
-              </datalist>
-            </div>
-          )}
+          <TripDatesField
+            idPrefix="trip-dates"
+            start={newTrip.start_date}
+            end={newTrip.end_date}
+            onChange={(start_date, end_date) => setNewTrip({ ...newTrip, start_date, end_date })}
+          />
           {IS_PUBLIC && (
             <div>
               <p className={ui.label}>

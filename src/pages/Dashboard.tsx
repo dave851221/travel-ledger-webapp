@@ -103,9 +103,21 @@ const Dashboard: React.FC = () => {
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   // 畫面還是手機上的舊資料時，記住的名字可能只是還沒出現在舊的成員清單裡 —— 等對完再決定要不要問
   // 開放版不必問：加入旅程時就選過了（成員資格裡有名字），要換再從頭像選單改
+  // 開放版：剛建立的旅程（首頁帶 ?who=1 進來）先問一次你是哪一位（建立時不問，David 2026-11-27）
+  const askWho = IS_PUBLIC && searchParams.get('who') === '1';
   const isWelcomeSelectorOpen = welcomeRequested
+    || (askWho && !loading && !!trip && !welcomeDismissed)
     || (!IS_PUBLIC && !loading && !!trip && !currentUser && !welcomeDismissed && (!syncing || !storedUser));
-  const closeWelcome = () => { setWelcomeRequested(false); setWelcomeDismissed(true); };
+  const closeWelcome = () => {
+    setWelcomeRequested(false);
+    setWelcomeDismissed(true);
+    if (askWho) {
+      // 問過了就把參數拿掉，重新整理不會再問
+      const next = new URLSearchParams(searchParams);
+      next.delete('who');
+      setSearchParams(next, { replace: true });
+    }
+  };
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
   const { toast, showToast, dismissToast } = useToast();
