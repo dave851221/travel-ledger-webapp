@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Ticket } from 'lucide-react';
 import { IS_PUBLIC } from '../config/mode';
 import { ART } from '../config/art';
@@ -8,10 +8,13 @@ import { ART } from '../config/art';
  * Public 旅行小本本: 旅行喵喵's round avatar (public/art/avatar.png, art by another AI — see docs/ART_PLAN.md).
  */
 const BrandMark: React.FC<{ size?: number; inverted?: boolean }> = ({ size = 34, inverted = false }) => {
+  // 開放版：先用 app-logo.png（小本本自己的 logo），還沒有就退回喵喵頭貼
+  const [logoMissing, setLogoMissing] = useState(false);
   if (IS_PUBLIC) {
     return (
-      <img src={`${import.meta.env.BASE_URL}${ART.avatar}`} alt="" aria-hidden width={size} height={size}
-        className="rounded-full shrink-0 bg-surface" style={{ width: size, height: size }} />
+      <img src={`${import.meta.env.BASE_URL}${logoMissing ? ART.avatar : ART.appLogo}`} alt="" aria-hidden width={size} height={size}
+        onError={() => setLogoMissing(true)}
+        className={`shrink-0 bg-surface ${logoMissing ? 'rounded-full' : 'rounded-[10px]'}`} style={{ width: size, height: size }} />
     );
   }
   return (

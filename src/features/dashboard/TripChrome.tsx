@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Lock, MessageCircle, Plus, Settings, Trash2, UserRound, Share2 } from 'lucide-react';
 import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
+import MascotArt from '../../components/MascotArt';
 import { ASSISTANT_CHAT_TITLE, ASSISTANT_NAME } from '../../config/assistant';
 import { ui } from '../../components/ui';
 import { PRODUCT_NAME } from '../../config/mode';
@@ -71,7 +72,9 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
           <h1 className="text-base font-bold truncate">{trip.name}</h1>
         </div>
         {onOpenChat && (
-          <button onClick={onOpenChat} aria-label={`跟${ASSISTANT_NAME}聊天記帳`} className={`${ui.iconBtn} text-ink`}><MessageCircle size={21} /></button>
+          <button onClick={onOpenChat} aria-label={`跟${ASSISTANT_NAME}聊天記帳`} className={`${ui.iconBtn} text-ink`}>
+            <MascotArt slot="chatButton" width={30} fallback={<MessageCircle size={21} />} />
+          </button>
         )}
         <Dropdown
           open={whoOpen}
