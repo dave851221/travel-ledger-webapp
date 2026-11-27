@@ -70,7 +70,10 @@ const fetchPhoto = async (path: string, signal?: AbortSignal): Promise<Response>
   const base = await resolvePhotoUrl(path);
   if (!base) throw new Error('photo_url_unavailable');
   const sep = base.includes('?') ? '&' : '?';
-  const attempt = (suffix: string, init: RequestInit) => fetch(`${base}${sep}${suffix}`, { ...init, signal, mode: 'cors' });
+  // R2 的簽名網址（X-Amz-Signature）多一個查詢參數簽章就不對了；它本來就帶查詢字串，PWA 不會快取，不用加
+  const presigned = base.includes('X-Amz-Signature=');
+  const attempt = (suffix: string, init: RequestInit) =>
+    fetch(presigned ? base : `${base}${sep}${suffix}`, { ...init, signal, mode: 'cors' });
   try {
     const res = await attempt('recap=1', {});
     if (res.ok && res.type !== 'opaque') return res;

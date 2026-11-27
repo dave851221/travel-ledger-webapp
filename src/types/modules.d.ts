@@ -19,3 +19,7 @@ declare module 'https://esm.sh/@supabase/supabase-js@2.39.3' {
 declare module 'npm:@anthropic-ai/sdk@0.135.0' {
   export { default } from '@anthropic-ai/sdk';
 }
+
+declare module 'npm:aws4fetch@1.0.20' {
+  export * from 'aws4fetch';
+}

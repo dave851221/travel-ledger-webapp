@@ -1,16 +1,15 @@
 /**
- * 開放版的照片網址：bucket 是私有的，畫面要用 Supabase 的簽名網址（短期有效）。
+ * 開放版的照片網址：照片在 Cloudflare R2 的私有 bucket，畫面要用簽名網址（短期有效，由 Edge Function tlb-photos 簽）。
  *
  * photoUrl() 是同步的、到處都在用，所以這裡做成「先回一張透明圖，背景批次去簽，簽好通知重畫」：
  *   · photoUrl(path) 沒有可用的簽名網址時，把 path 排進下一批，先回 PLACEHOLDER
- *   · 一批最多 100 張一起簽（createSignedUrls），簽好之後 version + 1
+ *   · 一批最多 100 張一起簽（tlb-photos 的 sign，只簽自己是成員的旅程），簽好之後 version + 1
  *   · 用 usePhotoUrlVersion() 的元件會跟著重畫（Dashboard 掛一個，底下的元件跟著重畫；
  *     有 useMemo 的地方把 version 放進相依）
  * 簽 12 小時，剩不到 1 小時就重簽。舊版不會用到這個檔案（公開 bucket 直接組網址）。
  */
 import { useSyncExternalStore } from 'react';
-import { supabase } from '../api/supabase';
-import { IMAGES_BUCKET } from '../config/mode';
+import { invokePhotos } from './photoStore';
 
 const TTL_SECONDS = 12 * 60 * 60;
 const REFRESH_BEFORE_MS = 60 * 60 * 1000;
@@ -34,12 +33,13 @@ const fresh = (path: string) => {
 async function signBatch(paths: string[]): Promise<void> {
   for (let i = 0; i < paths.length; i += BATCH) {
     const chunk = paths.slice(i, i + BATCH);
-    const { data, error } = await supabase.storage.from(IMAGES_BUCKET).createSignedUrls(chunk, TTL_SECONDS);
-    if (error || !data) continue;
-    const expiresAt = Date.now() + TTL_SECONDS * 1000;
-    data.forEach(item => {
-      if (item.path && item.signedUrl) cache.set(item.path, { url: item.signedUrl, expiresAt });
-    });
+    try {
+      const { urls, ttl } = await invokePhotos<{ urls: Record<string, string>; ttl?: number }>({ action: 'sign', paths: chunk });
+      const expiresAt = Date.now() + (ttl ?? TTL_SECONDS) * 1000;
+      Object.entries(urls ?? {}).forEach(([path, url]) => { if (url) cache.set(path, { url, expiresAt }); });
+    } catch (e) {
+      console.error('[PHOTO] sign failed', e);
+    }
   }
   version += 1;
   listeners.forEach(l => l());

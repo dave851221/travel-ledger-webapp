@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { supabase } from '../api/supabase';
-import { RECEIPTS_BUCKET } from '../utils/storage';
+import { removePhotos } from '../utils/photoStore';
 import { quotaMessage } from '../features/quota/quotaErrors';
 
 type ShowToast = (message: string, type?: 'success' | 'error') => void;
@@ -61,10 +61,7 @@ export const useTrash = (tripId: string | undefined, showToast: ShowToast) => {
 
       // 2. 清 Storage
       if (exp?.photo_urls && exp.photo_urls.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from(RECEIPTS_BUCKET)
-          .remove(exp.photo_urls);
-        if (storageError) console.error('照片刪除失敗:', storageError);
+        await removePhotos(exp.photo_urls).catch(storageError => console.error('照片刪除失敗:', storageError));
       }
 
       // 3. 再刪紀錄
@@ -96,10 +93,7 @@ export const useTrash = (tripId: string | undefined, showToast: ShowToast) => {
 
       // 2. 整批清 Storage
       if (allPhotoUrls.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from(RECEIPTS_BUCKET)
-          .remove(allPhotoUrls);
-        if (storageError) console.error('整批照片刪除失敗:', storageError);
+        await removePhotos(allPhotoUrls).catch(storageError => console.error('整批照片刪除失敗:', storageError));
       }
 
       // 3. 再刪紀錄
