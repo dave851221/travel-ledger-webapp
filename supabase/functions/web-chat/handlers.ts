@@ -61,6 +61,7 @@ import { countryForTimezone } from "../_shared/tools/weather.ts"
 import type { TripRow } from "../_shared/types.ts"
 import { consumeAi, quotaReply, userActor, type AiKind } from "../_shared/quota.ts"
 import { PERSONA } from "../_shared/assistant/persona.ts"
+import { createR2Store, createSupabaseStore, r2ConfigFromEnv, type PhotoStore } from "../_shared/photoStore.ts"
 import {
   AI_DEADLINE_MS,
   AI_PROVIDER,
@@ -164,7 +165,7 @@ async function removeChatPhotos(db: SupabaseClient, tripId: string, candidates: 
   const { data: used } = await db.from('expenses').select('photo_urls').eq('trip_id', tripId).overlaps('photo_urls', paths)
   const keep = new Set(((used ?? []) as { photo_urls: string[] }[]).flatMap(r => r.photo_urls ?? []))
   const removable = paths.filter(p => !keep.has(p))
-  if (removable.length > 0) await db.storage.from(RECEIPTS_BUCKET).remove(removable)
+  if (removable.length > 0) await photoStore(db).remove(removable)
 }
 
 function newNonce(): string {
@@ -175,13 +176,20 @@ function toShort(e: { description: string; amount: number; currency: string; dat
   return { d: e.description, a: e.amount, c: e.currency, dt: e.date, cat: e.category, p: e.payer_data, s: e.split_details }
 }
 
-/** 讓 AI 讀照片的網址：舊版公開 bucket；開放版私有 bucket，給 10 分鐘的簽名網址 */
+/** 照片放哪：舊版 Supabase 公開 bucket；開放版 Cloudflare R2（沒設金鑰時退回私有 bucket） */
+const R2_CONFIG = IS_PUBLIC ? r2ConfigFromEnv(k => Deno.env.get(k)) : null
+function photoStore(db: SupabaseClient): PhotoStore {
+  return R2_CONFIG ? createR2Store(R2_CONFIG, db) : createSupabaseStore(db, RECEIPTS_BUCKET, !IS_PUBLIC)
+}
+
+/** 讓 AI 讀照片的網址：舊版公開網址；開放版 10 分鐘的簽名網址 */
 async function photoUrl(db: SupabaseClient, path: string): Promise<string> {
-  if (IS_PUBLIC) {
-    const { data } = await db.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, 600)
-    return data?.signedUrl ?? ''
+  try {
+    return await photoStore(db).viewUrl(path, 600)
+  } catch (e) {
+    console.error('[PHOTO] view url failed', e)
+    return ''
   }
-  return db.storage.from(RECEIPTS_BUCKET).getPublicUrl(path).data.publicUrl
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -506,15 +514,13 @@ export async function handlePhoto(scope: ChatScope, req: ChatRequest): Promise<C
     return blocked
   }
   try {
-    const { data: file, error } = await db.storage.from(RECEIPTS_BUCKET).download(path)
-    if (error || !file) throw error ?? new Error('Photo not found')
-    const buf = new Uint8Array(await file.arrayBuffer())
+    const buf = new Uint8Array(await photoStore(db).download(path))
     const today = tripToday(trip)
     const ocr = await recognizeReceipt(ai, {
       trip, memberName, today,
       tripUrl: `${WEBAPP_URL}/#/trip/${trip.id}/dashboard`,
       imageBase64: encodeBase64(buf),
-      mimeType: file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg',
+      mimeType: 'image/jpeg',
     })
     const nonce = newNonce()
     const draft: WebDraft = {

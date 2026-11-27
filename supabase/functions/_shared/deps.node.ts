@@ -4,3 +4,4 @@
 export { default as Decimal } from 'decimal.js';
 export { createClient, type SupabaseClient } from '@supabase/supabase-js';
 export { default as Anthropic } from '@anthropic-ai/sdk';
+export { AwsClient } from 'aws4fetch';

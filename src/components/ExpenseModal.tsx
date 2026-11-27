@@ -29,7 +29,8 @@ import type { Trip, Expense } from '../types';
 import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
 import { getLocalDateString } from '../utils/date';
 import { getDefaultCategory, getDefaultCurrency } from '../utils/tripDefaults';
-import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
+import { photoUrl } from '../utils/storage';
+import { removePhotos, uploadPhoto } from '../utils/photoStore';
 import { insertExpenseOrQueue } from '../utils/offlineQueue';
 import { quotaMessage } from '../features/quota/quotaErrors';
 import Decimal from 'decimal.js';
@@ -497,10 +498,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       const newPhotoPathMap = new Map<string, string>();
       for (const item of photoList) {
         if (item.kind === 'new') {
-          const ext = item.file.name.split('.').pop() || 'jpg';
-          const filePath = `expenses/${trip.id}/${crypto.randomUUID()}.${ext}`;
-          const { error: uErr } = await supabase.storage.from(RECEIPTS_BUCKET).upload(filePath, item.file);
-          if (uErr) throw uErr;
+          const filePath = await uploadPhoto(trip.id, item.file, 'expense', item.file.name);
           uploadedPaths.push(filePath);
           newPhotoPathMap.set(item.key, filePath);
         }
@@ -544,8 +542,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         // （順序不能反，否則更新失敗時紀錄會指向已刪掉的照片）
         const removedPhotos = (editData.photo_urls || []).filter(url => url && !finalPhotoUrls.includes(url));
         if (removedPhotos.length > 0) {
-          const { error: rmErr } = await supabase.storage.from(RECEIPTS_BUCKET).remove(removedPhotos);
-          if (rmErr) console.error('[PHOTO] failed to remove replaced photos:', rmErr);
+          await removePhotos(removedPhotos).catch(rmErr => console.error('[PHOTO] failed to remove replaced photos:', rmErr));
         }
         // LIFF 的成功提示等 LINE 確認訊息送出後才顯示（David 2026-11-27：太早說成功，使用者會直接關掉）
         if (!liffMeta?.line_user_id) showToast('已更新支出紀錄！');
@@ -590,7 +587,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       onClose();
     } catch (err) {
       if (uploadedPaths.length > 0) {
-        await supabase.storage.from(RECEIPTS_BUCKET).remove(uploadedPaths).catch(() => {});
+        await removePhotos(uploadedPaths).catch(() => {});
       }
       // 上傳或寫入失敗時把 nonce 鎖放掉，否則那張 LINE 卡片之後再也存不進去
       if (nonceLocked && liffMeta?.nonce) {

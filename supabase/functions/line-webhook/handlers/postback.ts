@@ -18,7 +18,8 @@ import {
 } from "../../_shared/tools/expenses.ts"
 import { resolveMember } from "../../_shared/validate.ts"
 import { buildSavedText } from "../../_shared/savedText.ts"
-import { RECEIPTS_BUCKET, TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
+import { TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
+import { photos } from "../photos.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import {
@@ -711,7 +712,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       if (photo_ids.length === 0 || !trip_id) return
       const urls = photo_ids.map((id: string) => id.includes('/') ? id : `expenses/${trip_id}/${id}.jpg`)
       console.log(`[PHOTO] Remove photo URL: ${urls}`)
-      await supabase.storage.from(RECEIPTS_BUCKET).remove(urls)
+      await photos.remove(urls)
     }
     await Promise.all([
       removePhotos(),

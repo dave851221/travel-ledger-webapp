@@ -3,7 +3,7 @@ import { supabase, TRIP_COLUMNS, TRIP_DETAIL_COLUMNS } from '../api/supabase';
 import { DB_SCHEMA, IS_PUBLIC, meKey, tripStorageKey } from '../config/mode';
 import { primePhotoUrls } from '../utils/signedPhotos';
 import type { Trip, Expense } from '../types';
-import { RECEIPTS_BUCKET } from '../utils/storage';
+import { removePhotos } from '../utils/photoStore';
 import { isNotFoundError } from '../utils/supabaseErrors';
 
 export interface UseTripDataResult {
@@ -168,7 +168,7 @@ export const useTripData = (
 
       // 順序不能換：紀錄一消失就查不出該刪哪些照片
       if (expiredPhotoUrls.length > 0) {
-        await supabase.storage.from(RECEIPTS_BUCKET).remove(expiredPhotoUrls);
+        await removePhotos(expiredPhotoUrls).catch(() => {});
       }
       // 兩次呼叫之間可能有人把紀錄還原，還原過的不能硬刪
       await supabase

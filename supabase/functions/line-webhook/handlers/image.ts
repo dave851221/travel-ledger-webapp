@@ -17,7 +17,8 @@
 
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { recognizeReceipt } from "../../_shared/assistant/receipt.ts"
-import { aiUnavailableMessage, IS_PUBLIC, RECEIPTS_BUCKET, TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
+import { aiUnavailableMessage, IS_PUBLIC, TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
+import { photos } from "../photos.ts"
 import { type EventContext, extendFollowup, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { photoViewUrl, storePendingExpense } from "../drafts.ts"
@@ -86,10 +87,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
     const imageBuffer = await lineRes.arrayBuffer()
 
     console.log(`[STORAGE] Uploading to: ${filePath}`)
-    const { error: uploadErr } = await supabase.storage.from(RECEIPTS_BUCKET).upload(filePath, imageBuffer, {
-      contentType: 'image/jpeg', upsert: true
-    })
-    if (uploadErr) throw uploadErr
+    await photos.upload(filePath, imageBuffer, 'image/jpeg')
 
     const publicUrl = await photoViewUrl(filePath, tripId)
     const base64Image = encodeBase64(new Uint8Array(imageBuffer))
@@ -181,7 +179,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
     extendFollowup(ctx)
   } catch (e) {
     console.error('[OCR_ERROR]', e)
-    await supabase.storage.from(RECEIPTS_BUCKET).remove([filePath])
+    await photos.remove([filePath])
     const msg = aiUnavailableMessage(e) ?? '😵 處理圖片時發生錯誤，請稍後再試。'
     await replyMessage(replyToken, [{ type: 'text', text: msg }], sourceId)
   }

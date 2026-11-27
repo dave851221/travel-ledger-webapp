@@ -3,7 +3,7 @@
  */
 import imageCompression from 'browser-image-compression';
 import { supabase } from '../../api/supabase';
-import { RECEIPTS_BUCKET } from '../../utils/storage';
+import { uploadPhoto } from '../../utils/photoStore';
 import { ASSISTANT_NAME } from '../../config/assistant';
 import { IS_PUBLIC } from '../../config/mode';
 import { quotaMessage } from '../quota/quotaErrors';
@@ -65,8 +65,9 @@ export async function uploadChatPhoto(tripId: string, file: File): Promise<strin
     const jpeg = await readLocalPhoto(file);
     compressed = await imageCompression(new File([jpeg], 'photo.jpg', { type: 'image/jpeg' }), options);
   }
-  const path = `expenses/${tripId}/chat_${crypto.randomUUID()}.jpg`;
-  const { error } = await supabase.storage.from(RECEIPTS_BUCKET).upload(path, compressed, { contentType: 'image/jpeg' });
-  if (error) throw new Error(quotaMessage(error) ?? error.message);
-  return path;
+  try {
+    return await uploadPhoto(tripId, new File([compressed], 'photo.jpg', { type: 'image/jpeg' }), 'chat', 'photo.jpg');
+  } catch (error) {
+    throw new Error(quotaMessage(error) ?? (error instanceof Error ? error.message : String(error)));
+  }
 }

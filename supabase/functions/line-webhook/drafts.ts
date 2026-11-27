@@ -9,7 +9,7 @@
 // ============================================================
 
 import { reconcileReceiptItems, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
-import { IS_PUBLIC, RECEIPTS_BUCKET } from "./config.ts"
+import { photos } from "./photos.ts"
 import { supabase } from "./db.ts"
 import type { PendingDraft } from "./types.ts"
 
@@ -77,13 +77,12 @@ const SIGNED_URL_TTL = 7 * 24 * 60 * 60
  */
 export async function photoViewUrl(photoId: string, tripId: string): Promise<string> {
   const path = String(photoId).includes('/') ? String(photoId) : `expenses/${tripId}/${photoId}.jpg`
-  if (IS_PUBLIC) {
-    const { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, SIGNED_URL_TTL)
-    if (error) console.error('[PHOTO] signed url failed', error.message)
-    return data?.signedUrl ?? ''
+  try {
+    return await photos.viewUrl(path, SIGNED_URL_TTL)
+  } catch (e) {
+    console.error('[PHOTO] view url failed', e)
+    return ''
   }
-  const { data } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(path)
-  return data.publicUrl
 }
 
 /**
@@ -158,7 +157,7 @@ export async function cancelDraft(
   if (draft.photoIds.length > 0 && draft.tripId) {
     const urls = draft.photoIds.map((id: string) => id.includes('/') ? id : `expenses/${draft.tripId}/${id}.jpg`)
     console.log(`[PHOTO] Remove photo URL: ${urls}`)
-    await supabase.storage.from(RECEIPTS_BUCKET).remove(urls)
+    await photos.remove(urls)
   }
 }
 

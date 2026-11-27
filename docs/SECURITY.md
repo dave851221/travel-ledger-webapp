@@ -37,7 +37,12 @@
   一律用 `tlb:` 開頭的鍵（`src/config/mode.ts` 的 `globalStorageKey` / `tripStorageKey` / `meKey`）。
   登入的人換了或登出時，`ensureCacheOwner`（`features/auth/session.ts`）整批清掉；
   上一個人還沒上傳的離線帳也會被清掉（不能用別人的身分上傳）。新增任何存在裝置上的資料都要用這些 helper。
-- **照片**：私有 bucket `app-images`，畫面用簽名網址（`utils/signedPhotos.ts`，12 小時），分享頁不顯示照片。
+- **照片**：Cloudflare R2 的私有 bucket `tlb-photos`（2026-11-27 從 Supabase Storage 的 `app-images` 搬過去，讓 Supabase 維持免費方案）。
+  R2 金鑰只在 Edge Function（secrets `R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`，選填 `R2_BUCKET`），網頁一律經過 `tlb-photos`：
+  上傳（≤ 10 MB、只收圖片、要是成員；`app.add_trip_photo` 先占位置擋張數上限）、簽名網址（12 小時，只簽自己是成員的旅程）、刪除（成員）、整趟刪除（owner）。
+  每張照片在 `app.trip_photos` 記一列（只有 service role 碰得到），`count_photos` 數這張表＋還留在 `app-images` 的（本機沒設 R2 金鑰時照片放 `app-images`）。
+  LINE 機器人與網頁聊天透過 `_shared/photoStore.ts` 存取，舊版照舊用公開的 `travel-images`。分享頁不顯示照片。
+  R2 bucket 的 CORS 只開 GET／HEAD 給網站網域與 localhost:5173（回顧影片要用 CORS 讀原圖）。本機測試：`scripts/local-photos-test.mjs`；搬既有照片：`scripts/migrate-photos-r2.mjs`。
 - **LINE 登入**：只收網頁 OAuth 的 code（伺服器自己換 ID token、驗 nonce）或 LIFF 的 access token
   （伺服器向 LINE 確認是發給我們 channel 的）；前端送來的 ID token 一律不收（有效期內可以重放）。
   `auth-line` 的 CORS 只對 `APP_ALLOWED_ORIGINS` 裡的網站回 Allow-Origin。
