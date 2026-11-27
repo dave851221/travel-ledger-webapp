@@ -30,6 +30,7 @@ import { getLocalDateString } from '../utils/date';
 import { getDefaultCategory, getDefaultCurrency } from '../utils/tripDefaults';
 import { photoUrl, RECEIPTS_BUCKET } from '../utils/storage';
 import { insertExpenseOrQueue } from '../utils/offlineQueue';
+import { quotaMessage } from '../features/quota/quotaErrors';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
 
@@ -586,7 +587,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       if (nonceLocked && liffMeta?.nonce) {
         await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);
       }
-      setError(err instanceof Error ? err.message : String(err));
+      setError(quotaMessage(err) ?? (err instanceof Error ? err.message : String(err)));
     } finally { setLoading(false); }
   };
 

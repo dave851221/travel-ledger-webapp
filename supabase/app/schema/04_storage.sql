@@ -20,10 +20,7 @@ CREATE POLICY app_images_select ON storage.objects
     FOR SELECT TO authenticated
     USING (bucket_id = 'app-images' AND app.is_member(app.trip_id_from_path(name)));
 
-DROP POLICY IF EXISTS app_images_insert ON storage.objects;
-CREATE POLICY app_images_insert ON storage.objects
-    FOR INSERT TO authenticated
-    WITH CHECK (bucket_id = 'app-images' AND app.is_member(app.trip_id_from_path(name)));
+-- 上傳政策（成員＋照片張數上限）在 05_quota.sql
 
 DROP POLICY IF EXISTS app_images_delete ON storage.objects;
 CREATE POLICY app_images_delete ON storage.objects

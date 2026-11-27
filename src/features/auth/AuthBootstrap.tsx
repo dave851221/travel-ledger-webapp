@@ -11,8 +11,8 @@ interface Notice { ok: boolean; text: string }
 function noticeFor(code: string, linking: boolean): Notice {
   switch (code) {
     case 'ok': return { ok: true, text: 'LINE 已經連到這個帳號' };
-    case 'line_already_linked': return { ok: false, text: '這個 LINE 已經是另一個帳號了，沒辦法再連' };
-    case 'identity_already_exists': return { ok: false, text: '這個 Google 已經是另一個帳號了，沒辦法再連' };
+    case 'line_already_linked': return { ok: false, text: '這個 LINE 已經是另一個帳號了。要連到這裡，請先用它登入，到「帳號」刪除那個帳號後再連。' };
+    case 'identity_already_exists': return { ok: false, text: '這個 Google 已經是另一個帳號了。要連到這裡，請先用它登入，到「帳號」刪除那個帳號後再連。' };
     case 'not_signed_in': return { ok: false, text: '請先登入再連結' };
     default: return { ok: false, text: linking ? '連結沒有成功，請再試一次' : '登入沒有成功，請再試一次' };
   }

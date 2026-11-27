@@ -23,6 +23,7 @@ import { supabase } from '../api/supabase';
 import { IS_PUBLIC, meKey } from '../config/mode';
 import ShareSettings from '../features/auth/ShareSettings';
 import MemberManager from '../features/auth/MemberManager';
+import TripUsage from '../features/quota/TripUsage';
 import { useSession } from '../features/auth/session';
 import { useMyMembership } from '../features/auth/membership';
 import type { Trip, Expense } from '../types';
@@ -708,6 +709,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   </button>
                 </div>
               </section>}
+
+              {IS_PUBLIC && <TripUsage tripId={trip.id} />}
 
               <section className="rounded-2xl border border-line divide-y divide-line">
                 <div className="flex items-center gap-3 p-4">
