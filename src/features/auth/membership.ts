@@ -11,7 +11,7 @@ import { IS_PUBLIC, meKey } from '../../config/mode';
 
 export interface Membership {
   memberName: string;
-  role: 'owner' | 'editor';
+  role: 'owner' | 'admin' | 'editor';
 }
 
 /**

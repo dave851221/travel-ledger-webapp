@@ -7,7 +7,7 @@
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "check:functions": "deno check --config supabase/functions/deno.json supabase/functions/line-webhook/index.ts supabase/functions/liff-notify/index.ts supabase/functions/web-chat/index.ts supabase/functions/auth-line/index.ts supabase/functions/_shared/tools/registry.ts supabase/functions/_shared/ai/gemini.ts supabase/functions/_shared/ai/claude.ts supabase/functions/_shared/ai/fallback.ts",
+    "check:functions": "deno check --config supabase/functions/deno.json supabase/functions/line-webhook/index.ts supabase/functions/liff-notify/index.ts supabase/functions/web-chat/index.ts supabase/functions/auth-line/index.ts supabase/functions/tlb-line-webhook/index.ts supabase/functions/_shared/tools/registry.ts supabase/functions/_shared/ai/gemini.ts supabase/functions/_shared/ai/claude.ts supabase/functions/_shared/ai/fallback.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",

@@ -44,7 +44,7 @@ CREATE POLICY trips_delete ON app.trips
     FOR DELETE TO authenticated
     USING (app.is_owner(id));
 
--- ── trip_members：看得到同一趟的其他成員；自己可以離開，owner 可以移除別人 ──
+-- ── trip_members：看得到同一趟的其他成員；自己可以離開，建立者／管理員可以移除別人 ──
 -- 加入只能走 accept_invite／create_trip；改名字只能走 set_my_member／update_trip_members。
 DROP POLICY IF EXISTS trip_members_select ON app.trip_members;
 CREATE POLICY trip_members_select ON app.trip_members
@@ -54,7 +54,8 @@ CREATE POLICY trip_members_select ON app.trip_members
 DROP POLICY IF EXISTS trip_members_delete ON app.trip_members;
 CREATE POLICY trip_members_delete ON app.trip_members
     FOR DELETE TO authenticated
-    USING (user_id = auth.uid() OR app.is_owner(trip_id));
+    -- 自己離開；建立者可以移除任何人；管理員只能移除一般成員
+    USING (user_id = auth.uid() OR app.is_owner(trip_id) OR (app.is_admin(trip_id) AND role = 'editor'));
 
 -- ── expenses：成員可讀寫 ───────────────────────────────────────
 DROP POLICY IF EXISTS expenses_member ON app.expenses;

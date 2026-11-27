@@ -35,7 +35,7 @@ import SettlementTab, { type SettleRequest } from '../features/dashboard/Settlem
 import TrashTab from '../features/dashboard/TrashTab';
 import SiblingsTab from '../features/dashboard/SiblingsTab';
 import AlbumTab from '../features/dashboard/AlbumTab';
-import MemberAvatar from '../features/dashboard/MemberAvatar';
+import MemberAvatar, { MemberColorProvider } from '../features/dashboard/MemberAvatar';
 
 // 統計分頁帶著圖表套件（recharts，壓縮前 300 KB），行程分頁帶著版面元件，都等點到才下載
 const StatsTab = lazy(() => import('../features/dashboard/StatsTab'));
@@ -387,6 +387,8 @@ const Dashboard: React.FC = () => {
   );
 
   return (
+    // 成員頭像依旅程裡的順序配色，同一趟裡不會撞色（MemberAvatar.tsx）
+    <MemberColorProvider members={trip.members}>
     <div className="min-h-screen bg-canvas text-ink md:flex">
       {/* 先畫的是手機上的舊資料、背景正在更新：頂端一條細線，不擋操作 */}
       {syncing && (
@@ -680,6 +682,7 @@ const Dashboard: React.FC = () => {
 
       <Toast toast={toast} onDismiss={dismissToast} />
     </div>
+    </MemberColorProvider>
   );
 };
 
