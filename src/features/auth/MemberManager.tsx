@@ -78,38 +78,52 @@ const MemberManager: React.FC<{ trip: Trip; myUserId: string | null; myRole: Rol
         <ul className="rounded-2xl border border-line divide-y divide-line">
           {rows.map(row => {
             const me = row.user_id === myUserId;
-            return (
-              <li key={row.user_id} className="flex items-center gap-2 px-3 py-2.5">
-                {row.role === 'owner' ? <Crown size={16} className="text-accent shrink-0" />
-                  : row.role === 'admin' ? <Shield size={16} className="text-ink-2 shrink-0" />
-                  : <span className="w-4 shrink-0" />}
-                <span className="flex-1 min-w-0">
-                  <span className="block truncate text-sm">
-                    {row.member_name}{me && <span className="text-muted">（你）</span>}
-                  </span>
-                  <LoginBadges logins={row.logins ?? []} />
-                </span>
-                <span className="text-xs text-muted shrink-0">{ROLE_LABEL[row.role]}</span>
+            const hasActions = (myRole === 'owner' && row.role !== 'owner') || canRemove(row) || (me && row.role !== 'owner');
+            const actions = (
+              <>
                 {myRole === 'owner' && row.role !== 'owner' && (
                   <button
                     type="button"
                     disabled={busy === row.user_id}
                     onClick={() => setRole(row, row.role === 'admin' ? 'editor' : 'admin')}
-                    className="text-xs text-accent font-medium hover:underline shrink-0"
+                    className="text-xs text-ink-2 hover:text-ink rounded-lg border border-line px-2 py-1"
                   >
                     {row.role === 'admin' ? '取消管理員' : '設為管理員'}
                   </button>
                 )}
                 {canRemove(row) && (
-                  <button type="button" aria-label={`移除 ${row.member_name}`} onClick={() => setConfirm({ row, leave: false })} className={`${ui.iconBtn} hover:text-neg`}>
-                    <UserMinus size={16} />
+                  <button type="button" onClick={() => setConfirm({ row, leave: false })} className="text-xs text-muted hover:text-neg inline-flex items-center gap-1 px-1 py-0.5">
+                    <UserMinus size={13} />移除
                   </button>
                 )}
                 {me && row.role !== 'owner' && (
-                  <button type="button" onClick={() => setConfirm({ row, leave: true })} className="text-xs text-neg hover:underline shrink-0 inline-flex items-center gap-1">
+                  <button type="button" onClick={() => setConfirm({ row, leave: true })} className="text-xs text-neg hover:underline inline-flex items-center gap-1 px-1 py-0.5">
                     <LogOut size={13} />離開
                   </button>
-                )}
+            )}
+              </>
+            );
+            return (
+              // 一列一個帳號：左邊名字＋角色，下面是登入方式（跟「我的帳號」同一套排法），右邊是操作
+              <li key={row.user_id} className="flex items-start gap-3 px-3 py-3">
+                <span className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${
+                  row.role === 'owner' ? 'bg-accent/20 text-ink' : 'bg-sunk text-ink-2'}`} aria-hidden>
+                  {row.role === 'owner' ? <Crown size={16} className="text-accent" />
+                    : row.role === 'admin' ? <Shield size={16} />
+                    : (row.member_name.trim()[0] ?? '?')}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="truncate text-sm font-medium">{row.member_name}</span>
+                    {me && <span className="shrink-0 text-xs text-muted">（你）</span>}
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-4 ${
+                      row.role === 'editor' ? 'bg-sunk text-muted' : 'bg-accent/15 text-ink font-medium'}`}>{ROLE_LABEL[row.role]}</span>
+                  </span>
+                  <LoginBadges logins={row.logins ?? []} />
+                  {/* 手機：操作放在名字下面一排，不跟登入資訊搶寬度；電腦放右邊 */}
+                  {hasActions && <span className="sm:hidden flex flex-wrap items-center gap-2 mt-2">{actions}</span>}
+                </span>
+                {hasActions && <span className="hidden sm:flex shrink-0 flex-col items-end gap-1.5 pt-0.5">{actions}</span>}
               </li>
             );
           })}

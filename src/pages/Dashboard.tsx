@@ -67,9 +67,11 @@ const Dashboard: React.FC = () => {
   // 目前的分頁記在網址（?tab=ledger）：重新整理、或 PWA 自動更新重新載入之後還留在同一頁。
   // 用 replace 而不是 push —— 分頁不疊進瀏覽紀錄，按返回仍然是回到所有旅程。
   const [searchParams, setSearchParams] = useSearchParams();
-  const defaultTab: TabType = hasItinerary(id || '') ? 'itinerary' : 'ledger';
+  // 開放版每一趟都有行程分頁（還沒連試算表時是設定步驟）；預設分頁只在真的有行程時才是行程
+  const hasPlan = hasItinerary(id || '') || (IS_PUBLIC && !!trip?.itinerary_sheet);
+  const defaultTab: TabType = hasPlan ? 'itinerary' : 'ledger';
   const tabParam = searchParams.get('tab');
-  const activeTab: TabType = isTabType(tabParam) && (tabParam !== 'itinerary' || hasItinerary(id || ''))
+  const activeTab: TabType = isTabType(tabParam) && (tabParam !== 'itinerary' || hasPlan || IS_PUBLIC)
     ? tabParam
     : defaultTab;
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -367,7 +369,7 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  const showItineraryTab = id ? hasItinerary(id) : false;
+  const showItineraryTab = id ? hasItinerary(id) || IS_PUBLIC : false;
   const tabs = primaryTabs(showItineraryTab);
   const readOnly = trip.is_archived;
   const goHome = () => navigate('/');
@@ -491,7 +493,7 @@ const Dashboard: React.FC = () => {
 
           {activeTab === 'itinerary' && id && (
             <Suspense fallback={<TabLoading />}>
-              <TripItinerary tripId={id} />
+              <TripItinerary trip={trip} readOnly={readOnly} onChanged={refetchTrip} />
             </Suspense>
           )}
 

@@ -39,6 +39,8 @@ export interface Trip {
    * 整趟旅程共用一份（不分 LINE 綁定、不分管道），空字串一律存成 NULL。
    */
   ai_preference?: string | null;
+  /** 開放版：行程用的 Google 試算表 id（features/itinerary/sheet.ts） */
+  itinerary_sheet?: string | null;
   created_at: string;
 }
 

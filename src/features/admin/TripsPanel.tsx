@@ -123,7 +123,7 @@ const TripsPanel: React.FC<{ trips: AdminTripRow[]; onEdit: (t: AdminTripRow) =>
                     <span className="text-muted num">建立 {day(t.created_at)}・最後記帳 {day(t.last_entry)}・{t.members} 人</span>
                   </span>
                 </span>
-                <span className="min-w-0">{t.owner ? <LoginBadges logins={t.owner} /> : <span className="text-xs text-muted">—</span>}</span>
+                <span className="min-w-0 block">{t.owner ? <LoginBadges logins={t.owner} /> : <span className="text-xs text-muted">—</span>}</span>
                 <span className="grid grid-cols-3 gap-3 lg:contents">
                   <Meter label="記帳" used={t.entries} limit={t.limits.max_entries} />
                   <Meter label="AI" used={t.ai_calls} limit={t.limits.max_ai_calls} />

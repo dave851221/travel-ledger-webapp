@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check, X, UserRound } from 'lucide-react';
+import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check, X, UserRound, ExternalLink } from 'lucide-react';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -11,7 +11,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { NEW_CURRENCY_DECIMALS } from '../utils/finance';
 import { CURRENCIES, normalizeCurrencyCode } from '../utils/currencies';
 import { isSubmitEnter } from '../utils/keyboard';
-import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
+import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME, PUBLIC_SITE_URL } from '../config/mode';
 import { peekReturnTo, signOut, useSession } from '../features/auth/session';
 import SignInPanel from '../features/auth/SignInPanel';
 import AccountModal from '../features/auth/AccountModal';
@@ -214,7 +214,8 @@ const Home: React.FC = () => {
   const handleCreateTrip = async (e: React.FormEvent) => {
     e.preventDefault();
     // access_code 為選填：留空代表此旅程不需要密碼
-    if (!supabase) return;
+    // 舊版不再建立新旅程（入口已經換成「前往新版」，這裡再擋一次）
+    if (!supabase || !IS_PUBLIC) return;
     setCreateError(null);
 
     // 全形逗號與頓號也要認：中文輸入法打出來的多半是「，」「、」，
@@ -386,9 +387,16 @@ const Home: React.FC = () => {
                 <ArrowDownUp size={15} /><span className="hidden sm:inline">排序</span>
               </button>
             )}
-            <button onClick={() => setIsModalOpen(true)} className={`${ui.btnPrimary} h-10 py-0`}>
-              <Plus size={16} strokeWidth={2.6} />新旅程
-            </button>
+            {/* 舊版不再建立新旅程（David 2026-11-27），新旅程到旅行小本本 */}
+            {IS_PUBLIC ? (
+              <button onClick={() => setIsModalOpen(true)} className={`${ui.btnPrimary} h-10 py-0`}>
+                <Plus size={16} strokeWidth={2.6} />新旅程
+              </button>
+            ) : (
+              <a href={PUBLIC_SITE_URL} className={`${ui.btnPrimary} h-10 py-0`}>
+                <ExternalLink size={15} />新版
+              </a>
+            )}
             {IS_PUBLIC && (
               <button onClick={() => setAccountOpen(true)} className={`${ui.btnSecondary} h-10 py-0 px-3 bg-sunk border-transparent`} aria-label="我的帳號" title="我的帳號（登入方式、登出）">
                 <UserRound size={15} /><span className="hidden sm:inline">帳號</span>
@@ -397,6 +405,18 @@ const Home: React.FC = () => {
           </div>
         </header>
         {IS_PUBLIC && <AccountModal isOpen={accountOpen} onClose={() => setAccountOpen(false)} onSignOut={handleSignOut} />}
+
+        {!IS_PUBLIC && (
+          <div className="mb-5 sm:mb-6 rounded-2xl bg-navy text-navy-fg px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-bold">旅遊小本本升級成「旅行小本本」了</p>
+              <p className="text-sm text-navy-sub mt-0.5">新的旅程請到新網站建立（用 LINE 或 Google 登入，還有旅行喵喵幫忙記帳）。這裡的舊旅程照常可以看、可以記帳。</p>
+            </div>
+            <a href={PUBLIC_SITE_URL} className={`${ui.btnAccent} shrink-0 h-10 py-0 justify-center`}>
+              前往旅行小本本<ExternalLink size={15} />
+            </a>
+          </div>
+        )}
 
         {error && (
           <div className={`${ui.errorBox} mb-6`}>
@@ -420,9 +440,13 @@ const Home: React.FC = () => {
             } />
             <h2 className="text-lg font-bold">還沒有任何旅程</h2>
             <p className="text-sm text-muted mt-1.5 mb-6">建立一趟旅程，邀請旅伴一起記帳。</p>
-            <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
-              <Plus size={16} strokeWidth={2.6} />建立第一趟旅程
-            </button>
+            {IS_PUBLIC ? (
+              <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
+                <Plus size={16} strokeWidth={2.6} />建立第一趟旅程
+              </button>
+            ) : (
+              <a href={PUBLIC_SITE_URL} className={ui.btnPrimary}>到旅行小本本建立旅程<ExternalLink size={15} /></a>
+            )}
           </div>
         ) : (
           // 電腦（lg 以上）：左邊固定一欄放最近的旅程＋分類目錄，右邊各分類由上往下排 ——

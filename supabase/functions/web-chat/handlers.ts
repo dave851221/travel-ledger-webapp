@@ -99,7 +99,12 @@ const ai = createAssistantAi({
 })
 const READ_TOOL_NAMES = readToolNames(!!GOOGLE_MAPS_API_KEY)
 const TEXT_TOOL_DECLARATIONS = buildTextToolDeclarations(READ_TOOL_NAMES)
-const loadItinerary = createItineraryLoader(WEBAPP_URL)
+/** 行程表：網頁打包的 JSON；開放版的旅程連了 Google 試算表就讀試算表 */
+function loadItinerary(trip: TripRow) {
+  const sheetId = IS_PUBLIC ? trip.itinerary_sheet : null
+  const year = trip.start_date ? Number(trip.start_date.slice(0, 4)) : new Date().getFullYear()
+  return createItineraryLoader(WEBAPP_URL, sheetId ? async () => ({ sheetId, title: trip.name, year }) : undefined)(trip.id)
+}
 
 // ============================================================
 // 回應的形狀（前端 src/features/chat/types.ts 是同一份契約）
@@ -245,7 +250,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
 
   const [recentExpenses, itinerary] = await Promise.all([
     loadRecentExpenses(db, trip.id),
-    loadItinerary(trip.id),
+    loadItinerary(trip),
   ])
   const today = tripToday(trip)
   const precision = (trip.precision_config ?? {}) as Record<string, number>
@@ -271,7 +276,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
 
   const toolCtx: ToolContext = {
     db, trip, today, actorName: memberName,
-    loadItinerary: () => loadItinerary(trip.id),
+    loadItinerary: () => loadItinerary(trip),
     placesApiKey: GOOGLE_MAPS_API_KEY || undefined,
   }
   const seenText: string[] = conversation.flatMap((m) => m.parts.map((part) => ('text' in part ? part.text : '')))
