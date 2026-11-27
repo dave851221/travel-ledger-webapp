@@ -500,7 +500,10 @@ BEGIN
             NEW.deleted_at := now();
         END IF;
     ELSE
-        NEW.created_by := OLD.created_by;
+        -- 使用者改不了是誰記的；帳號被刪掉時（外鍵 ON DELETE SET NULL，以資料表擁有者身分執行）才會變成空的
+        IF NOT (NEW.created_by IS NULL AND current_user NOT IN ('authenticated', 'anon')) THEN
+            NEW.created_by := OLD.created_by;
+        END IF;
         NEW.created_at := OLD.created_at;
         NEW.trip_id    := OLD.trip_id;   -- 帳不能被搬到別的旅程
         IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN

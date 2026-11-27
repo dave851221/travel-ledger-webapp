@@ -6,6 +6,7 @@ import { ui } from '../../components/ui';
 import { type LoginInfo, providerLabel } from './loginInfo';
 import { lineLoginAvailable, startLineLogin } from './lineLogin';
 import { linkGoogle } from './session';
+import DeleteAccount from './DeleteAccount';
 
 /**
  * 開放版「我的帳號」：這個帳號用哪些方式登入，並可以把 LINE／Google 連到同一個帳號。
@@ -82,7 +83,7 @@ const AccountModal: React.FC<{ isOpen: boolean; onClose: () => void; onSignOut: 
             )}
             <p className={ui.hint}>
               連結後，用 LINE 或 Google 登入都是這個帳號，看到一樣的旅程。
-              已經自己用過的另一個帳號沒辦法合併進來。
+              如果那個 LINE／Google 已經自己登入過、變成另一個帳號，要先用它登入並刪除那個帳號，才能連到這裡。
             </p>
           </div>
         )}
@@ -92,6 +93,7 @@ const AccountModal: React.FC<{ isOpen: boolean; onClose: () => void; onSignOut: 
         <button type="button" onClick={onSignOut} className={`${ui.btnSecondary} w-full text-neg`}>
           <LogOut size={16} />登出
         </button>
+        <DeleteAccount onDeleted={onSignOut} />
       </div>
     </Modal>
   );
