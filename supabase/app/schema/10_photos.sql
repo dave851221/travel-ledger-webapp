@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS app.trip_photos (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS trip_photos_trip_idx ON app.trip_photos (trip_id);
+-- 檔案大小：後台看 R2 用了多少（免費 10 GB）
+ALTER TABLE app.trip_photos ADD COLUMN IF NOT EXISTS bytes BIGINT NOT NULL DEFAULT 0 CHECK (bytes >= 0);
 ALTER TABLE app.trip_photos ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON app.trip_photos FROM anon, authenticated;
 GRANT ALL ON app.trip_photos TO service_role;
