@@ -49,7 +49,7 @@ serve(async (req) => {
   if (!auth.ok) return json({ error: auth.error }, auth.status)
   // 開放版由登入決定是誰，不再相信前端送的名字（見 auth.ts）
   if (auth.memberName) body.memberName = auth.memberName
-  const scope = { db, trip: auth.trip }
+  const scope = { db, trip: auth.trip, userId: auth.userId }
 
   const started = Date.now()
   try {

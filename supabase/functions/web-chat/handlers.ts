@@ -59,6 +59,8 @@ import { runTool } from "../_shared/tools/registry.ts"
 import type { PreparedExpense, ToolArgs, ToolContext } from "../_shared/tools/types.ts"
 import { countryForTimezone } from "../_shared/tools/weather.ts"
 import type { TripRow } from "../_shared/types.ts"
+import { consumeAi, quotaReply, userActor, type AiKind } from "../_shared/quota.ts"
+import { PERSONA } from "../_shared/assistant/persona.ts"
 import {
   AI_DEADLINE_MS,
   AI_PROVIDER,
@@ -68,6 +70,7 @@ import {
   DRAFT_RETRY_MIN_MS,
   GEMINI_API_KEY,
   GOOGLE_MAPS_API_KEY,
+  IS_PUBLIC,
   RECEIPTS_BUCKET,
   WEB_SEARCH_MAX_USES,
   WEBAPP_URL,
@@ -135,6 +138,15 @@ export interface ActionReply {
 export interface ChatScope {
   db: SupabaseClient
   trip: TripRow
+  /** 開放版：登入的帳號（AI 次數記在這裡） */
+  userId?: string
+}
+
+/** 開放版：叫 AI 前先扣這趟的次數；扣不到回一句說明（舊版一律放行） */
+async function chargeAi(scope: ChatScope, kind: AiKind): Promise<ChatReply | null> {
+  if (!IS_PUBLIC) return null
+  const r = await consumeAi(scope.db, scope.trip.id, userActor(scope.userId ?? 'unknown'), kind)
+  return r.ok ? null : { blocks: [{ type: 'text', text: quotaReply(r) }], history: [] }
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -163,7 +175,12 @@ function toShort(e: { description: string; amount: number; currency: string; dat
   return { d: e.description, a: e.amount, c: e.currency, dt: e.date, cat: e.category, p: e.payer_data, s: e.split_details }
 }
 
-function photoUrl(db: SupabaseClient, path: string): string {
+/** 讓 AI 讀照片的網址：舊版公開 bucket；開放版私有 bucket，給 10 分鐘的簽名網址 */
+async function photoUrl(db: SupabaseClient, path: string): Promise<string> {
+  if (IS_PUBLIC) {
+    const { data } = await db.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, 600)
+    return data?.signedUrl ?? ''
+  }
   return db.storage.from(RECEIPTS_BUCKET).getPublicUrl(path).data.publicUrl
 }
 
@@ -207,7 +224,9 @@ function replyTargetNote(target: ReplyTarget | null, drafts: WebDraft[]): string
 export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise<ChatReply> {
   const { db, trip } = scope
   const text = cleanText(req.text)
-  if (!text) return { blocks: [{ type: 'text', text: '想記什麼或問什麼都可以直接打給我 🥚' }], history: [] }
+  if (!text) return { blocks: [{ type: 'text', text: `想記什麼或問什麼都可以直接打給我 ${PERSONA.emoji}` }], history: [] }
+  const blocked = await chargeAi(scope, 'text')
+  if (blocked) return blocked
 
   const memberName = cleanMemberName(req.memberName)
   const drafts = cleanDrafts(req.drafts, trip.id)
@@ -233,7 +252,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
     ?? outstanding.find(d => d.photoIds.length > 0) ?? null
   let attachedPhoto = false
   if (photoDraft) {
-    const part = await fetchPhotoPart(photoUrl(db, photoDraft.photoIds[0]))
+    const part = await fetchPhotoPart(await photoUrl(db, photoDraft.photoIds[0]))
     if (part) {
       const lastTurn = conversation[conversation.length - 1]
       lastTurn.parts.unshift({ text: photoDraftHint(photoDraft) })
@@ -426,7 +445,7 @@ async function analyzeReceipt(
     const d = photoDraft.exp
     const draftLabel = `${d.d ?? ''} ${d.a ?? ''} ${d.c ?? ''}`.trim()
     try {
-      const content = await analyzeReceiptPhoto(ai, photoDraft.photoIds.map(p => photoUrl(db, p)), question, draftLabel)
+      const content = await analyzeReceiptPhoto(ai, await Promise.all(photoDraft.photoIds.map(p => photoUrl(db, p))), question, draftLabel)
       return { text: `🔍 ${draftLabel}（還沒存）\n\n${content}`, history: `[收據分析 草稿 ${photoDraft.nonce}] ${content}` }
     } catch (err) {
       console.error('[ANALYZE_DRAFT_PHOTO_ERROR]', err)
@@ -448,7 +467,7 @@ async function analyzeReceipt(
     return { text: '😅 找不到符合描述的收據照片，請試著描述得更詳細一點，例如加上日期、店名或金額。', history: '找不到符合描述的收據' }
   }
   try {
-    const urls = (chosen.photo_urls ?? []).map((path: string) => photoUrl(db, path))
+    const urls = await Promise.all((chosen.photo_urls ?? []).map((path: string) => photoUrl(db, path)))
     const content = await analyzeReceiptPhoto(ai, urls, question, label(chosen))
     // 開頭標明分析的是哪一筆，使用者才看得出有沒有挑錯
     return {
@@ -481,6 +500,11 @@ export async function handlePhoto(scope: ChatScope, req: ChatRequest): Promise<C
     return { blocks: [{ type: 'text', text: '🔒 此旅程已封存，無法新增支出（照片未儲存）。' }], history: [] }
   }
   const memberName = cleanMemberName(req.memberName)
+  const blocked = await chargeAi(scope, 'receipt')
+  if (blocked) {
+    await removeChatPhotos(db, trip.id, [path])
+    return blocked
+  }
   try {
     const { data: file, error } = await db.storage.from(RECEIPTS_BUCKET).download(path)
     if (error || !file) throw error ?? new Error('Photo not found')

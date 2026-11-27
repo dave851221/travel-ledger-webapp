@@ -4,23 +4,12 @@ import { supabase } from '../../api/supabase';
 import Modal from '../../components/Modal';
 import { ui } from '../../components/ui';
 import { clearUserStorage } from '../../config/mode';
-import { RECEIPTS_BUCKET } from '../../utils/storage';
+import { removeTripPhotos } from '../../utils/tripPhotos';
 
 interface TripRef { id: string; name: string; owner?: boolean }
 interface Preview { delete: TripRef[]; leave: TripRef[] }
 
 const CONFIRM_WORD = '刪除帳號';
-
-/** 一趟旅程的照片全部刪掉（帳號刪掉之後就沒有權限了，所以要先刪） */
-async function removeTripPhotos(tripId: string): Promise<void> {
-  const prefix = `expenses/${tripId}`;
-  for (;;) {
-    const { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).list(prefix, { limit: 100 });
-    if (error || !data || data.length === 0) return;
-    const { error: rmErr } = await supabase.storage.from(RECEIPTS_BUCKET).remove(data.map(f => `${prefix}/${f.name}`));
-    if (rmErr) return;
-  }
-}
 
 /**
  * 刪除帳號（David 2026-11-27）：LINE／Google 已經自己變成另一個帳號時，刪掉它就能連到主帳號。
