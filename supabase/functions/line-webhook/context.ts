@@ -10,7 +10,7 @@ import { supabase } from "./db.ts"
 import { getChatMemberName } from "./line-api.ts"
 import { getQuickReply } from "./messages.ts"
 import { getOutstandingDrafts, type OutstandingDraft } from "./drafts.ts"
-import { FOLLOWUP_WINDOW_MS } from "./config.ts"
+import { FOLLOWUP_WINDOW_MS, IS_PUBLIC } from "./config.ts"
 import { groupModeOf } from "./guards.ts"
 import { getTodayString, getTripTimezone, isPendingExpired, runInBackground } from "./util.ts"
 import type { GroupMode, QuickReply, SourceType, UserStateRow, WebhookEvent } from "./types.ts"
@@ -37,6 +37,11 @@ export interface EventContext {
   memberName: string
   /** 群組才標記「由 X 記錄」，一對一是 null —— 一對一標了只是贅述 */
   speakerLabel: string | null
+  /**
+   * 開放版：發言者的網站帳號 id（LINE 已連到網站帳號、而且是這趟的成員才有）。
+   * 有的話 memberName 就是他在這趟的名字，不用猜 LINE 顯示名稱；AI 次數也記在這個帳號上。
+   */
+  accountUserId: string | null
   userState: UserStateRow
   isBound: boolean
   isBinding: boolean
@@ -145,10 +150,6 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
     // 那只是拿來餵 prompt，寫個假名字反而會誤導 AI 去對應成員。
     memberName = fetchedName || (isGroup ? `User_${speakerUserId.substring(0, 8)}` : '未知');
   }
-  // 一對一的回覆不需要「由 X 記錄」這種贅述，只有群組才標記發言者。
-  // 但 memberName 兩邊都要有：AI 靠它把「我付的」對應到成員（見 H9）。
-  const speakerLabel = isGroup ? memberName : null
-
   let userState = stateResult.data
   if (!userState) {
     console.log(`[DB] Registering new state for sourceId: ${sourceId}`)
@@ -170,6 +171,20 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
   //    新旅程的密碼驗證成功了才換過去，中途放棄不該變成「沒綁定」。
   const isBinding = !!userState?.pending_trip_id
   const isBound = !!userState?.current_trip_id
+
+  // 開放版：LINE 帳號連到網站帳號、而且是這趟的成員 → 用他在這趟的名字（帳上的名字），
+  // 不用拿 LINE 顯示名稱去猜是哪位成員。查不到就照舊用顯示名稱。
+  let accountUserId: string | null = null
+  if (IS_PUBLIC && isBound && needsMemberName && speakerUserId) {
+    const { data: member } = await supabase.rpc('line_member', {
+      p_line_user_id: speakerUserId, p_trip_id: userState.current_trip_id,
+    })
+    if (member?.member_name) memberName = member.member_name
+    accountUserId = member?.user_id ?? null
+  }
+  // 一對一的回覆不需要「由 X 記錄」這種贅述，只有群組才標記發言者。
+  // 但 memberName 兩邊都要有：AI 靠它把「我付的」對應到成員（見 H9）。
+  const speakerLabel = isGroup ? memberName : null
   const groupMode = groupModeOf(userState)
   const mentionRequired = groupMode !== 'all'
   // last_active_at 原本是從沒被更新過的死欄位（M1 順手處理）。
@@ -196,6 +211,7 @@ export async function buildEventContext(event: WebhookEvent): Promise<EventConte
     eventTimestamp,
     memberName,
     speakerLabel,
+    accountUserId,
     userState: userState as UserStateRow,
     isBound,
     isBinding,

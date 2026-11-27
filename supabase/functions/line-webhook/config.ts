@@ -9,9 +9,22 @@
 // ============================================================
 
 import type { GroupMode } from "./types.ts"
+import { isPublicApp } from "../_shared/appMode.ts"
 
-export const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
-export const LINE_CHANNEL_SECRET = Deno.env.get('LINE_CHANNEL_SECRET') || ''
+/**
+ * 開放版（旅行喵喵，tlb-line-webhook）與舊版（耀西）共用這份程式，差在下面這幾個設定。
+ * 見 _shared/appMode.ts：由進入點決定，不是環境變數（secrets 是整個 Supabase 專案共用的）。
+ */
+export const IS_PUBLIC = isPublicApp()
+
+export const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get(IS_PUBLIC ? 'TLB_BOT_ACCESS_TOKEN' : 'LINE_CHANNEL_ACCESS_TOKEN') || ''
+export const LINE_CHANNEL_SECRET = Deno.env.get(IS_PUBLIC ? 'TLB_BOT_CHANNEL_SECRET' : 'LINE_CHANNEL_SECRET') || ''
+/** 資料在哪個 schema：舊版 public，開放版 app（表名相同） */
+export const DB_SCHEMA = IS_PUBLIC ? 'app' : 'public'
+/** 綁定的旅程不見了（被刪掉）時的說法 */
+export const TRIP_GONE_MSG = IS_PUBLIC
+  ? '❌ 找不到這個旅程，可能已被刪除。請重新輸入「綁定」選一趟。'
+  : '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。'
 export const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || ''
 export const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || ''
 /**
@@ -27,18 +40,22 @@ export const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') || ''
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 
-export const WEBAPP_URL = Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp'
+export const WEBAPP_URL = IS_PUBLIC
+  ? (Deno.env.get('TLB_WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp/next')
+  : (Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp')
 /**
  * LIFF app 的 ID（不是密鑰）。有值時卡片按鈕改開 https://liff.line.me/<ID>，
  * LIFF 頁面才能用 liff.sendMessages 代送「✅ 已記帳」換機器人的免費回覆（_shared/liffEcho.ts）。
  * 預設是正式的 LIFF app（Endpoint = GitHub Pages）；secret LIFF_ID 設成空字串＝照舊直接開網頁。要跟前端 src/utils/liff.ts 的 LIFF_ID 一致。
  */
-export const LIFF_ID = Deno.env.get('LIFF_ID') ?? '2012713943-msELyw4c'
+// 開放版還沒有 LIFF：卡片上的編輯按鈕不出現，改用打字修改或到網頁上改
+export const LIFF_ID = IS_PUBLIC ? '' : (Deno.env.get('LIFF_ID') ?? '2012713943-msELyw4c')
 
 
 // 收據照片的 bucket。路徑慣例 expenses/{tripId}/{檔名}，
 // supabase/scripts/delete_trip.sql 依賴這個前綴清理照片，勿隨意更名。
-export const RECEIPTS_BUCKET = 'travel-images'
+// 開放版是私有 bucket：卡片上的照片用簽名網址（drafts.ts 的 photoViewUrls）
+export const RECEIPTS_BUCKET = IS_PUBLIC ? 'app-images' : 'travel-images'
 
 // AI 失敗與改用備援時的說法，網頁聊天也用同一份（_shared/assistant/notices.ts）
 export { AI_BUSY_MSG, AI_QUOTA_MSG, aiUnavailableMessage, FALLBACK_NOTICES, RATE_LIMIT_MSG } from "../_shared/assistant/notices.ts"

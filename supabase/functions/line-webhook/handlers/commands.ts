@@ -22,10 +22,14 @@ import {
   EDIT_LIST_KEYWORDS,
   GROUP_MODE_COMMANDS,
   HELP_KEYWORDS,
+  IS_PUBLIC,
   QUICK_CMD_KEYWORDS,
+  TRIP_GONE_MSG,
   UNDO_KEYWORDS,
   WEBAPP_URL,
 } from "../config.ts"
+import { PERSONA } from "../../_shared/assistant/persona.ts"
+import { PUBLIC_BIND_KEYWORDS, replyBindPicker } from "./bind-public.ts"
 import { type EventContext, isInFollowupWindow, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import { cancelDraft, supersedeAllDrafts } from "../drafts.ts"
@@ -90,7 +94,10 @@ export function routeTextMessage(
   console.log(`[USER_TEXT] "${userText}"`)
 
   const isMentioned = mentionees?.some((m: Mentionee) => m.isSelf === true)
-  const isIdCommand = userText.toUpperCase().startsWith('ID:') || userText.toUpperCase().startsWith('ID：')
+  // 開放版沒有代碼，「綁定」就是綁定指令（bind-public.ts）
+  const isIdCommand = IS_PUBLIC
+    ? PUBLIC_BIND_KEYWORDS.includes(userText)
+    : userText.toUpperCase().startsWith('ID:') || userText.toUpperCase().startsWith('ID：')
   const isUndoKeyword = UNDO_KEYWORDS.includes(userText)
   const isDeleteListKeyword = DELETE_LIST_KEYWORDS.includes(userText)
   const isEditListKeyword = EDIT_LIST_KEYWORDS.includes(userText)
@@ -105,7 +112,9 @@ export function routeTextMessage(
   // 只拿掉「提及機器人」的那幾段，其他人的 @名字要留著（M16）——
   // 以前一律刪掉所有 @開頭的詞，「@耀西 @小明 你付的晚餐 300」的付款人整個消失（L14）。
   const withoutSelfMention = stripSelfMentions(rawText, mentionees)
-  const startsWithYoshi = withoutSelfMention.startsWith('耀西')
+  // 叫它的字（耀西／旅行喵喵、喵喵）見 _shared/assistant/persona.ts
+  const wakeWord = PERSONA.wakeWords.find(w => withoutSelfMention.startsWith(w))
+  const startsWithYoshi = !!wakeWord
 
   // 群組觸發邏輯：
   //   - 全回應模式（mention_required=false）→ 處理所有訊息
@@ -143,7 +152,7 @@ export function routeTextMessage(
     return null
   }
 
-  const cleanText = withoutSelfMention.replace(/^耀西\s*/, '').trim()
+  const cleanText = (wakeWord ? withoutSelfMention.slice(wakeWord.length) : withoutSelfMention).trim()
   if (trigger !== 'direct') console.log(`[ROUTE] Group message accepted as ${trigger}`)
   return { rawText, cleanText, isMentioned: !!isMentioned, startsWithYoshi, trigger }
 }
@@ -166,10 +175,12 @@ if (HELP_KEYWORDS.includes(cleanText)) {
 
 // 0b. 只是被叫到（純提及或只打「耀西」）→ 一句話 + 按鈕就好。
 //     大多數時候使用者只是想看有哪些按鈕可以按，不是要讀整篇說明。
-if (cleanText === '' || cleanText === '耀西') {
+if (cleanText === '' || PERSONA.wakeWords.includes(cleanText)) {
   const shortMsg = isBound
-    ? 'Yoshi! 🥚 需要什麼？直接打「晚餐 300」就能記帳，或用下面的按鈕。'
-    : 'Yoshi! 🥚 請先輸入「ID:旅程代碼」來連結旅程。'
+    ? `${PERSONA.catchphrase} ${PERSONA.emoji} 需要什麼？直接打「晚餐 300」就能記帳，或用下面的按鈕。`
+    : IS_PUBLIC
+      ? `${PERSONA.catchphrase} ${PERSONA.emoji} 請先輸入「綁定」，選要記帳的旅程。`
+      : 'Yoshi! 🥚 請先輸入「ID:旅程代碼」來連結旅程。'
   await replyMessage(replyToken, [{
     type: 'text',
     text: shortMsg,
@@ -178,8 +189,14 @@ if (cleanText === '' || cleanText === '耀西') {
   return true
 }
 
-// 1. ID 綁定 / 切換旅程
-if (cleanText.toUpperCase().startsWith('ID:') || cleanText.toUpperCase().startsWith('ID：')) {
+// 1a. 開放版：「綁定」「切換旅程」→ 列出這個人可以綁的旅程（按了才綁，見 bind-public.ts）
+if (IS_PUBLIC && PUBLIC_BIND_KEYWORDS.includes(cleanText)) {
+  await replyBindPicker(ctx)
+  return true
+}
+
+// 1. ID 綁定 / 切換旅程（舊版）
+if (!IS_PUBLIC && (cleanText.toUpperCase().startsWith('ID:') || cleanText.toUpperCase().startsWith('ID：'))) {
   const linebotId = cleanText.substring(3).trim().toUpperCase()
   const { data: mapping } = await supabase.from('line_trip_id_mapping').select('trip_id').eq('linebot_id', linebotId).maybeSingle()
   if (mapping) {
@@ -250,7 +267,8 @@ if (isBound && (cleanText === '斷開' || cleanText === '切換旅程')) {
     .eq('line_user_id', sourceId)
   // 沒有旅程可以存進去了，留著的卡片按下去只會出錯（M13）
   await supersedeAllDrafts(sourceId)
-  await replyMessage(replyToken, [{ type: 'text', text: '❌ 已解除連接。如需重新連接，請輸入 ID:您的代碼', quickReply: getQuickReply(false) }], sourceId); return true
+  const reconnect = IS_PUBLIC ? '如需重新連接，請輸入「綁定」' : '如需重新連接，請輸入 ID:您的代碼'
+  await replyMessage(replyToken, [{ type: 'text', text: `❌ 已解除連接。${reconnect}`, quickReply: getQuickReply(false) }], sourceId); return true
 }
 
 // 3. 切換群組回應模式（提及／全回應／靜音，見 types.ts 的 GroupMode）
@@ -273,13 +291,15 @@ if (isBound && (cleanText === '設定?' || cleanText === '設定？')) {
   const { data: prefTrip } = await supabase.from('trips')
     .select('ai_preference').eq('id', userState.current_trip_id).maybeSingle()
   if (!prefTrip) {
-    await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+    await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
     return true
   }
   const config = prefTrip.ai_preference
   const msg = config
-    ? `⚙️ 這趟旅程目前的 AI 記帳偏好：\n\n${config}\n\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）\n\n要修改請按下方「⚙️ 記帳偏好」，或輸入「設定: 新的內容」。`
-    : '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n按下方「⚙️ 記帳偏好」開啟編輯畫面，或輸入「設定: 預設由我付款，大家均分」。'
+    ? `⚙️ 這趟旅程目前的 AI 記帳偏好：\n\n${config}\n\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）\n\n${IS_PUBLIC ? '要修改請輸入「設定: 新的內容」，或到網頁的旅程設定修改。' : '要修改請按下方「⚙️ 記帳偏好」，或輸入「設定: 新的內容」。'}`
+    : IS_PUBLIC
+      ? '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n輸入「設定: 預設由我付款，大家均分」，或到網頁的旅程設定填寫。'
+      : '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n按下方「⚙️ 記帳偏好」開啟編輯畫面，或輸入「設定: 預設由我付款，大家均分」。'
   await replyMessage(replyToken, [{
     type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
   }], sourceId)
@@ -537,7 +557,7 @@ if (isBinding) {
   if (cleanText === '今日支出' || cleanText === '今天支出') {
     const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, default_currency, precision_config').eq('id', tripId).single()
     if (!trip) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return true
     }
     const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
@@ -570,7 +590,7 @@ if (isBinding) {
   if (cleanText === '本週支出' || cleanText === '近期支出') {
     const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency, precision_config').eq('id', tripId).single()
     if (!trip) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return true
     }
     const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
@@ -595,7 +615,7 @@ if (isBinding) {
   if (cleanText === '本月支出') {
     const { data: trip } = await supabase.from('trips').select('name, base_currency, rates, default_currency, precision_config').eq('id', tripId).single()
     if (!trip) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return true
     }
     const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
@@ -622,7 +642,7 @@ if (isBinding) {
     // 這裡取整列（而不是列舉欄位）是因為工具層要的是一個完整的 TripRow
     const { data: trip } = await supabase.from('trips').select('*').eq('id', tripId).single()
     if (!trip) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return true
     }
     // 餘額、匯率換算與結清路徑全部走共用工具層（_shared/tools/balance.ts），
@@ -663,7 +683,7 @@ if (isBinding) {
   if (cleanText === '旅程總覽') {
     const { data: trip } = await supabase.from('trips').select('name, members, base_currency, rates, is_archived, precision_config').eq('id', tripId).single()
     if (!trip) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return true
     }
     const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>

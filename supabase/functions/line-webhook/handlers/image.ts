@@ -17,12 +17,13 @@
 
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts"
 import { recognizeReceipt } from "../../_shared/assistant/receipt.ts"
-import { aiUnavailableMessage, RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
+import { aiUnavailableMessage, IS_PUBLIC, RECEIPTS_BUCKET, TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
 import { type EventContext, extendFollowup, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
-import { storePendingExpense } from "../drafts.ts"
+import { photoViewUrl, storePendingExpense } from "../drafts.ts"
 import { ai } from "../ai.ts"
 import { downloadLineContent, replyMessage, showLoading } from "../line-api.ts"
+import { chargeAi, photoQuotaOk } from "../quota.ts"
 import { buildDraftLiffUrl, buildExpenseCard, buildItemsLiffUrl, canGoSolo, canSplitByItems } from "../messages.ts"
 import { runInBackground } from "../util.ts"
 import type { ImageMessageEvent } from "../types.ts"
@@ -41,7 +42,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
   }
 
   if (!userState?.current_trip_id) {
-    await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程，再傳送收據照片喔！' }], sourceId)
+    await replyMessage(replyToken, [{ type: 'text', text: IS_PUBLIC ? '👋 請先輸入「綁定」選旅程，再傳送收據照片喔！' : '👋 請先輸入 ID:代碼 來連結旅程，再傳送收據照片喔！' }], sourceId)
     return
   }
 
@@ -59,7 +60,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
     if (!lineRes.ok) throw new Error('Failed to download image from LINE')
 
     if (!trip) {
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return
     }
     // 照片還沒上傳，直接回覆就好，不需要清理 Storage。
@@ -73,6 +74,15 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       return
     }
 
+    // 開放版：照片張數與 AI 次數（照片還沒上傳，不用清理）
+    if (!(await photoQuotaOk(tripId))) {
+      await replyMessage(replyToken, [{
+        type: 'text', text: '這趟旅程的照片張數已經滿了，這張沒有存。可以直接打字記帳，例如「晚餐 1200」。', quickReply: boundQR,
+      }], sourceId)
+      return
+    }
+    if (!(await chargeAi(ctx, tripId, 'receipt'))) return
+
     const imageBuffer = await lineRes.arrayBuffer()
 
     console.log(`[STORAGE] Uploading to: ${filePath}`)
@@ -81,7 +91,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
     })
     if (uploadErr) throw uploadErr
 
-    const { data: { publicUrl } } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(filePath)
+    const publicUrl = await photoViewUrl(filePath, tripId)
     const base64Image = encodeBase64(new Uint8Array(imageBuffer))
     const today = tripToday(trip)
 
@@ -162,7 +172,7 @@ export async function handleImage(ctx: EventContext, event: ImageMessageEvent): 
       altText: unidentified
         ? '照片記帳（請填寫內容與金額）'
         : needsAmount ? `照片記帳（還沒填金額）: ${expense.description}` : `收據辨識預覽: ${expense.description}`,
-      heroUrl: publicUrl,
+      heroUrl: publicUrl || null,
       nonce, webUrl, liffUrl, needsAmount, unidentified,
       soloButton: canGoSolo(expense, trip.members),
       itemsUrl: canSplitByItems(items, trip.members) ? buildItemsLiffUrl(trip.id, nonce, sourceId) : undefined,

@@ -18,12 +18,12 @@ import {
 } from "../../_shared/tools/expenses.ts"
 import { resolveMember } from "../../_shared/validate.ts"
 import { buildSavedText } from "../../_shared/savedText.ts"
-import { RECEIPTS_BUCKET, WEBAPP_URL } from "../config.ts"
+import { RECEIPTS_BUCKET, TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
 import {
   getPendingExpense,
-  photoPublicUrl,
+  photoViewUrl,
   releaseNonce,
   storePendingExpense,
 } from "../drafts.ts"
@@ -214,7 +214,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       expense: curExpense,
       title: `🔍 已改用 ${chosen}`,
       altText: `確認記帳: ${curExpense.description}`,
-      heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], tripIdForCur) : null,
+      heroUrl: photoIds.length > 0 ? (await photoViewUrl(photoIds[0], tripIdForCur)) || null : null,
       nonce: newNonce,
       webUrl: `${WEBAPP_URL}/#/trip/${tripIdForCur}/dashboard`,
       liffUrl: buildDraftLiffUrl(tripIdForCur, newNonce, sourceId),
@@ -310,7 +310,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
         expense: soloExpense,
         title: `👤 改成只算 ${me}`,
         altText: `確認記帳: ${soloExpense.description}`,
-        heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], tripIdForMe) : null,
+        heroUrl: photoIds.length > 0 ? (await photoViewUrl(photoIds[0], tripIdForMe)) || null : null,
         nonce: newNonce,
         webUrl: `${WEBAPP_URL}/#/trip/${tripIdForMe}/dashboard`,
         liffUrl: buildDraftLiffUrl(tripIdForMe, newNonce, sourceId),
@@ -405,7 +405,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     const updTrip = guessTrip?.id === updTripId ? guessTrip : await fetchTrip(updTripId)
     if (!updTrip) {
       // 旅程被後台刪掉了，這張卡再也套不上去 —— 與 save 一致，鎖不放
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId)
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId)
       return
     }
 
@@ -563,7 +563,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
     if (!trip) {
       // 旅程可能已被刪除（見 docs/DB_MAINTENANCE.md），此時舊卡片的按鈕不該讓整個函式崩掉。
       // ⚠️ 這一路與「已封存」都刻意**不** releaseNonce：那張卡片本來就再也存不進去了。
-      await replyMessage(replyToken, [{ type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。' }], sourceId);
+      await replyMessage(replyToken, [{ type: 'text', text: TRIP_GONE_MSG }], sourceId);
       return;
     }
 
@@ -590,7 +590,7 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
       if (saveResult.reason === 'archived' || saveResult.reason === 'trip_missing') {
         const text = saveResult.reason === 'archived'
           ? '❌ 此旅程已封存，無法新增支出。'
-          : '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。'
+          : TRIP_GONE_MSG
         await replyMessage(replyToken, [{ type: 'text', text }], sourceId)
         return
       }
