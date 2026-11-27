@@ -7,6 +7,7 @@ import { hasItinerary } from '../features/itinerary/registry';
 import ExpenseModal from '../components/ExpenseModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import SettingsModal from '../components/SettingsModal';
+import TripUsage from '../features/quota/TripUsage';
 import Modal from '../components/Modal';
 import { ui } from '../components/ui';
 import { getLocalDateString } from '../utils/date';
@@ -449,6 +450,9 @@ const Dashboard: React.FC = () => {
               onOpenTrash={() => changeTab('recycle')}
               showToast={showToast}
               summary={<div className="xl:hidden">{ticket('var(--app-bg)')}</div>}
+              usage={IS_PUBLIC ? (
+                <TripUsage tripId={trip.id} compact refreshKey={allExpenses.length} onOpen={() => setIsSettingsModalOpen(true)} />
+              ) : null}
             />
           </div>
 

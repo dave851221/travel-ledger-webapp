@@ -51,7 +51,8 @@
 - 每趟的上限在 `app.plan_limits`（free／paid），加量在 `trips.extra_*`；只有 service role 能改。
 - 記帳筆數由 trigger 擋（新增、從垃圾桶救回、把結清改成一般帳都算），照片由 storage 上傳政策擋。
 - AI：Edge Function 叫 AI **之前**一定要先 `consumeAi()`（`_shared/quota.ts`），不過就不叫；
-  每人每分鐘／每天上限、全站每日上限與總開關在 `app.ai_settings`（`enabled = false` 立刻全部停）。
+  只限「每趟」的次數，不限每個人；總開關在 `app.quota_settings.ai_enabled`（設成 false 立刻全部停）。
+- 建立旅程：沒付過費的帳號最多建立 5 趟（`app.trip_creations` 記錄，刪掉旅程也不會空出名額），`app.paid_accounts` 裡的帳號不限。
 
 ## 上線時要做的設定（還沒做）
 

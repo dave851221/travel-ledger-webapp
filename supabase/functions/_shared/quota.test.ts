@@ -18,7 +18,7 @@ describe('consumeAi', () => {
 
 describe('quotaReply', () => {
   it('says something for every reason', () => {
-    for (const reason of ['trip_limit', 'rate_minute', 'rate_day', 'ai_disabled', 'no_trip', 'error'] as const) {
+    for (const reason of ['trip_limit', 'ai_disabled', 'no_trip', 'error'] as const) {
       expect(quotaReply({ ok: false, reason, limit: 30 }).length).toBeGreaterThan(5)
     }
     expect(quotaReply({ ok: false, reason: 'trip_limit', limit: 30 })).toContain('30')

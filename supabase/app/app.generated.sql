@@ -1003,10 +1003,12 @@ CREATE POLICY app_images_delete ON storage.objects
 --
 -- 規則（David 2026-11-26／27）：
 --   · 免費、付費旅程都有上限，只設用量、不設有效期。數字放在 app.plan_limits，改數字不用改程式
---     （規劃文件：免費 80 筆／30 次 AI／30 張照片；解鎖 600／300／300；加量包加在 trips.extra_*）
+--     （免費 50 筆／15 次 AI／15 張照片；解鎖 600／300／300；加量包加在 trips.extra_*）
 --   · AI 次數 LINE 與網頁共用；被 AI 拒絕的呼叫也算（真的花了錢）
---   · 每個人（帳號或 LINE 使用者）每分鐘、每天有上限，避免有人狂打字燒掉整趟的額度
---   · 全站每天的 AI 次數超過門檻就整個暫停（app.ai_settings），也可以手動關掉（kill switch）
+--   · 不限每個人每分鐘／每天的次數，只用「每趟」當上限（David 2026-11-27）
+--   · 防止一直開新的免費旅程刷 AI：從沒付過費的帳號最多「建立」5 趟（刪掉的也算；加入別人的不算），
+--     付過費（app.paid_accounts）就不限
+--   · app.quota_settings.ai_enabled 是總開關（緊急時一鍵停掉所有 AI），平常不會擋
 --   · 上限只在資料庫判斷，前端只負責顯示（docs/SECURITY.md）
 -- ============================================================
 
@@ -1019,7 +1021,7 @@ CREATE TABLE IF NOT EXISTS app.plan_limits (
 );
 
 INSERT INTO app.plan_limits (plan, max_entries, max_ai_calls, max_photos) VALUES
-    ('free', 80, 30, 30),
+    ('free', 50, 15, 15),
     ('paid', 600, 300, 300)
 ON CONFLICT (plan) DO NOTHING;
 
@@ -1033,15 +1035,33 @@ ALTER TABLE app.trips ADD CONSTRAINT trips_plan_fkey FOREIGN KEY (plan) REFERENC
 -- 成員看得到自己旅程的方案（顯示用量），但改不了（UPDATE 的欄位清單在 01_tables 沒有這幾個）
 GRANT SELECT (plan, extra_entries, extra_ai_calls, extra_photos) ON app.trips TO authenticated;
 
--- ── 全站的 AI 開關與每日門檻（只有一列）────────────────────────
-CREATE TABLE IF NOT EXISTS app.ai_settings (
+-- ── 全站設定（只有一列）───────────────────────────────────────
+CREATE TABLE IF NOT EXISTS app.quota_settings (
     id                 BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
-    enabled            BOOLEAN NOT NULL DEFAULT TRUE,     -- kill switch：FALSE 時所有 AI 立刻停
-    global_daily_calls INTEGER NOT NULL DEFAULT 2000,     -- 全站一天的 AI 次數上限（約 NT$150）
-    user_per_minute    INTEGER NOT NULL DEFAULT 6,
-    user_per_day       INTEGER NOT NULL DEFAULT 80
+    ai_enabled         BOOLEAN NOT NULL DEFAULT TRUE,  -- 總開關：FALSE 時所有 AI 立刻停
+    free_trip_creations INTEGER NOT NULL DEFAULT 5 CHECK (free_trip_creations >= 0)
 );
-INSERT INTO app.ai_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
+INSERT INTO app.quota_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
+
+-- 付過費的帳號（付款流程寫入；建立旅程不設上限）
+CREATE TABLE IF NOT EXISTS app.paid_accounts (
+    user_id       UUID        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    first_paid_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 每個帳號建立過幾趟旅程（旅程刪掉這裡也留著，不然刪了再建就能一直拿新的免費額度）
+CREATE TABLE IF NOT EXISTS app.trip_creations (
+    id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id    UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    trip_id    UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trip_creations_user_idx ON app.trip_creations (user_id);
+-- 上線前就建好的旅程也算進去
+INSERT INTO app.trip_creations (user_id, trip_id, created_at)
+SELECT t.created_by, t.id, t.created_at FROM app.trips t
+WHERE t.created_by IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM app.trip_creations c WHERE c.trip_id = t.id);
 
 -- ── 每一次 AI 呼叫的紀錄 ───────────────────────────────────────
 -- actor：誰叫的，'user:<uuid>'（登入帳號）或 'line:<userId>'（群組裡還沒登入過的人）。
@@ -1058,10 +1078,74 @@ CREATE INDEX IF NOT EXISTS ai_calls_actor_idx ON app.ai_calls (actor, at);
 CREATE INDEX IF NOT EXISTS ai_calls_at_idx    ON app.ai_calls (at);
 
 ALTER TABLE app.plan_limits ENABLE ROW LEVEL SECURITY;
-ALTER TABLE app.ai_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.quota_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.paid_accounts  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.trip_creations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.ai_calls    ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON app.plan_limits, app.ai_settings, app.ai_calls FROM anon, authenticated;
-GRANT ALL ON app.plan_limits, app.ai_settings, app.ai_calls TO service_role;
+REVOKE ALL ON app.plan_limits, app.quota_settings, app.paid_accounts, app.trip_creations, app.ai_calls FROM anon, authenticated;
+GRANT ALL ON app.plan_limits, app.quota_settings, app.paid_accounts, app.trip_creations, app.ai_calls TO service_role;
+
+-- ── 建立旅程的上限 ─────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION app.trip_allowance(p_user_id UUID)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT jsonb_build_object(
+        'paid', EXISTS (SELECT 1 FROM app.paid_accounts WHERE user_id = p_user_id),
+        'created', (SELECT count(*)::int FROM app.trip_creations WHERE user_id = p_user_id),
+        'limit', (SELECT free_trip_creations FROM app.quota_settings WHERE id));
+$$;
+REVOKE ALL ON FUNCTION app.trip_allowance(UUID) FROM PUBLIC, anon, authenticated;
+
+-- 建立旅程的畫面顯示「還能建立幾趟」
+CREATE OR REPLACE FUNCTION app.my_trip_allowance()
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'not_signed_in' USING ERRCODE = '42501';
+    END IF;
+    RETURN app.trip_allowance(auth.uid());
+END;
+$$;
+REVOKE ALL ON FUNCTION app.my_trip_allowance() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION app.my_trip_allowance() TO authenticated;
+
+CREATE OR REPLACE FUNCTION app.trips_check_creation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    a JSONB;
+BEGIN
+    IF NEW.created_by IS NULL THEN
+        RETURN NEW;
+    END IF;
+    -- 同一個帳號同時建好幾趟時排隊算
+    PERFORM pg_advisory_xact_lock(hashtextextended('trip_creations:' || NEW.created_by::text, 0));
+    a := app.trip_allowance(NEW.created_by);
+    IF NOT (a ->> 'paid')::boolean AND (a ->> 'created')::int >= (a ->> 'limit')::int THEN
+        RAISE EXCEPTION 'trip_limit' USING ERRCODE = 'P0001', DETAIL = a ->> 'limit';
+    END IF;
+    INSERT INTO app.trip_creations (user_id, trip_id) VALUES (NEW.created_by, NEW.id);
+    RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION app.trips_check_creation() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS tr_app_trips_check_creation ON app.trips;
+CREATE TRIGGER tr_app_trips_check_creation
+    BEFORE INSERT ON app.trips
+    FOR EACH ROW EXECUTE FUNCTION app.trips_check_creation();
 
 -- ── 一趟旅程的上限（方案＋加量）──────────────────────────────
 CREATE OR REPLACE FUNCTION app.trip_limits(p_trip_id UUID)
@@ -1165,8 +1249,9 @@ CREATE POLICY app_images_insert ON storage.objects
 
 -- ── AI：先扣一次，再叫 AI ──────────────────────────────────────
 -- Edge Function（service role）每次要叫 AI 之前呼叫；ok=false 就不要叫，照 reason 回覆使用者：
---   ai_disabled（kill switch 或全站今天用完）、trip_limit、rate_minute、rate_day、no_trip
+--   ai_disabled（總開關關著）、trip_limit、no_trip
 -- 呼叫端要先確認 actor 是這趟的成員（或是綁定這趟的 LINE 群組裡的人），這支只管次數。
+-- actor 只記下來（之後查濫用用），不拿來限制。
 CREATE OR REPLACE FUNCTION app.consume_ai(p_trip_id UUID, p_actor TEXT, p_kind TEXT DEFAULT 'text')
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1174,15 +1259,13 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    s       app.ai_settings%ROWTYPE;
     v_max   INTEGER;
     v_used  INTEGER;
 BEGIN
     IF p_actor IS NULL OR p_actor !~ '^(user|line):[A-Za-z0-9-]{1,64}$' THEN
         RAISE EXCEPTION 'invalid_actor' USING ERRCODE = '22023';
     END IF;
-    SELECT * INTO s FROM app.ai_settings WHERE id;
-    IF NOT FOUND OR NOT s.enabled THEN
+    IF NOT coalesce((SELECT ai_enabled FROM app.quota_settings WHERE id), FALSE) THEN
         RETURN jsonb_build_object('ok', FALSE, 'reason', 'ai_disabled');
     END IF;
 
@@ -1192,15 +1275,6 @@ BEGIN
         RETURN jsonb_build_object('ok', FALSE, 'reason', 'no_trip');
     END IF;
 
-    IF (SELECT count(*) FROM app.ai_calls WHERE at > now() - interval '1 day') >= s.global_daily_calls THEN
-        RETURN jsonb_build_object('ok', FALSE, 'reason', 'ai_disabled');
-    END IF;
-    IF (SELECT count(*) FROM app.ai_calls WHERE actor = p_actor AND at > now() - interval '1 minute') >= s.user_per_minute THEN
-        RETURN jsonb_build_object('ok', FALSE, 'reason', 'rate_minute');
-    END IF;
-    IF (SELECT count(*) FROM app.ai_calls WHERE actor = p_actor AND at > now() - interval '1 day') >= s.user_per_day THEN
-        RETURN jsonb_build_object('ok', FALSE, 'reason', 'rate_day');
-    END IF;
 
     SELECT max_ai_calls INTO v_max FROM app.trip_limits(p_trip_id);
     SELECT count(*)::int INTO v_used FROM app.ai_calls WHERE trip_id = p_trip_id;

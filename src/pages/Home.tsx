@@ -94,6 +94,15 @@ const Home: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   // 建立旅程的錯誤顯示在表單裡；專案禁用原生 alert()
   const [createError, setCreateError] = useState<string | null>(null);
+  // 開放版：沒付過費的帳號最多建立幾趟（資料庫 my_trip_allowance；刪掉的也算，加入別人的不算）
+  const [allowance, setAllowance] = useState<{ paid: boolean; created: number; limit: number } | null>(null);
+  useEffect(() => {
+    if (!IS_PUBLIC || !isModalOpen || !supabase) return;
+    let alive = true;
+    supabase.rpc('my_trip_allowance').then(({ data }) => { if (alive && data) setAllowance(data); });
+    return () => { alive = false; };
+  }, [isModalOpen]);
+  const tripsLeft = allowance && !allowance.paid ? Math.max(0, allowance.limit - allowance.created) : null;
 
   // 開放版：要登入才有「我的旅程」。舊版沒有登入，session 永遠是 null、也不會等
   const { session, loading: sessionLoading } = useSession();
@@ -253,6 +262,7 @@ const Home: React.FC = () => {
         setCreateError(msg.includes('invalid_name') ? '每位成員的名字要 1～20 個字'
           : msg.includes('too_many_members') ? '成員最多 150 位'
           : msg.includes('trips_name_check') ? '旅程名稱最多 60 個字'
+          : msg.includes('trip_limit') ? '免費帳號建立的旅程已經到上限了。加入朋友建立的旅程不受限制。'
           : '建立失敗，請再試一次');
       } finally {
         setSubmitting(false);
@@ -636,7 +646,8 @@ const Home: React.FC = () => {
           </div>
           <p className={ui.hint}>
             {IS_PUBLIC
-              ? '建立後只有你看得到。到旅程設定可以拿邀請連結給旅伴，或開放分享給沒登入的人看。'
+              ? `建立後只有你看得到。到旅程設定可以拿邀請連結給旅伴，或開放分享給沒登入的人看。${
+                  tripsLeft !== null ? `免費帳號還能建立 ${tripsLeft} 趟旅程（刪掉的也算；加入朋友的旅程不算）。` : ''}`
               : newTrip.access_code.trim()
                 ? '進入這趟旅程時需要輸入密碼。'
                 : '沒有設定密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}

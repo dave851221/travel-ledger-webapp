@@ -2,12 +2,12 @@
 //
 // 每次要叫 AI 之前先呼叫 consumeAi；ok=false 就「不要叫 AI」，把 quotaReply 的話回給使用者。
 // 呼叫端自己先確認 actor 有權使用這趟（是成員、或在綁定這趟的群組裡），這裡只管次數。
-// 被 AI 拒絕的回覆也已經扣過（真的花了錢）；被頻率限制擋下的不扣。
+// 被 AI 拒絕的回覆也已經扣過（真的花了錢）。上限只看「這趟」，不限每個人的次數。
 
 import type { SupabaseClient } from './deps.ts'
 
 export type AiKind = 'text' | 'receipt' | 'voice' | 'search'
-export type QuotaReason = 'ai_disabled' | 'trip_limit' | 'rate_minute' | 'rate_day' | 'no_trip' | 'error'
+export type QuotaReason = 'ai_disabled' | 'trip_limit' | 'no_trip' | 'error'
 
 export interface QuotaResult {
   ok: boolean
@@ -33,10 +33,6 @@ export function quotaReply(r: QuotaResult): string {
   switch (r.reason) {
     case 'trip_limit':
       return `這趟旅程的 AI 記帳次數用完了（${r.limit ?? ''} 次）喵。還是可以在網頁上自己記帳喔！`
-    case 'rate_minute':
-      return '說得有點快，喵喵跟不上了，等一分鐘再傳給我好嗎？'
-    case 'rate_day':
-      return '你今天已經叫我很多次了，喵喵要休息一下，明天再來找我！網頁上還是可以自己記帳喔。'
     case 'ai_disabled':
       return '喵喵現在暫停服務中，請先在網頁上記帳，晚點再來找我。'
     case 'no_trip':

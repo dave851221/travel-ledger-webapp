@@ -4,10 +4,10 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(26);
+SELECT plan(30);
 
 UPDATE app.plan_limits SET max_entries = 2, max_ai_calls = 2, max_photos = 1 WHERE plan = 'free';
-UPDATE app.ai_settings SET user_per_minute = 2, user_per_day = 100, global_daily_calls = 1000, enabled = TRUE;
+UPDATE app.quota_settings SET ai_enabled = TRUE, free_trip_creations = 3;
 
 INSERT INTO auth.users (id, email, aud, role)
 VALUES ('aaaaaaaa-0000-0000-0000-00000000000a', 'qa@test.local', 'authenticated', 'authenticated'),
@@ -54,7 +54,7 @@ SELECT is((SELECT plan FROM app.trips WHERE id = (SELECT v::uuid FROM ids WHERE 
 SELECT throws_ok($$ UPDATE app.trips SET plan = 'paid' $$, '42501', NULL, '不能自己改成付費');
 SELECT throws_ok($$ UPDATE app.trips SET extra_ai_calls = 999 $$, '42501', NULL, '不能自己加量');
 SELECT throws_ok($$ SELECT count(*) FROM app.ai_calls $$, '42501', NULL, '看不到 AI 呼叫紀錄');
-SELECT throws_ok($$ UPDATE app.ai_settings SET enabled = TRUE $$, '42501', NULL, '動不了全站 AI 開關');
+SELECT throws_ok($$ UPDATE app.quota_settings SET ai_enabled = TRUE $$, '42501', NULL, '動不了全站設定');
 SELECT throws_ok($$ SELECT app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't1'), 'user:x', 'text') $$,
                  '42501', NULL, '前端不能自己扣 AI 次數');
 SELECT is((app.trip_usage((SELECT v::uuid FROM ids WHERE k = 't1')) -> 'entries' ->> 'used')::int, 2, '成員看得到用量');
@@ -79,18 +79,32 @@ SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't1'), 'user:aaaa', 
 SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't1'), 'line:Ubbb', 'text') ->> 'ok', 'true', '第 2 次可以（不同人共用這趟）');
 SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't1'), 'user:aaaa', 'text') ->> 'reason', 'trip_limit', '這趟用完了');
 SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't2'), 'user:aaaa', 'text') ->> 'ok', 'true', '別趟不受影響');
-SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't2'), 'user:aaaa', 'text') ->> 'reason', 'rate_minute',
-          '同一個人一分鐘內太多次就擋（被擋的不算這趟的次數）');
-SELECT is((SELECT count(*)::int FROM app.ai_calls WHERE trip_id = (SELECT v::uuid FROM ids WHERE k = 't2')), 1,
-          '被頻率限制擋下的沒有扣這趟');
+SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't2'), 'user:aaaa', 'text') ->> 'ok', 'true',
+          '同一個人連續叫也只看這趟的次數（不限每個人）');
+SELECT is((SELECT count(*)::int FROM app.ai_calls WHERE trip_id = (SELECT v::uuid FROM ids WHERE k = 't2')), 2,
+          '每次都扣這趟');
 SELECT throws_ok($$ SELECT app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't2'), 'evil; drop', 'text') $$,
                  'invalid_actor', '奇怪的 actor 不收');
-UPDATE app.ai_settings SET enabled = FALSE;
+UPDATE app.quota_settings SET ai_enabled = FALSE;
 SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't2'), 'line:Uccc', 'text') ->> 'reason', 'ai_disabled',
           '總開關關掉就全部停');
-UPDATE app.ai_settings SET enabled = TRUE, global_daily_calls = 3;
-SELECT is(app.consume_ai((SELECT v::uuid FROM ids WHERE k = 't2'), 'line:Uccc', 'text') ->> 'reason', 'ai_disabled',
-          '全站今天的次數用完就停');
+UPDATE app.quota_settings SET ai_enabled = TRUE;
+RESET ROLE;
+
+-- ── 5. 建立旅程的上限（測試設成 3 趟；已經建了 t1、t2）──────────
+SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-00000000000a');
+SELECT lives_ok($$ INSERT INTO ids SELECT 't3', app.create_trip('三', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲'])::text $$,
+                '上限內可以建立');
+SELECT throws_ok($$ SELECT app.create_trip('四', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$,
+                 'trip_limit', '沒付過費的帳號超過上限就不能建立');
+DELETE FROM app.trips WHERE id = (SELECT v::uuid FROM ids WHERE k = 't3');
+SELECT throws_ok($$ SELECT app.create_trip('四', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$,
+                 'trip_limit', '刪掉旅程不會空出名額（不然可以一直刷免費額度）');
+SELECT is((app.my_trip_allowance() ->> 'created')::int, 3, '看得到自己建立過幾趟');
+RESET ROLE;
+INSERT INTO app.paid_accounts (user_id) VALUES ('aaaaaaaa-0000-0000-0000-00000000000a');
+SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-00000000000a');
+SELECT lives_ok($$ SELECT app.create_trip('五', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$, '付過費就不限');
 RESET ROLE;
 
 SELECT * FROM finish();

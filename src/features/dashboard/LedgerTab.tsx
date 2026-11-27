@@ -23,11 +23,13 @@ interface Props {
   showToast: (message: string, type?: 'success' | 'error') => void;
   /** Rendered above the quick-add bar (the balance ticket on narrow screens) */
   summary?: React.ReactNode;
+  /** 開放版：這趟的用量（快速記帳下面一行） */
+  usage?: React.ReactNode;
 }
 
 const LedgerTab: React.FC<Props> = ({
   trip, expenses, currentUser, trashCount,
-  onOpenExpense, onEditExpense, onDeleteExpense, onQuickSaved, onOpenQuickInForm, onOpenTrash, showToast, summary,
+  onOpenExpense, onEditExpense, onDeleteExpense, onQuickSaved, onOpenQuickInForm, onOpenTrash, showToast, summary, usage,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -98,6 +100,7 @@ const LedgerTab: React.FC<Props> = ({
           showToast={showToast}
         />
       )}
+      {usage}
 
       <div className="flex items-center gap-2">
         <div className="flex-1 min-w-0 flex gap-1.5 overflow-x-auto no-scrollbar -ml-4 pl-4 pr-1 md:ml-0 md:pl-0 md:flex-wrap" role="group" aria-label="依分類篩選">
