@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Ban, Check, Loader2, MessageCircle, Search } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Ban, Check, Loader2 } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import { ui } from '../components/ui';
-import LoginBadges from '../features/auth/LoginBadges';
-import type { LoginInfo } from '../features/auth/loginInfo';
+import TripsPanel from '../features/admin/TripsPanel';
+import AccountsPanel from '../features/admin/AccountsPanel';
+import type { AdminAccountRow, AdminTripRow } from '../features/admin/types';
 import { useSession } from '../features/auth/session';
 
 /**
@@ -21,22 +22,10 @@ interface Overview {
   settings: { ai_enabled: boolean; free_trip_creations: number };
   plans: PlanRow[];
 }
-interface Limits { max_entries: number; max_ai_calls: number; max_photos: number }
-interface TripRow {
-  id: string; name: string; created_at: string; is_archived: boolean; plan: string;
-  extra_entries: number; extra_ai_calls: number; extra_photos: number; ai_suspended: boolean;
-  members: number; accounts: number; owner: LoginInfo[] | null; line_bound: boolean; last_entry: string | null;
-  limits: Limits; entries: number; ai_calls: number; photos: number;
-}
-interface AccountRow {
-  id: string; created_at: string; last_sign_in_at: string | null; logins: LoginInfo[];
-  paid: boolean; admin: boolean; trips: number; ai_calls: number;
-  allowance: { created: number; limit: number; paid: boolean };
-}
+type TripRow = AdminTripRow;
+type AccountRow = AdminAccountRow;
 
 type Tab = 'overview' | 'trips' | 'accounts';
-const day = (s: string | null) => (s ? new Date(s).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' }) : '—');
-const meterTone = (used: number, limit: number) => (limit > 0 && used >= limit ? 'text-neg font-bold' : limit > 0 && used >= limit * 0.8 ? 'text-warn font-bold' : 'text-ink-2');
 
 const Stat: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
   <div className={`${ui.card} px-4 py-3`}>
@@ -54,7 +43,6 @@ const Admin: React.FC = () => {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [trips, setTrips] = useState<TripRow[] | null>(null);
   const [accounts, setAccounts] = useState<AccountRow[] | null>(null);
-  const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<TripRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,8 +52,8 @@ const Admin: React.FC = () => {
     const { data, error: err } = await supabase.rpc('admin_overview');
     if (err) setError('讀不到總覽'); else setOverview(data as Overview);
   }, []);
-  const loadTrips = useCallback(async (q: string) => {
-    const { data, error: err } = await supabase.rpc('admin_trips', { p_search: q || null, p_limit: 100 });
+  const loadTrips = useCallback(async () => {
+    const { data, error: err } = await supabase.rpc('admin_trips', { p_search: null, p_limit: 200 });
     if (err) setError('讀不到旅程'); else setTrips(data as TripRow[]);
   }, []);
   const loadAccounts = useCallback(async () => {
@@ -88,7 +76,7 @@ const Admin: React.FC = () => {
   const openTab = (k: Tab) => {
     setTab(k);
     if (k === 'overview') void loadOverview();
-    if (k === 'trips' && trips === null) void loadTrips('');
+    if (k === 'trips' && trips === null) void loadTrips();
     if (k === 'accounts' && accounts === null) void loadAccounts();
   };
 
@@ -168,57 +156,13 @@ const Admin: React.FC = () => {
           </div>
         ))}
 
-        {tab === 'trips' && (
-          <div className="space-y-3">
-            <form className="flex gap-2" onSubmit={e => { e.preventDefault(); void loadTrips(search.trim()); }}>
-              <input className={ui.input} placeholder="旅程名稱或 id" value={search} onChange={e => setSearch(e.target.value)} />
-              <button type="submit" className={`${ui.btnSecondary} px-3`} aria-label="搜尋"><Search size={16} /></button>
-            </form>
-            {trips === null ? <Loader2 className="animate-spin text-muted" /> : trips.length === 0 ? <p className="text-sm text-muted">沒有旅程</p> : (
-              <ul className={`${ui.card} divide-y divide-line`}>
-                {trips.map(t => (
-                  <li key={t.id} className="px-4 py-3 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold truncate flex-1 min-w-0">{t.name}</span>
-                      {t.plan === 'paid' && <span className="text-[11px] font-bold text-accent">已解鎖</span>}
-                      {t.ai_suspended && <span className="text-[11px] font-bold text-neg">AI 暫停</span>}
-                      {t.line_bound && <MessageCircle size={14} className="text-pos" aria-label="已綁定 LINE" />}
-                      <button className="text-xs text-accent font-medium hover:underline" onClick={() => setEditing(t)}>調整</button>
-                    </div>
-                    <div className="text-xs text-muted flex flex-wrap gap-x-3 gap-y-0.5 num">
-                      <span>建立 {day(t.created_at)}・最後記帳 {day(t.last_entry)}</span>
-                      <span>成員 {t.members}・帳號 {t.accounts}</span>
-                      <span className={meterTone(t.entries, t.limits.max_entries)}>記帳 {t.entries}/{t.limits.max_entries}</span>
-                      <span className={meterTone(t.ai_calls, t.limits.max_ai_calls)}>AI {t.ai_calls}/{t.limits.max_ai_calls}</span>
-                      <span className={meterTone(t.photos, t.limits.max_photos)}>照片 {t.photos}/{t.limits.max_photos}</span>
-                    </div>
-                    {t.owner && <LoginBadges logins={t.owner} />}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        {tab === 'trips' && (trips === null ? <Loader2 className="animate-spin text-muted" /> : (
+          <TripsPanel trips={trips} onEdit={setEditing} />
+        ))}
 
         {tab === 'accounts' && (accounts === null ? <Loader2 className="animate-spin text-muted" /> : (
-          <ul className={`${ui.card} divide-y divide-line`}>
-            {accounts.map(a => (
-              <li key={a.id} className="px-4 py-3 flex items-start gap-3">
-                <div className="flex-1 min-w-0 space-y-1">
-                  <LoginBadges logins={a.logins} />
-                  <p className="text-xs text-muted num">
-                    註冊 {day(a.created_at)}・上次登入 {day(a.last_sign_in_at)}・旅程 {a.trips}・建立 {a.allowance.created}
-                    {a.allowance.paid ? '' : `/${a.allowance.limit}`}・AI {a.ai_calls}{a.admin ? '・管理員' : ''}
-                  </p>
-                </div>
-                <label className="flex items-center gap-1.5 text-xs shrink-0">
-                  <input type="checkbox" checked={a.paid} disabled={busy}
-                    onChange={e => run(e.target.checked ? '標記付費' : '取消付費', () => supabase.rpc('admin_set_paid', { p_user_id: a.id, p_paid: e.target.checked }), loadAccounts)} />
-                  付費
-                </label>
-              </li>
-            ))}
-          </ul>
+          <AccountsPanel accounts={accounts} busy={busy}
+            onSetPaid={(a, paid) => run(paid ? '標記付費' : '取消付費', () => supabase.rpc('admin_set_paid', { p_user_id: a.id, p_paid: paid }), loadAccounts)} />
         ))}
       </main>
 
@@ -227,7 +171,7 @@ const Admin: React.FC = () => {
           onSave={v => run('調整旅程', () => supabase.rpc('admin_update_trip', {
             p_trip_id: editing.id, p_plan: v.plan, p_extra_entries: v.extra_entries, p_extra_ai_calls: v.extra_ai_calls,
             p_extra_photos: v.extra_photos, p_ai_suspended: v.ai_suspended,
-          }), async () => { setEditing(null); await loadTrips(search.trim()); })}
+          }), async () => { setEditing(null); await loadTrips(); })}
         />
       )}
     </div>

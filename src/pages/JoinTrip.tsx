@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, Check, Loader2, UserPlus } from 'lucide-react';
 import { supabase } from '../api/supabase';
 import { ui } from '../components/ui';
+import MascotArt from '../components/MascotArt';
 import MemberAvatar, { MemberColorProvider } from '../features/dashboard/MemberAvatar';
 import BrandMark from '../components/BrandMark';
 import SignInPanel from '../features/auth/SignInPanel';
@@ -94,6 +95,7 @@ const JoinTrip: React.FC = () => {
 
         {state === 'ready' && preview && (
           <div className="space-y-5">
+            <MascotArt slot="invite" width={180} className="mx-auto" />
             <div className={`${ui.card} px-5 py-5`}>
               <p className="text-xs text-muted">邀請你加入</p>
               <h1 className="text-xl font-bold mt-1">{preview.name}</h1>

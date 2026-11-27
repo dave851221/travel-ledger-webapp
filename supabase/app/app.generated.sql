@@ -1610,15 +1610,6 @@ BEGIN
         RAISE EXCEPTION 'not_confirmed' USING ERRCODE = '22023';
     END IF;
 
-    -- 建立過幾趟、有沒有付過費：跟著登入方式留下來（只存雜湊）
-    SELECT (a ->> 'created')::int, (a ->> 'paid')::boolean INTO v_created, v_paid FROM app.trip_allowance(v_uid) a;
-    INSERT INTO app.deleted_identity_trips (identity_hash, trips_created, paid)
-    SELECT h, v_created, v_paid FROM unnest(app.identity_hashes(v_uid)) h
-    ON CONFLICT (identity_hash) DO UPDATE
-        SET trips_created = GREATEST(app.deleted_identity_trips.trips_created, EXCLUDED.trips_created),
-            paid = app.deleted_identity_trips.paid OR EXCLUDED.paid,
-            deleted_at = now();
-
     FOR r IN SELECT trip_id, role FROM app.trip_members WHERE user_id = v_uid LOOP
         SELECT o.user_id INTO v_next FROM app.trip_members o
         WHERE o.trip_id = r.trip_id AND o.user_id <> v_uid
@@ -1630,6 +1621,15 @@ BEGIN
             UPDATE app.trip_members SET role = 'owner' WHERE trip_id = r.trip_id AND user_id = v_next;
         END IF;
     END LOOP;
+
+    -- 建立過、而且還留著的旅程數（只剩自己的已經刪掉，空出名額）與有沒有付過費：跟著登入方式留下來（只存雜湊）
+    SELECT (a ->> 'created')::int, (a ->> 'paid')::boolean INTO v_created, v_paid FROM app.trip_allowance(v_uid) a;
+    INSERT INTO app.deleted_identity_trips (identity_hash, trips_created, paid)
+    SELECT h, v_created, v_paid FROM unnest(app.identity_hashes(v_uid)) h
+    ON CONFLICT (identity_hash) DO UPDATE
+        SET trips_created = GREATEST(app.deleted_identity_trips.trips_created, EXCLUDED.trips_created),
+            paid = app.deleted_identity_trips.paid OR EXCLUDED.paid,
+            deleted_at = now();
 
     -- trip_members、line_identities、profiles、auth.identities 都會跟著刪（ON DELETE CASCADE）
     DELETE FROM auth.users WHERE id = v_uid;
@@ -2050,4 +2050,29 @@ REVOKE ALL ON FUNCTION app.admin_update_plan(TEXT, INT, INT, INT) FROM PUBLIC, a
 GRANT EXECUTE ON FUNCTION app.admin_update_plan(TEXT, INT, INT, INT) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ── 建立旅程的額度（最終版；05_quota、07_account 的舊版本被這裡取代）─────────
+-- David 2026-11-27：刪掉的旅程要空出名額（不想花錢的人照樣能玩）→ 算「還留著、自己建立的旅程」。
+-- 加上同一個 LINE／Google 刪掉的舊帳號留下來還在的旅程（app.deleted_identity_trips）。
+-- 付過費、或是網站管理員（例如從舊版匯入很多趟的 David）不限。
+CREATE OR REPLACE FUNCTION app.trip_allowance(p_user_id UUID)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    WITH prev AS (
+        SELECT coalesce(max(d.trips_created), 0) AS created, coalesce(bool_or(d.paid), FALSE) AS paid
+        FROM app.deleted_identity_trips d
+        WHERE d.identity_hash = ANY (app.identity_hashes(p_user_id))
+    )
+    SELECT jsonb_build_object(
+        'paid', EXISTS (SELECT 1 FROM app.paid_accounts WHERE user_id = p_user_id)
+                OR EXISTS (SELECT 1 FROM app.site_admins WHERE user_id = p_user_id)
+                OR (SELECT paid FROM prev),
+        'created', (SELECT count(*)::int FROM app.trips WHERE created_by = p_user_id) + (SELECT created FROM prev),
+        'limit', (SELECT free_trip_creations FROM app.quota_settings WHERE id));
+$$;
+REVOKE ALL ON FUNCTION app.trip_allowance(UUID) FROM PUBLIC, anon, authenticated;
 

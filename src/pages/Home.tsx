@@ -4,7 +4,7 @@ import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
 import BrandMark from '../components/BrandMark';
-import { CatTraveler } from '../components/TravelCat';
+import MascotArt from '../components/MascotArt';
 import Toast from '../components/Toast';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -95,7 +95,7 @@ const Home: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   // 建立旅程的錯誤顯示在表單裡；專案禁用原生 alert()
   const [createError, setCreateError] = useState<string | null>(null);
-  // 開放版：沒付過費的帳號最多建立幾趟（資料庫 my_trip_allowance；刪掉的也算，加入別人的不算）
+  // 開放版：沒付過費的帳號最多建立幾趟（資料庫 my_trip_allowance；算現在還留著的，加入別人的不算）
   const [allowance, setAllowance] = useState<{ paid: boolean; created: number; limit: number } | null>(null);
   useEffect(() => {
     if (!IS_PUBLIC || !isModalOpen || !supabase) return;
@@ -263,7 +263,7 @@ const Home: React.FC = () => {
         setCreateError(msg.includes('invalid_name') ? '每位成員的名字要 1～20 個字'
           : msg.includes('too_many_members') ? '成員最多 150 位'
           : msg.includes('trips_name_check') ? '旅程名稱最多 60 個字'
-          : msg.includes('trip_limit') ? '免費帳號建立的旅程已經到上限了。加入朋友建立的旅程不受限制。'
+          : msg.includes('trip_limit') ? '免費帳號的旅程已經到上限了，刪掉不用的旅程就能空出名額。'
           : '建立失敗，請再試一次');
       } finally {
         setSubmitting(false);
@@ -325,7 +325,7 @@ const Home: React.FC = () => {
           ) : (
             <div className="mt-6 sm:mt-10 space-y-6">
               <div className="text-center px-2">
-                <CatTraveler size={132} className="mx-auto -mb-1" title="旅行喵喵" />
+                <MascotArt slot="signinHero" width={220} className="mx-auto mb-2" />
                 <h1 className="text-2xl font-bold text-balance">在 LINE 群組裡拍收據，帳就分好了</h1>
                 <p className="text-sm text-muted mt-2">一起出去玩的旅伴都能記帳，回來還有一支回顧影片。</p>
               </div>
@@ -413,13 +413,11 @@ const Home: React.FC = () => {
           </div>
         ) : trips.length === 0 ? (
           <div className={`${ui.card} mt-4 px-6 py-14 text-center`}>
-            {IS_PUBLIC ? (
-              <CatTraveler size={112} className="mx-auto mb-2" title="旅行喵喵" />
-            ) : (
+            <MascotArt slot="emptyTrips" width={180} className="mx-auto mb-3" fallback={
               <span className="inline-flex w-14 h-14 rounded-2xl bg-sunk text-muted items-center justify-center mb-4">
                 <Plane size={26} />
               </span>
-            )}
+            } />
             <h2 className="text-lg font-bold">還沒有任何旅程</h2>
             <p className="text-sm text-muted mt-1.5 mb-6">建立一趟旅程，邀請旅伴一起記帳。</p>
             <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
@@ -653,7 +651,7 @@ const Home: React.FC = () => {
           <p className={ui.hint}>
             {IS_PUBLIC
               ? `建立後只有你看得到。到旅程設定可以拿邀請連結給旅伴，或開放分享給沒登入的人看。${
-                  tripsLeft !== null ? `免費帳號還能建立 ${tripsLeft} 趟旅程（刪掉的也算；加入朋友的旅程不算）。` : ''}`
+                  tripsLeft !== null ? `免費帳號還能建立 ${tripsLeft} 趟旅程（加入朋友的旅程不算）。` : ''}`
               : newTrip.access_code.trim()
                 ? '進入這趟旅程時需要輸入密碼。'
                 : '沒有設定密碼：任何拿到連結的人都能直接進入，綁定 LINE 機器人時也不用驗證。'}

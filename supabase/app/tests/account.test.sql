@@ -3,7 +3,7 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(12);
+SELECT plan(13);
 
 UPDATE app.quota_settings SET free_trip_creations = 2;
 
@@ -49,9 +49,10 @@ SELECT is((SELECT count(*)::int FROM app.expenses WHERE trip_id = (SELECT v::uui
 INSERT INTO auth.users (id, email, aud, role) VALUES ('dddddddd-0000-0000-0000-0000000000f4', 'dd@test.local', 'authenticated', 'authenticated');
 INSERT INTO app.line_identities (line_user_id, user_id) VALUES ('Udel1', 'dddddddd-0000-0000-0000-0000000000f4');
 SELECT pg_temp.as_user('dddddddd-0000-0000-0000-0000000000f4');
-SELECT is((app.my_trip_allowance() ->> 'created')::int, 2, '重新註冊後建立過的趟數接著算');
-SELECT throws_ok($$ SELECT app.create_trip('再一趟', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$, 'trip_limit',
-                 '刪帳號重來也拿不到新的免費名額');
+SELECT is((app.my_trip_allowance() ->> 'created')::int, 1, '重新註冊後，舊帳號還留著的旅程照樣算（只剩自己的那趟已刪掉，空出名額）');
+SELECT lives_ok($$ SELECT app.create_trip('再一趟', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$, '空出來的名額可以用');
+SELECT throws_ok($$ SELECT app.create_trip('再兩趟', ARRAY['甲'], '甲', 'TWD', ARRAY['餐飲']) $$, 'trip_limit',
+                 '刪帳號重來也拿不到額外的免費名額');
 SELECT throws_ok($$ SELECT count(*) FROM app.deleted_identity_trips $$, '42501', NULL, '使用者看不到刪除紀錄');
 RESET ROLE;
 

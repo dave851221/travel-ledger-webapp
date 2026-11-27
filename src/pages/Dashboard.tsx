@@ -369,7 +369,8 @@ const Dashboard: React.FC = () => {
   const tabs = primaryTabs(showItineraryTab);
   const readOnly = trip.is_archived;
   const goHome = () => navigate('/');
-  const openRecap = readOnly ? () => setRecapOpen(true) : undefined;
+  // 回顧影片不必封存也能做（David 2026-11-27）
+  const openRecap = () => setRecapOpen(true);
   // 開放版的網頁聊天還沒接上登入與額度（後端 web-chat 目前只認舊版的資料），先不顯示入口
   const openChat = IS_PUBLIC ? undefined : () => { setChatMounted(true); setChatOpen(true); };
   const goCategory = () => { if (trip.category) navigate(`/#cat-${encodeURIComponent(trip.category)}`); };
