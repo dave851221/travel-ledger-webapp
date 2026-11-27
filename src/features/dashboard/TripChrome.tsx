@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Images, Lock, MessageCircle, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, Clapperboard, Compass, Ellipsis, House, Lock, MessageCircle, Plus, Settings, Trash2, UserRound, Share2 } from 'lucide-react';
 import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
 import { ASSISTANT_CHAT_TITLE, ASSISTANT_NAME } from '../../config/assistant';
@@ -9,7 +9,7 @@ import { formatTripDates, formatTripDatesShort } from '../../utils/tripDates';
 import Dropdown, { MenuDivider, MenuItem, MenuLabel } from './Dropdown';
 import MemberAvatar from './MemberAvatar';
 import type { TabDef, TabType } from './tabs';
-import { TAB_ALBUM, TAB_RECYCLE, TAB_SIBLINGS } from './tabs';
+import { TAB_RECYCLE, TAB_SIBLINGS } from './tabs';
 
 interface IdentityProps {
   trip: Trip;
@@ -45,11 +45,13 @@ interface ChromeProps extends IdentityProps {
   onOpenRecap?: () => void;
   /** 跟耀西聊天記帳 */
   onOpenChat?: () => void;
+  /** 開放版：分享（邀請／只看的連結） */
+  onOpenShare?: () => void;
 }
 
 /** 手機頂列：返回、旅程名稱、我是誰、⋯ 選單（設定、其他旅程、垃圾桶）。 */
 export const MobileTopBar: React.FC<ChromeProps> = ({
-  trip, currentUser, onPick, onChange, trashCount, onBack, onOpenSettings, onOpenRecap, onOpenChat,
+  trip, currentUser, onPick, onChange, trashCount, onBack, onOpenSettings, onOpenChat, onOpenShare,
 }) => {
   const [whoOpen, setWhoOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -90,8 +92,8 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
           anchor={<button onClick={() => setMoreOpen(v => !v)} aria-label="更多" className={ui.iconBtn}><Ellipsis size={21} /></button>}
         >
           <MenuItem icon={<Settings size={17} />} onClick={() => { setMoreOpen(false); onOpenSettings(); }}>旅程設定</MenuItem>
-          <MenuItem icon={<Images size={17} />} onClick={() => { setMoreOpen(false); onChange(TAB_ALBUM.key); }}>相簿</MenuItem>
-          {onOpenRecap && <MenuItem icon={<Clapperboard size={17} />} onClick={() => { setMoreOpen(false); onOpenRecap(); }}>回顧影片</MenuItem>}
+          {/* 相簿、回顧影片在下面的分頁就有，選單不重複放（David 2026-11-27） */}
+          {onOpenShare && <MenuItem icon={<Share2 size={17} />} onClick={() => { setMoreOpen(false); onOpenShare(); }}>分享</MenuItem>}
           <MenuItem icon={<Compass size={17} />} onClick={() => { setMoreOpen(false); onChange(TAB_SIBLINGS.key); }}>其他旅程</MenuItem>
           <MenuItem
             icon={<Trash2 size={17} />}
@@ -110,7 +112,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
 
 /** 電腦版左側欄：品牌、目前旅程、分頁、垃圾桶與設定。 */
 export const SideNav: React.FC<ChromeProps> = ({
-  trip, tabs, active, onChange, trashCount, onBack, onOpenSettings, onOpenChat,
+  trip, tabs, active, onChange, trashCount, onBack, onOpenSettings, onOpenChat, onOpenShare,
 }) => {
   const items = [...tabs, TAB_SIBLINGS];
   const navBtn = (on: boolean) =>
@@ -144,6 +146,7 @@ export const SideNav: React.FC<ChromeProps> = ({
         <Trash2 size={18} />垃圾桶
         {trashCount > 0 && <span className="ml-auto num text-[11px] font-bold bg-white/10 rounded-md px-1.5">{trashCount}</span>}
       </button>
+      {onOpenShare && <button onClick={onOpenShare} className={navBtn(false)}><Share2 size={18} />分享</button>}
       <button onClick={onOpenSettings} className={navBtn(false)}><Settings size={18} />旅程設定</button>
     </aside>
   );

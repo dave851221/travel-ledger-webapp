@@ -81,6 +81,7 @@ import {
   buildUpdatePreviewCard,
   GROUP_MODE_INFO,
   replyEditPicker,
+  buildPlacesFlex,
 } from "../messages.ts"
 import { runInBackground } from "../util.ts"
 import { countryForTimezone } from "../../_shared/tools/weather.ts"
@@ -512,6 +513,12 @@ async function plainReply(scope: AiScope, args: ToolArgs): Promise<void> {
   // 假完成宣稱、沒查過的地圖連結、過長都在 sanitizeReplyText 處理（網頁聊天共用）
   const safeContent = sanitizeReplyText(args.text, scope.seenText.join('\n'))
   runInBackground(supabase.from('line_chat_history').insert({ line_user_id: sourceId, role: 'model', content: safeContent }))
+  // 推薦地點（兩個以上）畫成一張卡片：店名＋評分／距離，按鈕開地圖，不再貼一長串網址（David 2026-11-27）
+  const places = buildPlacesFlex(safeContent)
+  if (places) {
+    await reply(scope, places.intro ? [{ type: 'text', text: places.intro }, { ...places.flex, quickReply: boundQR }] : [{ ...places.flex, quickReply: boundQR }])
+    return
+  }
   await reply(scope, [{ type: 'text', text: safeContent, quickReply: boundQR }])
 }
 

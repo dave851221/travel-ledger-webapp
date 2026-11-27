@@ -7,6 +7,7 @@ import { hasItinerary } from '../features/itinerary/registry';
 import ExpenseModal from '../components/ExpenseModal';
 import ExpenseDetailModal from '../components/ExpenseDetailModal';
 import SettingsModal from '../components/SettingsModal';
+import ShareDialog from '../features/auth/ShareDialog';
 import TripUsage from '../features/quota/TripUsage';
 import Modal from '../components/Modal';
 import { ui } from '../components/ui';
@@ -73,6 +74,7 @@ const Dashboard: React.FC = () => {
     : defaultTab;
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [recapOpen, setRecapOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   // 開過一次就一直掛著：關掉聊天室時還在等的回覆（AI、照片辨識）才不會跟著不見
@@ -387,6 +389,7 @@ const Dashboard: React.FC = () => {
     onOpenSettings: () => setIsSettingsModalOpen(true),
     onOpenRecap: openRecap,
     onOpenChat: openChat,
+    onOpenShare: IS_PUBLIC ? () => setShareOpen(true) : undefined,
   };
 
   const ticket = (notchBg: string) => (
@@ -634,6 +637,7 @@ const Dashboard: React.FC = () => {
         </Suspense>
       )}
 
+      {IS_PUBLIC && <ShareDialog trip={trip} isOpen={shareOpen} onClose={() => setShareOpen(false)} onChanged={() => refetchTrip()} />}
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} trip={trip} onSuccess={() => { refetchTrip(); showToast('設定已更新'); }} expenses={expenses} />
 
       {deleteConfirmId && (

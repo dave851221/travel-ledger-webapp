@@ -250,3 +250,6 @@ export const exportExpensesToCSV = async (expenses: Expense[], tripName: string)
   link.click();
   document.body.removeChild(link);
 };
+
+/** 新建立的旅程、新加的幣別一律先用 2 位小數（David 2026-11-27），之後可以在設定頁改 */
+export const NEW_CURRENCY_DECIMALS = 2;

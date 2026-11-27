@@ -94,7 +94,7 @@ const AuthBootstrap: React.FC = () => {
 
   if (shown) {
     return (
-      <div role={shown.ok ? 'status' : 'alert'} className={`fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[90] max-w-[calc(100vw-32px)] bg-surface border border-line rounded-xl shadow-xl px-4 py-2.5 text-sm flex items-center gap-2 ${shown.ok ? 'text-pos' : 'text-neg'}`}>
+      <div role={shown.ok ? 'status' : 'alert'} className={`fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[90] w-max max-w-[min(calc(100vw-32px),32rem)] bg-surface border border-line rounded-xl shadow-xl px-4 py-2.5 text-sm flex items-center gap-2 ${shown.ok ? 'text-pos' : 'text-neg'}`}>
         {shown.ok ? <CheckCircle2 size={16} className="shrink-0" /> : <AlertCircle size={16} className="shrink-0" />}{shown.text}
         <button className="ml-2 underline text-ink-2 shrink-0" onClick={dismiss}>關閉</button>
       </div>

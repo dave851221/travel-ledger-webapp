@@ -13,7 +13,8 @@
 //    快捷查詢之後也是 —— 兩者都會落到 AI 核心去。
 // ============================================================
 
-import { formatAmount, sumByCurrency } from "../../_shared/finance.ts"
+import { convertToBase, formatAmount, sumByCurrency } from "../../_shared/finance.ts"
+import { Decimal } from "../../_shared/deps.ts"
 import { getSettlementPlan } from "../../_shared/tools/balance.ts"
 import { deleteExpense } from "../../_shared/tools/expenses.ts"
 import { CANCEL_DRAFT_KEYWORDS, stripSelfMentions } from "../guards.ts"
@@ -687,9 +688,17 @@ if (isBinding) {
     const precisionConfig = (trip.precision_config ?? {}) as Record<string, number>
     const today = tripToday(trip)
     const { data: allExp } = await supabase.from('expenses')
-      .select('amount, currency').eq('trip_id', tripId)
+      .select('amount, currency, split_data').eq('trip_id', tripId)
       .is('deleted_at', null).not('is_settlement', 'is', true)
     const status = trip.is_archived ? '已封存 🔒' : '進行中 ✈️'
+    // 每個人總共花了多少（自己分攤的部分，折合主幣別）；誰該給誰看「結算」（David 2026-11-27）
+    const spentRows = (trip.members ?? []).map((m: string) => {
+      const spent = (allExp ?? []).reduce((sum: Decimal, e: { currency: string; split_data: Record<string, number> | null }) => {
+        const share = Number((e.split_data ?? {})[m]) || 0
+        return share ? sum.plus(convertToBase(share, e.currency, trip.rates, trip.base_currency)) : sum
+      }, new Decimal(0))
+      return { label: m, sub: '總共花費', value: formatMoney(spent.toNumber(), trip.base_currency, precisionConfig) }
+    })
     await replyMessage(replyToken, [{
       ...buildSummaryCard({
         title: `🗺️ ${trip.name}`,
@@ -698,6 +707,7 @@ if (isBinding) {
           rows: [
             { label: '👥 成員', sub: (trip.members ?? []).join('、') || '（尚無成員）', value: `${(trip.members ?? []).length} 人` },
             { label: '💵 主幣別', value: trip.base_currency },
+            ...spentRows,
           ],
         }],
         totals: totalRows(sumByCurrency(allExp ?? []), (allExp ?? []).length, precisionConfig),

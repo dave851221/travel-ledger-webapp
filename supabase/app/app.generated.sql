@@ -1875,10 +1875,16 @@ BEGIN
         'ai_today', (SELECT count(*) FROM app.ai_calls WHERE at > date_trunc('day', now() AT TIME ZONE 'Asia/Taipei') AT TIME ZONE 'Asia/Taipei'),
         'ai_7d', (SELECT count(*) FROM app.ai_calls WHERE at > now() - interval '7 days'),
         'ai_total', (SELECT count(*) FROM app.ai_calls),
-        'ai_by_day', coalesce((
-            SELECT jsonb_agg(jsonb_build_object('day', d, 'calls', n) ORDER BY d)
-            FROM (SELECT (at AT TIME ZONE 'Asia/Taipei')::date AS d, count(*) AS n
-                  FROM app.ai_calls WHERE at > now() - interval '14 days' GROUP BY 1) s), '[]'::jsonb),
+        'ai_30d', (SELECT count(*) FROM app.ai_calls WHERE at > now() - interval '30 days'),
+        -- 近 30 天依種類（文字、收據…）的次數，後台估花費用
+        'ai_kind_30d', coalesce((SELECT jsonb_object_agg(kind, n) FROM (
+            SELECT kind, count(*) AS n FROM app.ai_calls WHERE at > now() - interval '30 days' GROUP BY 1) k), '{}'::jsonb),
+        -- 最近 14 天每一天（沒有呼叫的日子也列出來，次數 0）
+        'ai_by_day', (
+            SELECT jsonb_agg(jsonb_build_object('day', d.day, 'calls', coalesce(c.n, 0)) ORDER BY d.day)
+            FROM generate_series((now() AT TIME ZONE 'Asia/Taipei')::date - 13, (now() AT TIME ZONE 'Asia/Taipei')::date, interval '1 day') AS d(day)
+            LEFT JOIN (SELECT (at AT TIME ZONE 'Asia/Taipei')::date AS day, count(*) AS n
+                       FROM app.ai_calls WHERE at > now() - interval '15 days' GROUP BY 1) c ON c.day = d.day::date),
         'photos', (SELECT count(*) FROM storage.objects WHERE bucket_id = 'app-images'),
         'line_chats', (SELECT count(*) FROM app.line_user_states WHERE current_trip_id IS NOT NULL),
         'settings', (SELECT to_jsonb(s) - 'id' FROM app.quota_settings s WHERE id),

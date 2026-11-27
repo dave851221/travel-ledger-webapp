@@ -8,7 +8,7 @@ import MascotArt from '../components/MascotArt';
 import Toast from '../components/Toast';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getCurrencyPrecision } from '../utils/finance';
+import { NEW_CURRENCY_DECIMALS } from '../utils/finance';
 import { CURRENCIES, normalizeCurrencyCode } from '../utils/currencies';
 import { isSubmitEnter } from '../utils/keyboard';
 import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
@@ -247,7 +247,7 @@ const Home: React.FC = () => {
           p_categories: newCategories,
           p_category: newTrip.category.trim() || null,
           // 精度與舊版建立時一致，跟建立一起寫進去
-          p_precision_config: { [baseCurrency]: getCurrencyPrecision(baseCurrency) },
+          p_precision_config: { [baseCurrency]: NEW_CURRENCY_DECIMALS },
           p_start_date: dates.start_date,
           p_end_date: dates.end_date,
         });
@@ -286,7 +286,7 @@ const Home: React.FC = () => {
           categories: DEFAULT_CATEGORIES,
           rates: { [baseCurrency]: 1 },
           // 以前只有 TWD 給 0 位，JPY 主幣的旅程會顯示成 ¥1,000.00、分帳拆出 333.33
-          precision_config: { [baseCurrency]: getCurrencyPrecision(baseCurrency) }
+          precision_config: { [baseCurrency]: NEW_CURRENCY_DECIMALS }
         }])
         .select(TRIP_COLUMNS);
 
@@ -382,7 +382,7 @@ const Home: React.FC = () => {
           <span className="text-lg sm:text-xl font-bold truncate">{APP_NAME}</span>
           <div className="ml-auto flex items-center gap-2">
             {trips.length > 1 && !loading && (
-              <button onClick={startSorting} className={`${ui.btnSecondary} h-10 py-0 px-3`} aria-label="調整旅程順序" title="調整旅程順序">
+              <button onClick={startSorting} className={`${ui.btnSecondary} h-10 py-0 px-3 bg-sunk border-transparent`} aria-label="調整旅程順序" title="調整旅程順序">
                 <ArrowDownUp size={15} /><span className="hidden sm:inline">排序</span>
               </button>
             )}
@@ -390,7 +390,7 @@ const Home: React.FC = () => {
               <Plus size={16} strokeWidth={2.6} />新旅程
             </button>
             {IS_PUBLIC && (
-              <button onClick={() => setAccountOpen(true)} className={`${ui.btnSecondary} h-10 py-0 px-3`} aria-label="我的帳號" title="我的帳號（登入方式、登出）">
+              <button onClick={() => setAccountOpen(true)} className={`${ui.btnSecondary} h-10 py-0 px-3 bg-sunk border-transparent`} aria-label="我的帳號" title="我的帳號（登入方式、登出）">
                 <UserRound size={15} /><span className="hidden sm:inline">帳號</span>
               </button>
             )}

@@ -60,13 +60,14 @@ const AccountModal: React.FC<{ isOpen: boolean; onClose: () => void; onSignOut: 
             <ul className="rounded-2xl border border-line divide-y divide-line">
               {logins.length === 0 && <li className="px-3 py-2.5 text-sm text-muted">其他方式登入</li>}
               {logins.map((l, i) => (
-                <li key={i} className="flex items-center gap-2 px-3 py-2.5 min-w-0">
-                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-bold ${l.provider === 'line' ? 'text-pos bg-pos/10' : 'text-ink-2 bg-sunk'}`}>
+                // 兩種登入方式排成一樣的兩行（名稱／帳號），標籤同寬，高度一致
+                <li key={i} className="flex items-center gap-3 px-3 py-2.5 min-w-0 min-h-[60px]">
+                  <span className={`shrink-0 w-16 text-center rounded-md py-1 text-xs font-bold ${l.provider === 'line' ? 'text-pos bg-pos/10' : 'text-ink-2 bg-sunk'}`}>
                     {providerLabel(l.provider)}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm">{l.name || '（沒有名稱）'}</span>
-                    {l.account && <span className="block truncate text-xs text-muted">{l.account}</span>}
+                    <span className="block truncate text-xs text-muted">{l.account || (l.provider === 'line' ? 'LINE 帳號' : '')}</span>
                   </span>
                 </li>
               ))}

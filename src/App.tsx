@@ -94,7 +94,7 @@ function App() {
 
         {/* Back Online Toast */}
         {showOnlineToast && (
-          <div className="fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[100] bg-navy text-navy-fg py-2.5 px-4 rounded-xl shadow-xl flex items-center gap-2 text-sm anim-sheet">
+          <div className="fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[100] w-max max-w-[calc(100vw-32px)] bg-navy text-navy-fg py-2.5 px-4 rounded-xl shadow-xl flex items-center gap-2 text-sm anim-sheet">
             <Wifi size={16} className="text-pos" />
             已恢復連線
           </div>
