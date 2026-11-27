@@ -59,7 +59,18 @@ serve(async (req) => {
         status: 400, headers: { ...CORS, 'Content-Type': 'application/json' }
       })
     }
-    if (!(await authorize(req, line_user_id, expense_id))) {
+    // 讀存好的那一筆（組確認文字用）跟身分檢查同時進行；檢查沒過就不會用到它
+    const savedRead = expense_id
+      ? supabase.from('expenses')
+          .select('date, category, description, amount, currency, payer_data, split_data, trips(precision_config)')
+          .eq('id', expense_id)
+          .single()
+      : Promise.resolve({ data: null, error: null })
+    const [allowed, { data: saved, error: readErr }] = await Promise.all([
+      authorize(req, line_user_id, expense_id),
+      savedRead,
+    ])
+    if (!allowed) {
       return new Response(JSON.stringify({ error: 'forbidden' }), {
         status: 403, headers: { ...CORS, 'Content-Type': 'application/json' }
       })
@@ -70,12 +81,10 @@ serve(async (req) => {
     // ⚠️ 只有「新增」才寫（M11）。編輯既有支出也寫一筆 `saved` 的話，
     //    使用者接著說「取消上一筆」撤掉的會是那筆剛編輯好的舊支出
     //    —— 他要的是撤銷最近**新增**的那一筆。
+    // （跟下面的 LIFF 暗號一起寫，少一趟資料庫往返）
+    const historyRows: { line_user_id: string; role: string; content: string }[] = []
     if (!isUpdate && record !== false) {
-      await supabase.from('line_chat_history').insert({
-        line_user_id,
-        role: 'saved',
-        content: JSON.stringify({ expense_id, description })
-      })
+      historyRows.push({ line_user_id, role: 'saved', content: JSON.stringify({ expense_id, description }) })
     }
 
     // 建立快速回覆（含撤銷按鈕）
@@ -106,11 +115,6 @@ serve(async (req) => {
     // 金額、類別、付款人、分帳都會反映出來）。查不到時退回前端帶來的描述與金額。
     let text = `${isUpdate ? '✏️ 已透過 LIFF 更新' : '✅ 已透過 LIFF 存入'}：${description}\n💰 ${amount} ${currency}`
     if (expense_id) {
-      const { data: saved, error: readErr } = await supabase
-        .from('expenses')
-        .select('date, category, description, amount, currency, payer_data, split_data, trips(precision_config)')
-        .eq('id', expense_id)
-        .single()
       if (readErr) console.error('[LIFF_NOTIFY] read saved expense failed:', readErr)
       if (saved) {
         const trip = (Array.isArray(saved.trips) ? saved.trips[0] : saved.trips) as { precision_config?: Record<string, number> } | null
@@ -121,9 +125,8 @@ serve(async (req) => {
     if (viaClient) {
       const marker = buildLiffEchoMarker(isUpdate)
       const notice: LiffNotice = { marker, text, quickReply: { items: quickReplyItems } }
-      const { error: noticeErr } = await supabase.from('line_chat_history').insert({
-        line_user_id, role: LIFF_NOTICE_ROLE, content: JSON.stringify(notice),
-      })
+      historyRows.push({ line_user_id, role: LIFF_NOTICE_ROLE, content: JSON.stringify(notice) })
+      const { error: noticeErr } = await supabase.from('line_chat_history').insert(historyRows)
       if (noticeErr) {
         console.error('[LIFF_NOTIFY] notice insert failed:', noticeErr)
         return new Response(JSON.stringify({ ok: false, reason: 'notice_failed' }), {
@@ -134,6 +137,8 @@ serve(async (req) => {
         headers: { ...CORS, 'Content-Type': 'application/json' }
       })
     }
+
+    if (historyRows.length > 0) await supabase.from('line_chat_history').insert(historyRows)
 
     // LINE push 推播確認訊息
     const pushRes = await fetch('https://api.line.me/v2/bot/message/push', {
