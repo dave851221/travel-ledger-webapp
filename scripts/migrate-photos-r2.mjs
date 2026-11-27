@@ -49,7 +49,7 @@ const r2 = new AwsClient({ accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: e
 const base = `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET || 'tlb-photos'}`;
 const rows = await sql(`select o.name, o.owner_id, o.created_at, o.metadata->>'mimetype' as type
   from storage.objects o
-  where o.bucket_id = 'app-images' and o.name ~ '^expenses/[0-9a-f-]{36}/[^/]+$'
+  where o.bucket_id = 'app-images' and o.name ~ '^expenses/[0-9a-f-]{36}/[^/.][^/]*$'
     and split_part(o.name, '/', 2)::uuid in (select id from app.trips)
     and not exists (select 1 from app.trip_photos p where p.path = o.name)`);
 console.log('要搬的', rows.length);
