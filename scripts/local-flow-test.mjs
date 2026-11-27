@@ -122,8 +122,10 @@ const { error: oldLink } = await anon.rpc('get_trip_snapshot', { p_trip_id: trip
 check(!!rotated && !!oldLink, '重設分享連結後舊連結失效');
 
 // ── 改名 ─────────────────────────────────────────────────────────
-const { error: renameErr } = await B.rpc('update_trip_members', { p_trip_id: tripId, p_members: ['阿甲', '乙'], p_renames: { 甲: '阿甲' } });
-check(!renameErr, '成員可以改名');
+const { error: bRename } = await B.rpc('update_trip_members', { p_trip_id: tripId, p_members: ['甲', '乙', '丙'], p_renames: {} });
+check(!!bRename, '一般成員不能改成員名單');
+const { error: renameErr } = await A.rpc('update_trip_members', { p_trip_id: tripId, p_members: ['阿甲', '乙'], p_renames: { 甲: '阿甲' } });
+check(!renameErr, '建立者可以改名');
 const { data: renamed } = await A.from('expenses').select('payer_data').eq('id', exp.id).single();
 check(renamed?.payer_data?.['阿甲'] === 2000, '帳裡的名字跟著改');
 const { data: aMe } = await A.from('trip_members').select('member_name').eq('trip_id', tripId).eq('user_id', (await A.auth.getUser()).data.user.id).single();

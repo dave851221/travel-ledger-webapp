@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS app.trip_members (
     trip_id     UUID        NOT NULL REFERENCES app.trips(id) ON DELETE CASCADE,
     user_id     UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     member_name TEXT        NOT NULL,
-    role        TEXT        NOT NULL DEFAULT 'editor' CHECK (role IN ('owner', 'editor')),
+    -- owner：建立者，最高權限（指定管理員、刪除旅程、轉移）；admin：管理員（旅程名稱、隱私、成員管理）；
+    -- editor：一般成員（記帳、預設值、匯率、分類）。哪些欄位誰能改見 02_functions 的 trips_guard_update。
+    role        TEXT        NOT NULL DEFAULT 'editor' CHECK (role IN ('owner', 'admin', 'editor')),
     joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (trip_id, user_id)
 );

@@ -35,7 +35,7 @@ import SettlementTab, { type SettleRequest } from '../features/dashboard/Settlem
 import TrashTab from '../features/dashboard/TrashTab';
 import SiblingsTab from '../features/dashboard/SiblingsTab';
 import AlbumTab from '../features/dashboard/AlbumTab';
-import MemberAvatar from '../features/dashboard/MemberAvatar';
+import MemberAvatar, { MemberColorProvider } from '../features/dashboard/MemberAvatar';
 
 // 統計分頁帶著圖表套件（recharts，壓縮前 300 KB），行程分頁帶著版面元件，都等點到才下載
 const StatsTab = lazy(() => import('../features/dashboard/StatsTab'));
@@ -103,9 +103,21 @@ const Dashboard: React.FC = () => {
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   // 畫面還是手機上的舊資料時，記住的名字可能只是還沒出現在舊的成員清單裡 —— 等對完再決定要不要問
   // 開放版不必問：加入旅程時就選過了（成員資格裡有名字），要換再從頭像選單改
+  // 開放版：剛建立的旅程（首頁帶 ?who=1 進來）先問一次你是哪一位（建立時不問，David 2026-11-27）
+  const askWho = IS_PUBLIC && searchParams.get('who') === '1';
   const isWelcomeSelectorOpen = welcomeRequested
+    || (askWho && !loading && !!trip && !welcomeDismissed)
     || (!IS_PUBLIC && !loading && !!trip && !currentUser && !welcomeDismissed && (!syncing || !storedUser));
-  const closeWelcome = () => { setWelcomeRequested(false); setWelcomeDismissed(true); };
+  const closeWelcome = () => {
+    setWelcomeRequested(false);
+    setWelcomeDismissed(true);
+    if (askWho) {
+      // 問過了就把參數拿掉，重新整理不會再問
+      const next = new URLSearchParams(searchParams);
+      next.delete('who');
+      setSearchParams(next, { replace: true });
+    }
+  };
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
 
   const { toast, showToast, dismissToast } = useToast();
@@ -387,6 +399,8 @@ const Dashboard: React.FC = () => {
   );
 
   return (
+    // 成員頭像依旅程裡的順序配色，同一趟裡不會撞色（MemberAvatar.tsx）
+    <MemberColorProvider members={trip.members}>
     <div className="min-h-screen bg-canvas text-ink md:flex">
       {/* 先畫的是手機上的舊資料、背景正在更新：頂端一條細線，不擋操作 */}
       {syncing && (
@@ -680,6 +694,7 @@ const Dashboard: React.FC = () => {
 
       <Toast toast={toast} onDismiss={dismissToast} />
     </div>
+    </MemberColorProvider>
   );
 };
 

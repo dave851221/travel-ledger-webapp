@@ -22,12 +22,18 @@ import { ui } from './ui';
 import { supabase } from '../api/supabase';
 import { IS_PUBLIC, meKey } from '../config/mode';
 import ShareSettings from '../features/auth/ShareSettings';
+import MemberManager from '../features/auth/MemberManager';
+import { useSession } from '../features/auth/session';
+import { useMyMembership } from '../features/auth/membership';
 import type { Trip, Expense } from '../types';
 import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
 import { isSubmitEnter } from '../utils/keyboard';
 import { normalizeTripDates } from '../utils/tripDates';
 import TripDatesField from './TripDatesField';
 import { EXCHANGE_RATE_SOURCE_URL, fetchLatestRates } from '../utils/exchangeRates';
+import { CURRENCIES, currencyLabel, currencyName, normalizeCurrencyCode } from '../utils/currencies';
+
+const OTHER_CURRENCY = '__other__';
 import Decimal from 'decimal.js';
 
 /**
@@ -78,6 +84,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   // Form States
   const [name, setName] = useState(trip.name);
   const [accessCode, setAccessCode] = useState(trip.access_code || '');
+  // 開放版的權限分級：旅程名稱、分組、主幣別、時區、封存、成員名單只有管理員以上能改
+  // （資料庫的 trips_guard_update 與 update_trip_members 也會擋，這裡只是不讓一般成員白改一場）
+  const { session } = useSession();
+  const { membership } = useMyMembership(IS_PUBLIC ? trip.id : undefined, session?.user.id ?? null);
+  const canAdmin = !IS_PUBLIC || membership?.role === 'owner' || membership?.role === 'admin';
+  const adminOnlyHint = canAdmin ? null : <p className={`${ui.hint} mt-1.5`}>只有建立者或管理員可以修改。</p>;
   const [isArchived, setIsArchived] = useState(trip.is_archived);
   const [members, setMembers] = useState<string[]>([...trip.members]);
   const [categories, setCategories] = useState<string[]>([...trip.categories]);
@@ -106,6 +118,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const [newMember, setNewMember] = useState('');
   const [newCategory, setNewCategory] = useState('');
   const [newCurrency, setNewCurrency] = useState('');
+  // 選單選「其他」時自己輸入的代碼
+  const [customCurrencyInput, setCustomCurrencyInput] = useState('');
   const [ratesLoading, setRatesLoading] = useState(false);
   const [ratesNote, setRatesNote] = useState<string | null>(null);
 
@@ -126,6 +140,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       setTripCategory(trip.category || '');
       setAiPreference(trip.ai_preference || '');
       setBaseCurrency(trip.base_currency);
+      setTodayRates(null);
+      setTodayNote(null);
       setTimezone(trip.timezone || '');
       setStartDate(trip.start_date || '');
       setEndDate(trip.end_date || '');
@@ -305,7 +321,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         if (membersErr) {
           if (membersErr.message.includes('member_claimed')) throw new Error('有成員已經用這個名字加入，不能直接移除。請他先在「我是誰」換成別人');
           if (membersErr.message.includes('invalid_name')) throw new Error('成員名字要 1～20 個字');
-          if (membersErr.message.includes('invalid_members')) throw new Error('成員名稱不能重複，最多 30 位');
+          if (membersErr.message.includes('invalid_members')) throw new Error('成員名稱不能重複，最多 150 位');
           throw new Error(membersErr.message);
         }
         setMemberOrigins(finalMembers);
@@ -413,6 +429,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
   const changeBaseCurrency = (next: string) => {
     setError(null);
     if (next === baseCurrency) return;
+    // 今日匯率是對舊主幣別查的，換了就不能再拿來套用
+    setTodayRates(null);
+    setTodayNote(null);
     const effective = (code: string) => (code === baseCurrency ? 1 : parseFloat(ratesStr[code]));
     const pivot = effective(next);
     if (!isFinite(pivot) || pivot <= 0) {
@@ -433,7 +452,29 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
     setBaseCurrency(next);
   };
 
+  // 今日匯率只拿來「參考」：每個幣別旁邊顯示今天的數字，要不要套用由使用者逐一決定
+  // （以前一個按鈕把全部幣別都蓋掉，大家記帳用的可能是自己換匯的匯率）
+  const [todayRates, setTodayRates] = useState<Record<string, string> | null>(null);
+  const [todayNote, setTodayNote] = useState<string | null>(null);
+  const loadTodayRates = async () => {
+    setError(null);
+    setTodayNote(null);
+    setRatesLoading(true);
+    try {
+      const codes = Object.keys(ratesStr).filter(c => c !== baseCurrency);
+      const { rates, missing, updatedAt } = await fetchLatestRates(baseCurrency, codes);
+      setTodayRates(rates);
+      const when = updatedAt ? `資料時間 ${updatedAt.getMonth() + 1}/${updatedAt.getDate()}。` : '';
+      setTodayNote(`${when}${missing.length > 0 ? `${missing.join('、')} 查不到今日匯率。` : ''}按「套用」才會改，存檔後生效。`);
+    } catch (err) {
+      setError('查詢今日匯率失敗：' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setRatesLoading(false);
+    }
+  };
+
   // 只填進表單，按「儲存設定」才寫入 —— 與手動改匯率的行為一致，也還有機會看過再存
+  // 現在只用在「剛新增的幣別」：它的匯率本來就只是 1 的佔位，直接填今日匯率不會蓋掉任何人的設定
   const updateRatesFromSource = async (codes: string[]) => {
     setError(null);
     setRatesNote(null);
@@ -469,14 +510,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
   const addCurrency = () => {
     setError(null);
-    const code = newCurrency.toUpperCase().trim();
-    if (!code) return;
+    const raw = newCurrency === OTHER_CURRENCY ? customCurrencyInput : newCurrency;
+    if (!raw.trim()) return;
     // LINE Bot 的 AI 與收據辨識輸出的都是 ISO 4217 代碼（JPY），
     // 設成「日幣」「JP Y」的幣別幾乎對不上，記帳時會被退回預設幣別
-    if (!/^[A-Z]{3}$/.test(code)) {
+    const code = normalizeCurrencyCode(raw);
+    if (!code) {
       setError('幣別請輸入 3 碼英文代碼，例如 JPY、USD、KRW');
       return;
     }
+    setCustomCurrencyInput('');
     if (!ratesStr[code]) {
       setRatesStr({ ...ratesStr, [code]: '1' });
       // 1:1 只是佔位，順手查今日匯率填進去（查不到就留著讓使用者自己改）
@@ -557,7 +600,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
             <div className="space-y-5 anim-fade">
               <div>
                 <label htmlFor="set-name" className={ui.label}>旅程名稱</label>
-                <input id="set-name" type="text" className={ui.input} value={name} onChange={e => setName(e.target.value)} />
+                <input id="set-name" type="text" disabled={!canAdmin} className={ui.input} value={name} onChange={e => setName(e.target.value)} />
+                {adminOnlyHint}
               </div>
               {IS_PUBLIC && <ShareSettings trip={trip} onChanged={onSuccess} />}
               {!IS_PUBLIC && <div>
@@ -581,6 +625,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   type="text"
                   list="settings-trip-categories"
                   placeholder="例如：家族、朋友、出差"
+                  disabled={!canAdmin}
                   className={ui.input}
                   value={tripCategory}
                   onChange={e => setTripCategory(e.target.value)}
@@ -603,7 +648,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   日本時間 23:30 記帳會被記到前一天去。 */}
               <div>
                 <label htmlFor="set-tz" className={ui.label}>旅程時區 <span className="text-muted font-normal">· 選填</span></label>
-                <select id="set-tz" className={ui.select} value={timezone} onChange={e => setTimezone(e.target.value)}>
+                <select id="set-tz" disabled={!canAdmin} className={ui.select} value={timezone} onChange={e => setTimezone(e.target.value)}>
                   <option value="">自動（依幣別推測）</option>
                   {TIMEZONE_OPTIONS.map(tz => (
                     <option key={tz.value} value={tz.value}>{tz.label}</option>
@@ -626,7 +671,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <textarea
                   rows={4}
                   aria-label="AI 記帳偏好"
-                  placeholder={`例如：預設由${trip.members[0] || '我'}付款，大家均分；日幣一律不換算`}
+                  placeholder="例如：預設由小明付款，大家均分；日幣一律不換算"
                   className={`${ui.input} resize-none`}
                   value={aiPreference}
                   onChange={e => setAiPreference(e.target.value)}
@@ -675,6 +720,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                     role="switch"
                     aria-checked={isArchived}
                     aria-label="封存旅程"
+                    disabled={!canAdmin}
                     onClick={() => setIsArchived(!isArchived)}
                     className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${isArchived ? 'bg-warn' : 'bg-line'}`}
                   >
@@ -695,10 +741,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
 
           {activeTab === 'members' && (
             <div className="space-y-5 anim-fade">
-              <div className="flex gap-2">
+              {IS_PUBLIC && (
+                <MemberManager
+                  trip={trip}
+                  myUserId={session?.user.id ?? null}
+                  myRole={membership?.role ?? null}
+                  onLeft={() => { onClose(); window.location.hash = '#/'; }}
+                />
+              )}
+              {IS_PUBLIC && <p className="text-sm font-bold pt-2">帳上的成員名字 <span className="text-xs font-normal text-muted">· 最多 150 位</span></p>}
+              {canAdmin && <div className="flex gap-2">
                 <input type="text" aria-label="新成員名稱" placeholder="新增成員" className={ui.input} value={newMember} onChange={e => setNewMember(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addMember()} />
                 <button onClick={addMember} aria-label="新增成員" className={`${ui.btnPrimary} px-4 shrink-0`}><Plus size={18} strokeWidth={2.6} /></button>
-              </div>
+              </div>}
               <ul className="rounded-2xl border border-line divide-y divide-line">
                 {members.map((m, idx) => (
                   <li key={idx} className="flex items-center gap-3 pl-3 pr-1.5 py-1.5 group">
@@ -707,16 +762,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                       type="text"
                       aria-label={`成員 ${idx + 1} 的名稱`}
                       className="flex-1 min-w-0 bg-transparent text-base sm:text-sm py-2 outline-none rounded-lg focus:bg-sunk px-2 -mx-2"
+                      readOnly={!canAdmin}
                       value={m}
                       onChange={e => handleMemberRename(idx, e.target.value)}
                       placeholder="成員名稱"
                     />
                     {/* 觸控裝置沒有 hover：只有滑鼠操作時才「滑過才顯示」，否則手機、平板上按鈕永遠是透明的 */}
-                    <button onClick={() => removeMember(idx)} aria-label={`移除 ${m}`} className={`${ui.iconBtn} hover:text-neg pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus:opacity-100`}><Trash2 size={16} /></button>
+                    {canAdmin && <button onClick={() => removeMember(idx)} aria-label={`移除 ${m}`} className={`${ui.iconBtn} hover:text-neg pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus:opacity-100`}><Trash2 size={16} /></button>}
                   </li>
                 ))}
               </ul>
-              <p className={ui.hint}>直接點名字就能改名，所有支出紀錄裡的名字會一起更新。</p>
+              <p className={ui.hint}>{canAdmin ? '直接點名字就能改名，所有支出紀錄裡的名字會一起更新。' : '只有建立者或管理員可以新增、改名或移除成員。'}</p>
 
               <div className="pt-4 border-t border-line space-y-4">
                 <p className="text-sm font-bold">記帳預設值</p>
@@ -757,11 +813,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="set-base" className={ui.label}>主幣別</label>
-                  <select id="set-base" className={`${ui.select} num font-bold`} value={baseCurrency} onChange={e => changeBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
+                  <select id="set-base" disabled={!canAdmin} className={`${ui.select} num font-bold`} value={baseCurrency} onChange={e => changeBaseCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{currencyLabel(c)}</option>)}</select>
                 </div>
                 <div>
                   <label htmlFor="set-defcur" className={ui.label}>預設記帳幣別</label>
-                  <select id="set-defcur" className={`${ui.select} num font-bold`} value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{c}</option>)}</select>
+                  <select id="set-defcur" className={`${ui.select} num font-bold`} value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)}>{Object.keys(ratesStr).map(c => <option key={c} value={c}>{currencyLabel(c)}</option>)}</select>
                 </div>
               </div>
               {baseCurrency !== trip.base_currency && (
@@ -774,36 +830,63 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <p className="text-sm font-bold">幣別與匯率 <span className="text-xs font-normal text-muted">· 1 單位 = ? {baseCurrency}</span></p>
                   <button
-                    onClick={() => updateRatesFromSource(Object.keys(ratesStr))}
+                    onClick={loadTodayRates}
                     disabled={ratesLoading || Object.keys(ratesStr).length <= 1}
                     className={`${ui.btnSecondary} py-1.5 px-3 text-xs shrink-0`}
                   >
-                    <RefreshCw size={13} className={ratesLoading ? 'animate-spin' : ''} />今日匯率
+                    <RefreshCw size={13} className={ratesLoading ? 'animate-spin' : ''} />{todayRates ? '重新查詢' : '查看今日匯率'}
                   </button>
                 </div>
-                <div className="grid grid-cols-[64px_minmax(0,1fr)_76px_36px] gap-2 px-1 pb-1 text-[11px] text-muted">
+                <div className="grid grid-cols-[76px_minmax(0,1fr)_64px_36px] gap-2 px-1 pb-1 text-[11px] text-muted">
                   <span>幣別</span><span>匯率</span><span>小數位數</span><span />
                 </div>
                 <ul className="space-y-2">
-                  {Object.keys(ratesStr).map(code => (
-                    <li key={code} className="grid grid-cols-[64px_minmax(0,1fr)_76px_36px] gap-2 items-center">
-                      <span className="num font-bold pl-1">{code}</span>
-                      <input type="text" inputMode="decimal" aria-label={`${code} 匯率`} className={`${ui.input} num py-2`} value={ratesStr[code] ?? ''} onChange={e => setRatesStr({ ...ratesStr, [code]: e.target.value })} />
-                      <input type="text" inputMode="numeric" aria-label={`${code} 小數位數`} className={`${ui.input} num py-2`} value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({ ...precisionStr, [code]: e.target.value })} />
-                      {code !== baseCurrency
-                        ? <button onClick={() => removeCurrency(code)} aria-label={`移除 ${code}`} className={`${ui.iconBtn} hover:text-neg`}><X size={16} /></button>
-                        : <span className="text-[11px] text-muted text-center">主</span>}
-                    </li>
-                  ))}
+                  {Object.keys(ratesStr).map(code => {
+                    const today = code !== baseCurrency ? todayRates?.[code] : undefined;
+                    const same = today !== undefined && parseFloat(today) === parseFloat(ratesStr[code]);
+                    return (
+                      <li key={code}>
+                        <div className="grid grid-cols-[76px_minmax(0,1fr)_64px_36px] gap-2 items-center">
+                          <span className="pl-1 min-w-0">
+                            <span className="num font-bold block">{code}</span>
+                            {currencyName(code) && <span className="text-[11px] text-muted block truncate">{currencyName(code)}</span>}
+                          </span>
+                          <input type="text" inputMode="decimal" aria-label={`${code} 匯率`} className={`${ui.input} num py-2`} value={ratesStr[code] ?? ''} onChange={e => setRatesStr({ ...ratesStr, [code]: e.target.value })} />
+                          <input type="text" inputMode="numeric" aria-label={`${code} 小數位數`} className={`${ui.input} num py-2`} value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({ ...precisionStr, [code]: e.target.value })} />
+                          {code !== baseCurrency
+                            ? <button onClick={() => removeCurrency(code)} aria-label={`移除 ${code}`} className={`${ui.iconBtn} hover:text-neg`}><X size={16} /></button>
+                            : <span className="text-[11px] text-muted text-center">主</span>}
+                        </div>
+                        {today !== undefined && (
+                          <div className="flex items-center gap-2 pl-[84px] mt-1 text-xs text-muted">
+                            <span>今日 <span className="num text-ink-2">{today}</span></span>
+                            {same
+                              ? <span className="text-pos inline-flex items-center gap-0.5"><Check size={12} />相同</span>
+                              : <button type="button" onClick={() => setRatesStr({ ...ratesStr, [code]: today })} className="text-accent font-medium hover:underline">套用</button>}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
+                {todayNote && <p className={`${ui.hint} mt-2`}>{todayNote}</p>}
                 {ratesNote && <p className={`${ui.hint} mt-2`}>{ratesNote}</p>}
                 <p className="text-[11px] text-muted mt-1.5">
                   今日匯率來自 <a href={EXCHANGE_RATE_SOURCE_URL} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a>，是市場中間價，和換匯店的牌價會有一點差距。
                 </p>
               </div>
-              <div className="flex gap-2">
-                <input type="text" aria-label="新幣別代碼" placeholder="新增幣別，例如 KRW" className={`${ui.input} uppercase placeholder:normal-case`} value={newCurrency} onChange={e => setNewCurrency(e.target.value)} />
-                <button onClick={addCurrency} className={`${ui.btnSecondary} shrink-0`}>新增</button>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <select aria-label="新增幣別" className={ui.select} value={newCurrency} onChange={e => setNewCurrency(e.target.value)}>
+                    <option value="">新增幣別…</option>
+                    {CURRENCIES.filter(c => !(c.code in ratesStr)).map(c => <option key={c.code} value={c.code}>{c.code} {c.name}</option>)}
+                    <option value={OTHER_CURRENCY}>其他（自己輸入代碼）</option>
+                  </select>
+                  <button onClick={addCurrency} disabled={!newCurrency} className={`${ui.btnSecondary} shrink-0`}>新增</button>
+                </div>
+                {newCurrency === OTHER_CURRENCY && (
+                  <input type="text" maxLength={3} aria-label="新幣別代碼" placeholder="3 碼英文代碼，例如 CZK" className={`${ui.input} uppercase placeholder:normal-case`} value={customCurrencyInput} onChange={e => setCustomCurrencyInput(e.target.value)} />
+                )}
               </div>
             </div>
           )}

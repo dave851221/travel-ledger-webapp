@@ -5,7 +5,7 @@
  *       拿回一次性 token_hash → supabase.auth.verifyOtp 換成正式 session。
  * LIFF：liff.getAccessToken() 直接交給 auth-line（不用跳頁），見 signInWithLiffAccessToken()。
  *
- * state 防 CSRF、nonce 防重放，都存在 sessionStorage，只用一次。
+ * state 防 CSRF、nonce 防重放，存在 localStorage（手機上授權完可能回到新分頁），只用一次、15 分鐘過期。
  */
 import { supabase } from '../../api/supabase';
 import { rememberReturnTo, siteRootUrl } from './session';
@@ -24,8 +24,8 @@ function randomString(bytes = 16): string {
 export function startLineLogin(returnTo: string): void {
   if (!CHANNEL_ID) throw new Error('line_not_configured');
   rememberReturnTo(returnTo);
-  const saved: LineOAuthState = { state: randomString(), nonce: randomString(), redirectUri: siteRootUrl() };
-  sessionStorage.setItem(LINE_STATE_KEY, JSON.stringify(saved));
+  const saved: LineOAuthState = { state: randomString(), nonce: randomString(), redirectUri: siteRootUrl(), at: Date.now() };
+  localStorage.setItem(LINE_STATE_KEY, JSON.stringify(saved));
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: CHANNEL_ID,

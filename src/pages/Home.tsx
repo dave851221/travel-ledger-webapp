@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check } from 'lucide-react';
+import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check, X } from 'lucide-react';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -8,6 +8,8 @@ import Toast from '../components/Toast';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getCurrencyPrecision } from '../utils/finance';
+import { CURRENCIES, normalizeCurrencyCode } from '../utils/currencies';
+import { isSubmitEnter } from '../utils/keyboard';
 import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
 import { peekReturnTo, signOut, useSession } from '../features/auth/session';
 import SignInPanel from '../features/auth/SignInPanel';
@@ -24,6 +26,9 @@ import { getLocalDateString } from '../utils/date';
 const TRIPS_PER_GROUP = 3;
 const APP_NAME = PRODUCT_NAME;
 const DEFAULT_CATEGORIES = ['餐飲', '交通', '住宿', '購物', '景點', '其他'];
+// 開放版：建立旅程時就能調整，預設帶 emoji（圖示與顏色仍依關鍵字對應，見 utils/category.ts）
+const PUBLIC_DEFAULT_CATEGORIES = ['🍜 餐飲', '🚃 交通', '🏨 住宿', '🛍️ 購物', '🎡 景點', '🎁 伴手禮', '📦 其他'];
+const OTHER_CURRENCY = '__other__';
 
 const EMPTY_NEW_TRIP = {
   name: '',
@@ -31,8 +36,6 @@ const EMPTY_NEW_TRIP = {
   access_code: '',
   base_currency: 'TWD',
   category: '',
-  // 開放版：建立者自己在這趟的名字（必須是參與人員之一）
-  my_name: '',
   // 旅程日期（選填）
   start_date: '',
   end_date: '',
@@ -78,6 +81,15 @@ const Home: React.FC = () => {
   const [savingOrder, setSavingOrder] = useState(false);
 
   const [newTrip, setNewTrip] = useState(EMPTY_NEW_TRIP);
+  // 開放版：記帳分類（建立時可增減）與自訂主幣別（null = 用選單上的）
+  const [newCategories, setNewCategories] = useState<string[]>(PUBLIC_DEFAULT_CATEGORIES);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [customCurrency, setCustomCurrency] = useState<string | null>(null);
+  const addNewCategory = () => {
+    const cat = newCategoryInput.trim();
+    if (cat && !newCategories.includes(cat)) setNewCategories([...newCategories, cat]);
+    setNewCategoryInput('');
+  };
   const [submitting, setSubmitting] = useState(false);
   // 建立旅程的錯誤顯示在表單裡；專案禁用原生 alert()
   const [createError, setCreateError] = useState<string | null>(null);
@@ -203,34 +215,40 @@ const Home: React.FC = () => {
     if (membersArray.length === 0) { setCreateError('請至少輸入一位參與人員'); return; }
     const dates = normalizeTripDates(newTrip.start_date, newTrip.end_date);
     if ('error' in dates) { setCreateError(dates.error); return; }
+    // 主幣別：選單上的，或「其他」自己輸入的 3 碼代碼
+    const baseCurrency = customCurrency !== null ? normalizeCurrencyCode(customCurrency) : newTrip.base_currency;
+    if (!baseCurrency) { setCreateError('主幣別請輸入 3 碼英文代碼，例如 CZK'); return; }
 
     if (IS_PUBLIC) {
-      // 開放版：trips 沒有 INSERT 權限，一律走 app.create_trip（建立者成為 owner 並加入）
-      const myName = newTrip.my_name.trim() || membersArray[0];
-      if (!membersArray.includes(myName)) { setCreateError('「你的名字」要是參與人員之一'); return; }
+      if (newCategories.length === 0) { setCreateError('請至少留一個記帳分類'); return; }
+      // 開放版：trips 沒有 INSERT 權限，一律走 app.create_trip（建立者成為 owner 並加入）。
+      // 建立時不問「你是哪一位」（David 2026-11-27）：先掛在第一位成員，進旅程後馬上請他選（Dashboard 的 ?who=1）
+      const myName = membersArray[0];
       try {
         setSubmitting(true);
         const { data: newId, error } = await supabase.rpc('create_trip', {
           p_name: tripName,
           p_members: membersArray,
           p_my_name: myName,
-          p_base_currency: newTrip.base_currency,
-          p_categories: DEFAULT_CATEGORIES,
+          p_base_currency: baseCurrency,
+          p_categories: newCategories,
           p_category: newTrip.category.trim() || null,
           // 精度與舊版建立時一致，跟建立一起寫進去
-          p_precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) },
+          p_precision_config: { [baseCurrency]: getCurrencyPrecision(baseCurrency) },
           p_start_date: dates.start_date,
           p_end_date: dates.end_date,
         });
         if (error) throw error;
         setIsModalOpen(false);
         setNewTrip(EMPTY_NEW_TRIP);
-        navigate(`/trip/${newId}/dashboard`);
+        setNewCategories(PUBLIC_DEFAULT_CATEGORIES);
+        setCustomCurrency(null);
+        navigate(membersArray.length > 1 ? `/trip/${newId}/dashboard?who=1` : `/trip/${newId}/dashboard`);
       } catch (err) {
         // supabase 的錯誤不是 Error 的實例，但有 message
         const msg = (err as { message?: string } | null)?.message ?? String(err);
         setCreateError(msg.includes('invalid_name') ? '每位成員的名字要 1～20 個字'
-          : msg.includes('too_many_members') ? '成員最多 30 位'
+          : msg.includes('too_many_members') ? '成員最多 150 位'
           : msg.includes('trips_name_check') ? '旅程名稱最多 60 個字'
           : '建立失敗，請再試一次');
       } finally {
@@ -247,14 +265,14 @@ const Home: React.FC = () => {
           name: tripName,
           members: membersArray,
           access_code: newTrip.access_code.trim() || null,
-          base_currency: newTrip.base_currency,
+          base_currency: baseCurrency,
           category: newTrip.category.trim() || null,
           start_date: dates.start_date,
           end_date: dates.end_date,
           categories: DEFAULT_CATEGORIES,
-          rates: { [newTrip.base_currency]: 1 },
+          rates: { [baseCurrency]: 1 },
           // 以前只有 TWD 給 0 位，JPY 主幣的旅程會顯示成 ¥1,000.00、分帳拆出 333.33
-          precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) }
+          precision_config: { [baseCurrency]: getCurrencyPrecision(baseCurrency) }
         }])
         .select(TRIP_COLUMNS);
 
@@ -263,6 +281,7 @@ const Home: React.FC = () => {
       setTrips([data[0], ...trips]);
       setIsModalOpen(false);
       setNewTrip(EMPTY_NEW_TRIP);
+      setCustomCurrency(null);
     } catch (err) {
       setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -464,7 +483,8 @@ const Home: React.FC = () => {
           </div>
         )}
 
-        <footer className="mt-10 text-center text-xs text-muted">Made by 代杰</footer>
+        {/* 開放版不放個人名字 */}
+        <footer className="mt-10 text-center text-xs text-muted">{IS_PUBLIC ? PRODUCT_NAME : 'Made by 代杰'}</footer>
       </main>
 
       <Toast toast={toast} onDismiss={dismissToast} />
@@ -528,22 +548,37 @@ const Home: React.FC = () => {
           />
           {IS_PUBLIC && (
             <div>
-              <label htmlFor="trip-my-name" className={ui.label}>
-                你的名字 <span className="text-muted font-normal">· 要是上面的參與人員之一，留空就用第一位</span>
-              </label>
-              <input
-                id="trip-my-name"
-                type="text"
-                maxLength={20}
-                list="home-trip-members"
-                placeholder="例如：小明"
-                className={ui.input}
-                value={newTrip.my_name}
-                onChange={e => setNewTrip({ ...newTrip, my_name: e.target.value })}
-              />
-              <datalist id="home-trip-members">
-                {newTrip.members.split(/[,，、]/).map(m => m.trim()).filter(Boolean).map(m => <option key={m} value={m} />)}
-              </datalist>
+              <p className={ui.label}>
+                記帳分類 <span className="text-muted font-normal">· 之後也可以在旅程設定裡修改</span>
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {newCategories.map(cat => (
+                  <span key={cat} className="inline-flex items-center gap-1 rounded-full border border-line bg-sunk pl-3 pr-1 py-1 text-sm">
+                    {cat}
+                    <button
+                      type="button"
+                      aria-label={`移除分類 ${cat}`}
+                      onClick={() => setNewCategories(newCategories.filter(c => c !== cat))}
+                      className="w-5 h-5 rounded-full inline-flex items-center justify-center text-muted hover:text-neg"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="text"
+                  aria-label="新增分類"
+                  maxLength={12}
+                  placeholder="新增分類，例如 ☕ 咖啡"
+                  className={ui.input}
+                  value={newCategoryInput}
+                  onChange={e => setNewCategoryInput(e.target.value)}
+                  onKeyDown={e => { if (isSubmitEnter(e)) { e.preventDefault(); addNewCategory(); } }}
+                />
+                <button type="button" onClick={addNewCategory} className={`${ui.btnSecondary} shrink-0`}>新增</button>
+              </div>
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -552,14 +587,27 @@ const Home: React.FC = () => {
               <select
                 id="trip-currency"
                 className={ui.select}
-                value={newTrip.base_currency}
-                onChange={e => setNewTrip({ ...newTrip, base_currency: e.target.value })}
+                value={customCurrency !== null ? OTHER_CURRENCY : newTrip.base_currency}
+                onChange={e => {
+                  if (e.target.value === OTHER_CURRENCY) { setCustomCurrency(''); return; }
+                  setCustomCurrency(null);
+                  setNewTrip({ ...newTrip, base_currency: e.target.value });
+                }}
               >
-                <option value="TWD">TWD 新台幣</option>
-                <option value="JPY">JPY 日圓</option>
-                <option value="USD">USD 美金</option>
-                <option value="EUR">EUR 歐元</option>
+                {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code} {c.name}</option>)}
+                <option value={OTHER_CURRENCY}>其他（自己輸入代碼）</option>
               </select>
+              {customCurrency !== null && (
+                <input
+                  type="text"
+                  aria-label="自訂主幣別代碼"
+                  maxLength={3}
+                  placeholder="3 碼英文代碼，例如 CZK"
+                  className={`${ui.input} uppercase placeholder:normal-case mt-2`}
+                  value={customCurrency}
+                  onChange={e => setCustomCurrency(e.target.value)}
+                />
+              )}
             </div>
             {!IS_PUBLIC && <div>
               <label htmlFor="trip-code" className={ui.label}>

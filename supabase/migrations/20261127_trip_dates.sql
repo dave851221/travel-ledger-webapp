@@ -4,6 +4,7 @@
 -- 一天的旅程只填 start_date；一段時間再加 end_date（含當天，不早於 start_date）。
 -- 都沒填的旅程首頁照舊用建立時間。只新增欄位，不動既有資料。
 -- 開放版的 create_trip 多兩個參數（舊的 8 參數版本拿掉，避免同名函式）。
+-- 函式本體以 20261126_app_roles.sql 之後的版本為準（成員上限 app.max_members()）。
 -- ============================================================
 
 ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS start_date DATE;
@@ -63,7 +64,7 @@ BEGIN
     IF v_members IS NULL OR NOT (v_me = ANY (v_members)) THEN
         RAISE EXCEPTION 'my_name_not_in_members' USING ERRCODE = '22023';
     END IF;
-    IF cardinality(v_members) > 30 THEN
+    IF cardinality(v_members) > app.max_members() THEN
         RAISE EXCEPTION 'too_many_members' USING ERRCODE = '22023';
     END IF;
 

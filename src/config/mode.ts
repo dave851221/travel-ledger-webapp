@@ -40,8 +40,8 @@ export const tripStorageKey = (name: string, tripId: string): string =>
 /** 「我是誰」記在這台裝置的鍵 */
 export const meKey = (tripId: string): string => tripStorageKey('me', tripId);
 
-/** 登入狀態的資料（登入回來要去哪頁、LINE 的 state）存在 sessionStorage，不在這裡清 */
-const KEEP_ON_USER_CHANGE = new Set([globalStorageKey('cache_owner')]);
+/** 登入流程本身用的鍵（登入回來要去哪頁、LINE 的 state）不能在換人時清掉，否則剛登入就忘了要回哪 */
+const KEEP_ON_USER_CHANGE = new Set(['cache_owner', 'auth_return_to', 'line_oauth'].map(globalStorageKey));
 
 /**
  * 開放版：清掉這台裝置上屬於「上一個登入的人」的資料（旅程清單快取、帳目快取、我是誰、聊天紀錄…）。

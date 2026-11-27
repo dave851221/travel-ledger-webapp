@@ -58,31 +58,32 @@ export function useSession(): SessionState {
 }
 
 /** 登入完成後要回到哪一頁（HashRouter 的路徑，例如 /join/xxx/yyy）。只接受站內路徑 */
+// 存在 localStorage（附時間，30 分鐘過期）：手機上登入完常常回到新分頁，sessionStorage 跟不過去
 const RETURN_KEY = 'tlb:auth_return_to';
+const RETURN_TTL_MS = 30 * 60 * 1000;
+
+const isSitePath = (v: unknown): v is string => typeof v === 'string' && v.startsWith('/') && !v.startsWith('//');
 
 export function rememberReturnTo(path: string): void {
-  if (!path.startsWith('/') || path.startsWith('//')) return;
-  try { sessionStorage.setItem(RETURN_KEY, path); } catch { /* 隱私模式：登入後回首頁 */ }
+  if (!isSitePath(path)) return;
+  try { localStorage.setItem(RETURN_KEY, JSON.stringify({ path, at: Date.now() })); } catch { /* 隱私模式：登入後回首頁 */ }
 }
 
 /** 看一下記了哪一頁但不清掉（首頁的登入按鈕用：從 Dashboard 被送回來時，登入後要回 Dashboard） */
 export function peekReturnTo(): string | null {
   try {
-    const v = sessionStorage.getItem(RETURN_KEY);
-    return v && v.startsWith('/') && !v.startsWith('//') ? v : null;
+    const v = JSON.parse(localStorage.getItem(RETURN_KEY) || 'null') as { path?: string; at?: number } | null;
+    if (!v || Date.now() - (v.at ?? 0) > RETURN_TTL_MS) return null;
+    return isSitePath(v.path) ? v.path : null;
   } catch {
     return null;
   }
 }
 
 export function takeReturnTo(): string | null {
-  try {
-    const v = sessionStorage.getItem(RETURN_KEY);
-    sessionStorage.removeItem(RETURN_KEY);
-    return v && v.startsWith('/') && !v.startsWith('//') ? v : null;
-  } catch {
-    return null;
-  }
+  const v = peekReturnTo();
+  try { localStorage.removeItem(RETURN_KEY); } catch { /* ignore */ }
+  return v;
 }
 
 /** 網站的根網址（不含 # 之後），OAuth 回來的落點 */
