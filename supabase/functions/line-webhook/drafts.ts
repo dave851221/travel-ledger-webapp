@@ -9,7 +9,7 @@
 // ============================================================
 
 import { reconcileReceiptItems, sanitizeReceiptItems } from "../_shared/itemSplit.ts"
-import { RECEIPTS_BUCKET } from "./config.ts"
+import { IS_PUBLIC, RECEIPTS_BUCKET } from "./config.ts"
 import { supabase } from "./db.ts"
 import type { PendingDraft } from "./types.ts"
 
@@ -68,9 +68,20 @@ export async function getOutstandingDrafts(sourceId: string): Promise<Outstandin
   return candidates.filter(c => !usedSet.has(c.nonce))
 }
 
-/** 由 photo id 或路徑組出 Storage 的公開網址 */
-export function photoPublicUrl(photoId: string, tripId: string): string {
+/** 開放版的簽名網址有效 7 天：LINE 卡片上的照片、AI 讀照片都夠用 */
+const SIGNED_URL_TTL = 7 * 24 * 60 * 60
+
+/**
+ * 由 photo id 或路徑組出看得到照片的網址。
+ * 舊版 bucket 是公開的，直接給公開網址；開放版是私有 bucket，給簽名網址（拿不到時回空字串）。
+ */
+export async function photoViewUrl(photoId: string, tripId: string): Promise<string> {
   const path = String(photoId).includes('/') ? String(photoId) : `expenses/${tripId}/${photoId}.jpg`
+  if (IS_PUBLIC) {
+    const { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, SIGNED_URL_TTL)
+    if (error) console.error('[PHOTO] signed url failed', error.message)
+    return data?.signedUrl ?? ''
+  }
   const { data } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(path)
   return data.publicUrl
 }

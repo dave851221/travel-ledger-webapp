@@ -16,7 +16,8 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { buildEventContext, extendFollowup, isQuotingBot } from "./context.ts"
-import { LINE_CHANNEL_ACCESS_TOKEN } from "./config.ts"
+import { IS_PUBLIC, LINE_CHANNEL_ACCESS_TOKEN } from "./config.ts"
+import { handlePublicBindPostback, isPublicBindPostback } from "./handlers/bind-public.ts"
 import { claimWebhookEvent, supabase } from "./db.ts"
 import { replyMessage, setDefaultQuickReply, verifySignature } from "./line-api.ts"
 import { BOT_SELF_INTRODUCTION, getQuickReply } from "./messages.ts"
@@ -75,13 +76,20 @@ serve(async (req) => {
       // --- 被加進群組／聊天室（M19）---
       // 以前完全不處理 join，機器人進來之後一片安靜，
       // 沒人知道它會做什麼、也不知道要先輸入 ID:代碼 綁定旅程。
-      if (event.type === 'join') {
+      // 開放版：加好友（follow）也自我介紹，告訴對方怎麼綁定
+      if (event.type === 'join' || (IS_PUBLIC && (event as { type: string }).type === 'follow')) {
         console.log(`[JOIN] Added to ${sourceType} ${sourceId}`)
         await replyMessage(replyToken, [{
           type: 'text',
           text: BOT_SELF_INTRODUCTION,
           quickReply: isBound ? boundQR : getQuickReply(false),
         }], sourceId)
+        continue
+      }
+
+      // --- 開放版：選旅程的按鈕（還沒綁定時也要能按）---
+      if (IS_PUBLIC && event.type === 'postback' && isPublicBindPostback(event.postback?.data)) {
+        await handlePublicBindPostback(ctx, event.postback.data)
         continue
       }
 
@@ -139,7 +147,8 @@ serve(async (req) => {
       }
 
       // 其他，尚未綁定狀態下的聊天
-      await replyMessage(replyToken, [{ type: 'text', text: '👋 請先輸入 ID:代碼 來連結旅程。', quickReply: getQuickReply(false) }], sourceId)
+      const bindHint = IS_PUBLIC ? '👋 請先輸入「綁定」，選要記帳的旅程。' : '👋 請先輸入 ID:代碼 來連結旅程。'
+      await replyMessage(replyToken, [{ type: 'text', text: bindHint, quickReply: getQuickReply(false) }], sourceId)
     }
     return new Response('OK', { status: 200 })
   } catch (err) {

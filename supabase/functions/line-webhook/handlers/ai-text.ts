@@ -47,12 +47,13 @@ import {
   CHAT_HISTORY_TURNS,
   FALLBACK_NOTICES,
   GOOGLE_MAPS_API_KEY,
+  TRIP_GONE_MSG,
   WEB_SEARCH_MAX_USES,
   WEBAPP_URL,
 } from "../config.ts"
 import { type EventContext, extendFollowup, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
-import { type OutstandingDraft, photoPublicUrl, storePendingExpense, supersedeDraft } from "../drafts.ts"
+import { type OutstandingDraft, photoViewUrl, storePendingExpense, supersedeDraft } from "../drafts.ts"
 import {
   ai,
   analyzeReceiptPhoto,
@@ -67,6 +68,7 @@ import {
   YOSHI_SYSTEM_INSTRUCTION,
 } from "../ai.ts"
 import { loadItinerary } from "../itinerary.ts"
+import { chargeAi } from "../quota.ts"
 import { pushMessage, replyMessage, showLoading } from "../line-api.ts"
 import {
   buildDeleteConfirmCard,
@@ -163,10 +165,13 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
   // 以前這裡直接讀 trip.name，整個 event 丟出例外 → 500 → LINE 會重送同一則訊息（M5）。
   if (!trip) {
     await replyMessage(replyToken, [{
-      type: 'text', text: '❌ 找不到這個旅程，可能已被刪除。請重新輸入「ID:代碼」綁定。',
+      type: 'text', text: TRIP_GONE_MSG,
     }], sourceId)
     return
   }
+
+  // 開放版：先扣這趟的 AI 次數，用完就回說明、不叫 AI
+  if (!(await chargeAi(ctx, tripId, 'text'))) return
 
   // 不阻塞主流程，但交給 waitUntil 保證回應送出後仍寫得完。
   // 接話的訊息要等 AI 判斷完才寫：它決定不回的話，那句話只是群組裡的閒聊，不該進對話歷史。
@@ -211,7 +216,7 @@ export async function handleAiText(ctx: EventContext, route: TextRoute): Promise
   const photoDraft = outstandingDrafts.find(d => d.photoIds.length > 0) ?? null
   let attachedPhoto = false
   if (photoDraft) {
-    const part = await fetchPhotoPart(photoPublicUrl(photoDraft.photoIds[0], photoDraft.tripId))
+    const part = await fetchPhotoPart(await photoViewUrl(photoDraft.photoIds[0], photoDraft.tripId))
     if (part) {
       const lastTurn = conversation[conversation.length - 1]
       lastTurn.parts.unshift({ text: photoDraftHint(photoDraft) })
@@ -378,7 +383,7 @@ async function proposeExpenses(scope: AiScope, args: ToolArgs, extraText?: strin
       expense,
       title: '🤖 AI 記帳預覽',
       altText: `確認記帳: ${expense.description}`,
-      heroUrl: photoIds.length > 0 ? photoPublicUrl(photoIds[0], trip.id) : null,
+      heroUrl: photoIds.length > 0 ? (await photoViewUrl(photoIds[0], trip.id)) || null : null,
       nonce,
       webUrl,
       // 草稿卡片的「✏️ 編輯」只帶 nonce，完整內容 LiffEdit 自己去 pending 列撈（T2）
@@ -526,7 +531,7 @@ async function analyzeReceipt(scope: AiScope, args: ToolArgs): Promise<void> {
 
   /** 把選定的那一筆的**所有**收據照片一起送去分析並回覆 */
   const analyzeChosen = async (chosen: RecentExpense) => {
-    const urls: string[] = (chosen.photo_urls ?? []).map((path: string) => photoPublicUrl(path, tripId))
+    const urls: string[] = (await Promise.all((chosen.photo_urls ?? []).map((path: string) => photoViewUrl(path, tripId)))).filter(Boolean)
     const content = await analyzeReceiptPhoto(urls, question, label(chosen))
     // 開頭標明分析的是哪一筆，使用者才看得出有沒有挑錯
     const answer = `🔍 ${chosen.date} ${label(chosen)}\n\n${content}`

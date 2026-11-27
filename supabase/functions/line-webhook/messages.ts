@@ -7,7 +7,8 @@
 // import config.ts、db.ts、line-api.ts 與 _shared/finance.ts。
 // ============================================================
 
-import { LIFF_ID, WEBAPP_URL } from "./config.ts"
+import { IS_PUBLIC, LIFF_ID, WEBAPP_URL } from "./config.ts"
+import { PERSONA } from "../_shared/assistant/persona.ts"
 import { buildLiffPageUrl } from "../_shared/liffEcho.ts"
 import { supabase } from "./db.ts"
 import { replyMessage } from "./line-api.ts"
@@ -28,6 +29,11 @@ export function preferenceLiffUrl(tripId: string): string {
   return liffPageUrl('/liff/preference', `tripId=${tripId}`)
 }
 
+/** 旅程網頁（開放版要登入、是成員才看得到） */
+export function tripWebUrl(tripId: string): string {
+  return `${WEBAPP_URL}/#/trip/${tripId}/dashboard`
+}
+
 /**
  * 「設定?」「設定:」的回覆用：把「記帳偏好」按鈕排到第一顆。
  * 一般的 boundQR 也有這顆，但排在最後 —— 使用者正在講偏好，那顆該最顯眼。
@@ -39,6 +45,8 @@ export function preferenceQuickReply(tripId: string, showGroupToggle: boolean, g
 }
 
 export function preferenceQuickReplyItem(tripId: string) {
+  // 開放版還沒有 LIFF：改成送出「設定?」，由機器人說明怎麼用文字設定
+  if (IS_PUBLIC) return { type: "action", action: { type: "message", label: "⚙️ 記帳偏好", text: "設定?" } }
   return {
     type: "action",
     action: { type: "uri", label: "⚙️ 記帳偏好", uri: preferenceLiffUrl(tripId) },
@@ -52,7 +60,7 @@ export function preferenceQuickReplyItem(tripId: string) {
 export const GROUP_MODE_INFO: Record<GroupMode, { name: string; button: string; command: string; summary: string }> = {
   mention: {
     name: '提及模式', button: '🎯 提及模式', command: '模式:提及模式',
-    summary: '照片都會處理；文字要 @耀西 或以「耀西」開頭才回應（剛回覆過的人 3 分鐘內接著講、或回覆耀西的訊息也算）',
+    summary: `照片都會處理；文字要 @${PERSONA.name} 或以「${PERSONA.wakeWords[PERSONA.wakeWords.length - 1]}」開頭才回應（剛回覆過的人 3 分鐘內接著講、或回覆${PERSONA.name}的訊息也算）`,
   },
   all: {
     name: '全回應模式', button: '📣 全回應模式', command: '模式:全回應模式',
@@ -60,7 +68,7 @@ export const GROUP_MODE_INFO: Record<GroupMode, { name: string; button: string; 
   },
   silent: {
     name: '靜音模式', button: '🔕 靜音模式', command: '模式:靜音模式',
-    summary: '照片完全不處理（不辨識、不出卡片）；文字跟提及模式一樣要 @耀西 或以「耀西」開頭',
+    summary: `照片完全不處理（不辨識、不出卡片）；文字跟提及模式一樣要 @${PERSONA.name} 或以「${PERSONA.wakeWords[PERSONA.wakeWords.length - 1]}」開頭`,
   },
 }
 
@@ -73,6 +81,8 @@ export function getQuickReply(
   if (!bound) {
     return {
       items: [
+        // 開放版綁定只要按一下（bind-public.ts）；舊版要輸入代碼，沒辦法做成按鈕
+        ...(IS_PUBLIC ? [{ type: "action", action: { type: "message", label: "🔗 綁定旅程", text: "綁定" } }] : []),
         { type: "action", action: { type: "message", label: "❓ 使用說明", text: "使用說明" } },
       ]
     }
@@ -113,6 +123,8 @@ export function getQuickReply(
  *    舊格式 LiffEdit 仍然看得懂，已發出去的卡片不會壞。
  */
 export function buildEditLiffUrl(expense: { id: string }, tripId: string, sourceId: string): string {
+  // 開放版：存好的帳到網頁上改（要登入、是成員）
+  if (IS_PUBLIC) return tripWebUrl(tripId)
   return liffPageUrl('/liff/edit', `tripId=${tripId}&id=${expense.id}&u=${encodeURIComponent(sourceId)}`)
 }
 
@@ -122,11 +134,14 @@ export function buildEditLiffUrl(expense: { id: string }, tripId: string, source
  * LiffEdit 自己去撈（順便就能發現這張卡片已經被確認或取消過了）。
  */
 export function buildDraftLiffUrl(tripId: string, nonce: string, sourceId: string): string {
+  // 開放版沒有 LIFF，草稿的內容只在機器人這邊：不給按鈕（空字串），用打字修改（「改 500」）
+  if (IS_PUBLIC) return ''
   return liffPageUrl('/liff/edit', `tripId=${tripId}&n=${nonce}&u=${encodeURIComponent(sourceId)}`)
 }
 
 /** 🧾 逐項分：同一個 LIFF 編輯頁，先開品項清單點「這是誰的」，再進表單確認 */
 export function buildItemsLiffUrl(tripId: string, nonce: string, sourceId: string): string {
+  if (IS_PUBLIC) return ''
   return `${buildDraftLiffUrl(tripId, nonce, sourceId)}&mode=items`
 }
 
@@ -278,6 +293,8 @@ export function buildExpenseCard(opts: {
   const cancelButton = { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
   const webButton = { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
   const editButton = { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } }
+  // 開放版沒有 LIFF：liffUrl 是空字串，編輯／填金額的按鈕都不出現（改用打字）
+  const hasLiff = !!liffUrl
   const row = (...contents: unknown[]) => ({ type: "box", layout: "horizontal", spacing: "sm", contents })
   const pairUp = (buttons: unknown[]) => {
     const rows: unknown[] = []
@@ -289,7 +306,7 @@ export function buildExpenseCard(opts: {
   const soloAction = { type: "button", style: "primary", color: "#FF9F0A", action: { type: "postback", label: "👤 只算我", data: JSON.stringify({ act: "me", n: nonce }) } }
   const footerButtons = needsAmount
     ? [
-        { type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: unidentified ? "✏️ 填寫內容" : "✏️ 填金額", uri: liffUrl } },
+        ...(hasLiff ? [{ type: "button", style: "primary", color: "#1DB446", action: { type: "uri", label: unidentified ? "✏️ 填寫內容" : "✏️ 填金額", uri: liffUrl } }] : []),
         // 只算我 + 取消 一列，跟有金額的卡片同樣是 1 + 2 + 1 的高度
         ...(soloButton ? [row(soloAction, cancelButton)] : [cancelButton]),
         webButton,
@@ -301,7 +318,7 @@ export function buildExpenseCard(opts: {
         ...pairUp([
           ...(soloButton ? [soloAction] : []),
           ...(itemsUrl ? [{ type: "button", style: "primary", color: "#34A3A3", action: { type: "uri", label: "🧾 逐項分", uri: itemsUrl } }] : []),
-          editButton,
+          ...(hasLiff ? [editButton] : []),
           cancelButton,
           webButton,
         ]),
@@ -527,7 +544,7 @@ export function describeProcessedAction(actionType: string | null | undefined): 
   }
 }
 
-export const BOT_SELF_INTRODUCTION = `Yoshi! 我是旅遊記帳小幫手「耀西」🥚
+const LEGACY_INTRODUCTION = `Yoshi! 我是旅遊記帳小幫手「耀西」🥚
 
 🔗 先綁定旅程
 輸入「ID:旅程代碼」（代碼在網頁的旅程設定），有密碼的話再輸入密碼
@@ -546,6 +563,26 @@ export const BOT_SELF_INTRODUCTION = `Yoshi! 我是旅遊記帳小幫手「耀�
 👥 群組裡請 @耀西 或用「耀西」開頭叫我，對我的訊息按「回覆」也可以
 🔕 不想讓我看群組裡的照片，就按下方按鈕切成靜音模式
 ⚙️ 分帳習慣按下方「記帳偏好」設定；今日支出、旅程總覽也在下方按鈕（「本月支出」「結算」直接打字）`
+
+const PUBLIC_INTRODUCTION = `喵～我是旅行小本本的記帳小幫手「旅行喵喵」🐱
+
+🔗 先綁定旅程
+1. 到網頁版用 LINE 登入，建立或加入旅程：${WEBAPP_URL}/
+2. 回到這裡輸入「綁定」，選要記的旅程
+（群組也一樣：由旅程成員輸入「綁定」）
+
+💰 記帳：用講的、拍照都可以
+・「晚餐 1200」「小明付計程車 300」
+・傳收據或商品照片，我幫你讀出來；也可以傳語音
+・卡片按「✅ 確認存入」才會存；講錯就說「剛剛那筆改 500」
+・存過的也能改或刪：「把昨天的拉麵改 300」
+
+🗺 也可以問我：「總共花多少？我還要給誰多少？」
+
+👥 群組裡請 @旅行喵喵 或用「喵喵」開頭叫我，對我的訊息按「回覆」也可以
+🔕 不想讓我看群組裡的照片，就按下方按鈕切成靜音模式`
+
+export const BOT_SELF_INTRODUCTION = IS_PUBLIC ? PUBLIC_INTRODUCTION : LEGACY_INTRODUCTION
 
 /**
  * 快捷查詢的「各幣別合計」字串。

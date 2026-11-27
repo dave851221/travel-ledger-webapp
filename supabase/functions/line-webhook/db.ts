@@ -6,10 +6,12 @@
 // createClient 從 _shared/deps.ts 拿，測試時才換得成 npm 版（見 vitest.config.ts）。
 // ============================================================
 
-import { createClient } from "../_shared/deps.ts"
-import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from "./config.ts"
+import { createClient, type SupabaseClient } from "../_shared/deps.ts"
+import { DB_SCHEMA, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from "./config.ts"
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+// 開放版（DB_SCHEMA = app）：表名與舊版相同，所以其他模組的 .from('trips') 等不用改
+// 型別上當成一般的 client（共用模組都收 SupabaseClient），schema 只影響實際查哪裡
+export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { db: { schema: DB_SCHEMA } }) as unknown as SupabaseClient
 
 /**
  * 佔用一個 webhook 事件。回傳 false 代表這個事件已經處理過（LINE 重送的第二份），呼叫端要略過。
