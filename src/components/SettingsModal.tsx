@@ -23,6 +23,7 @@ import { supabase } from '../api/supabase';
 import { IS_PUBLIC, meKey } from '../config/mode';
 import ShareSettings from '../features/auth/ShareSettings';
 import MemberManager from '../features/auth/MemberManager';
+import DeleteTrip from '../features/auth/DeleteTrip';
 import TripUsage from '../features/quota/TripUsage';
 import { useSession } from '../features/auth/session';
 import { useMyMembership } from '../features/auth/membership';
@@ -747,6 +748,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   <button onClick={() => { void exportExpensesToCSV(expenses, trip.name); }} className={`${ui.btnSecondary} py-2 shrink-0`}>下載</button>
                 </div>
               </section>
+
+              {/* 開放版：建立者可以刪掉整趟（免費名額會空出來） */}
+              {IS_PUBLIC && membership?.role === 'owner' && (
+                <DeleteTrip trip={trip} onDeleted={() => { onClose(); window.location.hash = '#/'; }} />
+              )}
             </div>
           )}
 

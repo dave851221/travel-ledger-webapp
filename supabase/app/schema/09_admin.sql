@@ -285,3 +285,18 @@ AS $$
         'limit', (SELECT free_trip_creations FROM app.quota_settings WHERE id));
 $$;
 REVOKE ALL ON FUNCTION app.trip_allowance(UUID) FROM PUBLIC, anon, authenticated;
+
+-- ── 方案一覽（升級視窗顯示用；數字以這張表為準，後台改了這裡就跟著變）────
+CREATE OR REPLACE FUNCTION app.plan_catalog()
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT coalesce(jsonb_object_agg(plan, jsonb_build_object(
+        'max_entries', max_entries, 'max_ai_calls', max_ai_calls, 'max_photos', max_photos)), '{}'::jsonb)
+    FROM app.plan_limits;
+$$;
+REVOKE ALL ON FUNCTION app.plan_catalog() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION app.plan_catalog() TO authenticated;

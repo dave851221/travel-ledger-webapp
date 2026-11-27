@@ -5,7 +5,12 @@ import imageCompression from 'browser-image-compression';
 import { supabase } from '../../api/supabase';
 import { RECEIPTS_BUCKET } from '../../utils/storage';
 import { ASSISTANT_NAME } from '../../config/assistant';
+import { IS_PUBLIC } from '../../config/mode';
+import { quotaMessage } from '../quota/quotaErrors';
 import type { ActionReply, ChatReply, DraftExpense, HistoryTurn, ReplyTarget, WebDraft } from './types';
+
+/** 開放版是 tlb-web-chat（要登入、是成員，扣這趟的 AI 次數）；supabase.functions.invoke 會自動帶登入的 JWT */
+const CHAT_FN = IS_PUBLIC ? 'tlb-web-chat' : 'web-chat';
 
 type Base = { tripId: string; memberName: string | null };
 
@@ -17,7 +22,7 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('等太久了，網路可能不太穩，請再試一次。')), TIMEOUT_MS);
   });
-  const { data, error } = await Promise.race([supabase.functions.invoke('web-chat', { body }), timeout])
+  const { data, error } = await Promise.race([supabase.functions.invoke(CHAT_FN, { body }), timeout])
     .finally(() => clearTimeout(timer));
   if (error) {
     // 離線或函式掛了：給一句看得懂的話，不要把 FunctionsFetchError 原文丟給使用者
@@ -62,6 +67,6 @@ export async function uploadChatPhoto(tripId: string, file: File): Promise<strin
   }
   const path = `expenses/${tripId}/chat_${crypto.randomUUID()}.jpg`;
   const { error } = await supabase.storage.from(RECEIPTS_BUCKET).upload(path, compressed, { contentType: 'image/jpeg' });
-  if (error) throw error;
+  if (error) throw new Error(quotaMessage(error) ?? error.message);
   return path;
 }

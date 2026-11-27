@@ -371,8 +371,8 @@ const Dashboard: React.FC = () => {
   const goHome = () => navigate('/');
   // 回顧影片不必封存也能做（David 2026-11-27）
   const openRecap = () => setRecapOpen(true);
-  // 開放版的網頁聊天還沒接上登入與額度（後端 web-chat 目前只認舊版的資料），先不顯示入口
-  const openChat = IS_PUBLIC ? undefined : () => { setChatMounted(true); setChatOpen(true); };
+  // 網頁聊天：開放版走 tlb-web-chat（登入、成員、扣這趟的 AI 額度），舊版走 web-chat
+  const openChat = () => { setChatMounted(true); setChatOpen(true); };
   const goCategory = () => { if (trip.category) navigate(`/#cat-${encodeURIComponent(trip.category)}`); };
 
   const chromeProps = {

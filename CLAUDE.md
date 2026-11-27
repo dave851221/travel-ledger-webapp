@@ -332,7 +332,7 @@ JSON 的形狀在 `_shared/tools/types.ts` 有一份複本（`ItineraryDoc`）�
 按了卡片上的按鈕（存入、撤銷、取消、修改、刪除）會補一行進對話紀錄（`remember`），不然模型以為那張卡還沒存，「剛剛那筆改 500」會再出一張新卡。
 代價：換裝置看不到之前的對話。
 
-**開放版沿用**：`web-chat/auth.ts`（現在只認旅程 id，跟網頁其他地方一樣；之後改成驗登入 JWT 與成員）與 `APP_DB_SCHEMA`（資料表所在的 schema）是唯二要換的地方。
+**開放版**：`tlb-web-chat`（同一份程式，進入點先切到開放版）：`web-chat/auth.ts` 驗登入 JWT 與成員、名字用成員名字；app schema、私有 bucket 簽名網址；叫 AI 前 `chargeAi` 扣這趟的次數。
 
 ⚠️ `ExpenseModal` 要一直掛著、用 `isOpen` 開關。一掛上就是開的話，開發模式的 StrictMode 會用第一次 render 的 0 元重跑自動分帳，把帶進來的分攤蓋掉。
 `onSuccess` 會帶新增那一筆的 id（聊天卡片的「撤銷」要用）。
