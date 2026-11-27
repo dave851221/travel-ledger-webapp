@@ -109,9 +109,9 @@ function App() {
             {IS_PUBLIC && <Route path="/join/:id/:token" element={<JoinTrip />} />}
             {IS_PUBLIC && <Route path="/s/:id/:token" element={<SharedTrip />} />}
             <Route path="/trip/:id/dashboard" element={<Dashboard />} />
-            {/* LIFF 頁面讀寫舊版的 LINE 表；開放版的 LINE 機器人在下一階段做，先不開放 */}
-            {!IS_PUBLIC && <Route path="/liff/edit" element={<LiffEdit />} />}
-            {!IS_PUBLIC && <Route path="/liff/preference" element={<LiffPreference />} />}
+            {/* 開放版也有 LIFF（旅行喵喵的卡片按鈕），頁面裡會先用 LINE 身分登入 */}
+            <Route path="/liff/edit" element={<LiffEdit />} />
+            <Route path="/liff/preference" element={<LiffPreference />} />
           </Routes>
         </Suspense>
       </div>

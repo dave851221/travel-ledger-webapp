@@ -12,6 +12,8 @@ declare global {
     /** 需要 LIFF app 開 profile scope；沒開或不在 LINE 裡會丟錯 */
     getProfile(): Promise<{ userId: string; displayName: string }>;
     sendMessages(messages: { type: 'text'; text: string }[]): Promise<void>;
+    /** LIFF 的 access token（開放版拿去 auth-line 換成網站登入） */
+    getAccessToken(): string | null;
   }
 
   interface Window {
