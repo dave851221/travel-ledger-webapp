@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowDownUp, Search, ShieldCheck } from 'lucide-react';
 import { ui } from '../../components/ui';
+import Modal from '../../components/Modal';
 import LoginBadges from '../auth/LoginBadges';
 import type { AdminAccountRow } from './types';
 
@@ -31,6 +32,8 @@ const AccountsPanel: React.FC<{ accounts: AdminAccountRow[]; busy: boolean; onSe
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<SortKey>('created');
   const [filter, setFilter] = useState<Filter>('all');
+  const [confirm, setConfirm] = useState<AdminAccountRow | null>(null);
+  const name = (a: AdminAccountRow) => a.logins.map(l => l.name || l.account).filter(Boolean)[0] ?? '這個帳號';
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -90,14 +93,40 @@ const AccountsPanel: React.FC<{ accounts: AdminAccountRow[]; busy: boolean; onSe
                   {a.allowance.paid ? '' : `/${a.allowance.limit}`}・AI {a.ai_calls}
                 </p>
               </div>
-              <button type="button" disabled={busy} onClick={() => onSetPaid(a, !a.paid)} role="switch" aria-checked={a.paid}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${a.paid ? 'bg-accent text-on-accent' : 'bg-sunk text-ink-2 hover:text-ink'}`}>
-                {a.paid ? '付費' : '免費'}
+              {/* 付費是單向的（David 2026-11-27）：免費 → 付費要確認；付費帳號只顯示標籤，點了才看得到「取消付費」 */}
+              <button type="button" disabled={busy} onClick={() => setConfirm(a)}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${a.paid ? 'bg-accent/15 text-accent' : 'border border-line text-ink-2 hover:text-ink'}`}>
+                {a.paid ? '付費' : '設為付費'}
               </button>
             </li>
           ))}
         </ul>
       )}
+
+      <Modal isOpen={!!confirm} onClose={() => setConfirm(null)} title={confirm?.paid ? '付費帳號' : '設為付費帳號？'}>
+        {confirm && (
+          <div className="space-y-4">
+            {confirm.paid ? (
+              <>
+                <p className="text-sm text-ink-2">「{name(confirm)}」是付費帳號，建立旅程不限趟數。</p>
+                <p className="text-xs text-muted">一般不需要改回免費。只有標錯時才取消。</p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setConfirm(null)} className={`${ui.btnPrimary} flex-1`}>關閉</button>
+                  <button type="button" disabled={busy} onClick={() => { onSetPaid(confirm, false); setConfirm(null); }} className={`${ui.btnDanger} flex-1`}>取消付費</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-ink-2">「{name(confirm)}」設為付費後，建立旅程不限趟數。</p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setConfirm(null)} className={`${ui.btnSecondary} flex-1`}>取消</button>
+                  <button type="button" disabled={busy} onClick={() => { onSetPaid(confirm, true); setConfirm(null); }} className={`${ui.btnAccent} flex-1`}>設為付費</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

@@ -382,15 +382,15 @@ const Home: React.FC = () => {
           <span className="text-lg sm:text-xl font-bold truncate">{APP_NAME}</span>
           <div className="ml-auto flex items-center gap-2">
             {trips.length > 1 && !loading && (
-              <button onClick={startSorting} className={`${ui.btnSecondary} px-3`} aria-label="調整旅程順序" title="調整旅程順序">
+              <button onClick={startSorting} className={`${ui.btnSecondary} h-10 py-0 px-3`} aria-label="調整旅程順序" title="調整旅程順序">
                 <ArrowDownUp size={15} /><span className="hidden sm:inline">排序</span>
               </button>
             )}
-            <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
+            <button onClick={() => setIsModalOpen(true)} className={`${ui.btnPrimary} h-10 py-0`}>
               <Plus size={16} strokeWidth={2.6} />新旅程
             </button>
             {IS_PUBLIC && (
-              <button onClick={() => setAccountOpen(true)} className={`${ui.btnSecondary} px-3`} aria-label="我的帳號" title="我的帳號（登入方式、登出）">
+              <button onClick={() => setAccountOpen(true)} className={`${ui.btnSecondary} h-10 py-0 px-3`} aria-label="我的帳號" title="我的帳號（登入方式、登出）">
                 <UserRound size={15} /><span className="hidden sm:inline">帳號</span>
               </button>
             )}

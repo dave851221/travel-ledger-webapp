@@ -42,29 +42,32 @@ const TripUsage: React.FC<{ tripId: string; compact?: boolean; refreshKey?: numb
 
   if (compact) {
     return (
-      <div className="flex items-center gap-3 rounded-2xl bg-surface border border-line pl-3 pr-1.5 py-1.5">
-        <button type="button" onClick={onOpen} className="flex-1 min-w-0 flex items-center gap-3 text-left" aria-label="查看這趟的用量">
+      <div className="flex items-center gap-2 rounded-2xl bg-surface border border-line pl-2.5 pr-1.5 py-1.5">
+        <button type="button" onClick={onOpen} className="flex-1 min-w-0 flex items-center gap-2.5 text-left" aria-label="查看這趟的用量">
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${paid ? 'bg-accent/15 text-accent' : 'bg-sunk text-ink-2'}`}>
-            {paid ? '已解鎖' : '免費'}
+            {paid ? '解鎖' : '免費'}
           </span>
           {ROWS.map(({ key, short }) => {
             const m = usage[key];
             const r = ratioOf(m);
             return (
               <span key={key} className="flex-1 min-w-0">
-                <span className={`flex items-baseline justify-between gap-1 text-[11px] leading-4 ${textTone(r)}`}>
-                  <span className="truncate">{short}</span>
-                  <span className="num font-bold">{m.used}<span className="font-normal text-muted">/{m.limit}</span></span>
+                {/* 手機上三格很擠（David 2026-11-27 名稱被切成半個字）：數字一行、名稱＋進度條一行，都不會被切 */}
+                <span className={`block text-[11px] leading-4 whitespace-nowrap num ${textTone(r)}`}>
+                  <span className="font-bold">{m.used}</span><span className="text-muted">/{m.limit}</span>
                 </span>
-                <span className="block h-1 mt-0.5 rounded-full bg-sunk overflow-hidden">
-                  <span className={`block h-full rounded-full ${barTone(r)}`} style={{ width: `${Math.max(r * 100, m.used > 0 ? 6 : 0)}%` }} />
+                <span className="flex items-center gap-1.5 mt-0.5">
+                  <span className="shrink-0 text-[10px] leading-3 text-muted whitespace-nowrap">{short}</span>
+                  <span className="flex-1 h-1 rounded-full bg-sunk overflow-hidden">
+                    <span className={`block h-full rounded-full ${barTone(r)}`} style={{ width: `${Math.max(r * 100, m.used > 0 ? 6 : 0)}%` }} />
+                  </span>
                 </span>
               </span>
             );
           })}
         </button>
         <button type="button" onClick={() => setUpgradeOpen(true)}
-          className="shrink-0 inline-flex items-center gap-1 rounded-xl bg-accent text-on-accent text-xs font-bold px-2.5 py-1.5 hover:brightness-105">
+          className="shrink-0 inline-flex items-center gap-1 rounded-xl bg-accent text-on-accent text-xs font-bold px-2 py-1.5 hover:brightness-105">
           <Sparkles size={13} />{upgradeLabel}
         </button>
         {upgrade}
