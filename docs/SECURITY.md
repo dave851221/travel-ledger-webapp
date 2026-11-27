@@ -54,6 +54,9 @@
   只限「每趟」的次數，不限每個人；總開關在 `app.quota_settings.ai_enabled`（設成 false 立刻全部停）。
 - 建立旅程：沒付過費的帳號最多建立 5 趟（`app.trip_creations` 記錄，刪掉旅程也不會空出名額），`app.paid_accounts` 裡的帳號不限。
 
+- **刪除帳號**：`app.delete_my_account`（要使用者自己打「刪除帳號」），只剩自己的旅程整趟刪除、其他旅程交給下一位；
+  登入方式的 sha256 與建立過的趟數留在 `app.deleted_identity_trips`（不存原文），重新註冊不會重拿免費名額。
+
 ## 上線時要做的設定（還沒做）
 
 - 正式資料庫：把 `supabase/app/app.generated.sql` 當成第一支 migration 跑一次（之後的變更照 CLAUDE.md 寫成 `supabase/migrations/`）；

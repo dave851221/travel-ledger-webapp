@@ -86,6 +86,7 @@ REVOKE ALL ON app.plan_limits, app.quota_settings, app.paid_accounts, app.trip_c
 GRANT ALL ON app.plan_limits, app.quota_settings, app.paid_accounts, app.trip_creations, app.ai_calls TO service_role;
 
 -- ── 建立旅程的上限 ─────────────────────────────────────────────
+-- （trip_allowance 在 07_account.sql 會換成「連同刪掉的舊帳號一起算」的版本）
 CREATE OR REPLACE FUNCTION app.trip_allowance(p_user_id UUID)
 RETURNS JSONB
 LANGUAGE sql
