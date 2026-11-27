@@ -10,6 +10,7 @@
 import { IS_PUBLIC, LIFF_ID, WEBAPP_URL } from "./config.ts"
 import { PERSONA } from "../_shared/assistant/persona.ts"
 import { buildLiffPageUrl } from "../_shared/liffEcho.ts"
+import { isMapUrl, parseReply } from "../_shared/replyText.ts"
 import { supabase } from "./db.ts"
 import { replyMessage } from "./line-api.ts"
 import { formatAmount, sumByCurrency } from "../_shared/finance.ts"
@@ -595,4 +596,34 @@ export function formatTotals(
 
 export function buildBindSuccessText(tripName: string, members: string[], tripId: string): string {
   return `✅ 綁定成功：\n${tripName}\n\n目前成員：\n${(members || []).join('、')}\n\n旅程網頁：\n${WEBAPP_URL}/#/trip/${tripId}/dashboard\n\n現在您可以直接「打字或上傳收據」請我記帳；想調整分帳習慣，按下方「⚙️ 記帳偏好」或輸入「設定: 預設付款人是我，大家平分」囉！`
+}
+
+/**
+ * 回覆裡有兩個以上「條列地點＋地圖網址」時，改成一張 Flex 卡片（店名一行、按鈕開地圖），
+ * 其餘文字（開頭的說明）另外一則。沒有就回 null，照舊送純文字。規則在 _shared/replyText.ts。
+ */
+export function buildPlacesFlex(text: string): { intro: string; flex: OutgoingMessage } | null {
+  const lines = parseReply(text)
+  const places = lines.filter((l): l is { kind: 'place'; label: string; url: string } => l.kind === 'place').slice(0, 10)
+  if (places.length < 2) return null
+  const intro = lines.filter(l => l.kind === 'text').map(l => (l as { text: string }).text).join('\n').trim()
+  const rows = places.map((p, i) => ({
+    type: "box", layout: "horizontal", spacing: "md", alignItems: "center",
+    ...(i > 0 ? { margin: "md" } : {}),
+    contents: [
+      { type: "text", text: p.label, size: "sm", color: "#333333", wrap: true, flex: 5 },
+      {
+        type: "button", style: "secondary", height: "sm", flex: 2,
+        action: { type: "uri", label: isMapUrl(p.url) ? "📍 地圖" : "開啟", uri: p.url },
+      },
+    ],
+  }))
+  return {
+    intro,
+    flex: {
+      type: "flex",
+      altText: intro || places.map(p => p.label).join('、'),
+      contents: { type: "bubble", body: { type: "box", layout: "vertical", contents: rows } },
+    } as OutgoingMessage,
+  }
 }

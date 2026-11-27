@@ -19,11 +19,16 @@ import { useSession } from '../features/auth/session';
 interface PlanRow { plan: string; max_entries: number; max_ai_calls: number; max_photos: number }
 interface Overview {
   accounts: number; paid_accounts: number; trips: number; paid_trips: number; expenses: number;
-  ai_today: number; ai_7d: number; ai_total: number; photos: number; line_chats: number;
+  ai_today: number; ai_7d: number; ai_total: number; ai_30d: number; ai_kind_30d: Record<string, number>; photos: number; line_chats: number;
   ai_by_day: { day: string; calls: number }[];
   settings: { ai_enabled: boolean; free_trip_creations: number };
   plans: PlanRow[];
 }
+/** 每次 AI 大約多少錢（11/21 正式環境量的，Haiku 5.5）：文字 NT$0.07、收據 NT$0.04 */
+const COST_PER_CALL: Record<string, number> = { text: 0.07, receipt: 0.04, voice: 0.01, search: 0.35, other: 0.07 };
+const estimateCost = (kinds: Record<string, number>) =>
+  Math.round(Object.entries(kinds ?? {}).reduce((sum, [k, n]) => sum + (COST_PER_CALL[k] ?? 0.07) * n, 0));
+
 type TripRow = AdminTripRow;
 type AccountRow = AdminAccountRow;
 
@@ -130,22 +135,27 @@ const Admin: React.FC = () => {
               <Stat label="綁定的 LINE 聊天" value={overview.line_chats} />
             </div>
 
-            {overview.ai_by_day.length > 0 && (
-              <section className={`${ui.card} p-4`}>
-                <p className="text-sm font-bold mb-2">最近 14 天的 AI 次數</p>
-                <div className="flex items-end gap-1 h-24">
-                  {overview.ai_by_day.map(d => {
-                    const max = Math.max(...overview.ai_by_day.map(x => x.calls), 1);
-                    return (
-                      <div key={d.day} className="flex-1 flex flex-col items-center gap-1" title={`${d.day}：${d.calls} 次`}>
-                        <div className="w-full rounded-t bg-accent" style={{ height: `${(d.calls / max) * 80}px` }} />
-                        <span className="text-[10px] text-muted">{d.day.slice(5)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
+            <section className={`${ui.card} p-4 space-y-3`}>
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-bold">最近 14 天的 AI 次數</p>
+                <p className="text-xs text-muted num">近 30 天 {overview.ai_30d} 次・估計 NT${estimateCost(overview.ai_kind_30d)}</p>
+              </div>
+              <div className="flex items-end gap-1 h-28">
+                {overview.ai_by_day.map(d => {
+                  const max = Math.max(...overview.ai_by_day.map(x => x.calls), 1);
+                  return (
+                    <div key={d.day} className="flex-1 min-w-0 flex flex-col items-center justify-end gap-0.5 h-full" title={`${d.day}：${d.calls} 次`}>
+                      {d.calls > 0 && <span className="text-[10px] num font-bold text-ink-2">{d.calls}</span>}
+                      <div className={`w-full rounded-t ${d.calls > 0 ? 'bg-accent' : 'bg-sunk'}`} style={{ height: `${Math.max((d.calls / max) * 72, 2)}px` }} />
+                      <span className="text-[9px] text-muted num">{Number(d.day.slice(8))}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted">
+                Anthropic 不提供用 API 查剩餘儲值，餘額請看 Console；這裡的花費是用每次約 NT$0.07（文字）／0.04（收據）估的。
+              </p>
+            </section>
 
             <SettingsCard overview={overview} busy={busy}
               onSave={(aiEnabled, freeTrips) => run('全站設定', () => supabase.rpc('admin_update_settings', { p_ai_enabled: aiEnabled, p_free_trip_creations: freeTrips }), loadOverview)}

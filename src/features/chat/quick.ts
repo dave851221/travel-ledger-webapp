@@ -6,7 +6,8 @@
  * 金額加總走 decimal.js（sumByCurrency），結清走 calculateSettlements，與帳目、結清分頁同一套。
  */
 import type { Expense, Trip } from '../../types';
-import { formatAmount, getCurrencyPrecision, sumByCurrency } from '../../utils/finance';
+import Decimal from 'decimal.js';
+import { convertToBase, formatAmount, getCurrencyPrecision, sumByCurrency } from '../../utils/finance';
 import { calculateSettlements } from '../../utils/settlement';
 import { formatMoney } from '../../utils/money';
 import type { SummarySection } from './types';
@@ -144,9 +145,13 @@ export function runQuickCommand(cmd: QuickCommand, trip: Trip, expenses: Expense
       rows: [
         { label: '👥 成員', sub: trip.members.join('、') || '（尚無成員）', value: `${trip.members.length} 人` },
         { label: '💵 主幣別', value: trip.base_currency },
+        // 每個人總共花了多少（自己分攤的部分，折合主幣別）；誰該給誰在「結算」看（David 2026-11-27）
         ...trip.members.map(m => {
-          const net = balances[m] ?? 0;
-          return { label: m, value: formatMoney(net, trip.base_currency, trip.precision_config, { signed: true }), sub: net >= 0 ? '可收回' : '要付' };
+          const spent = spending.reduce((sum, e) => {
+            const share = Number((e.split_data ?? {})[m]) || 0;
+            return share ? sum.plus(convertToBase(share, e.currency, trip.rates, trip.base_currency)) : sum;
+          }, new Decimal(0));
+          return { label: m, value: formatMoney(spent.toNumber(), trip.base_currency, trip.precision_config), sub: '總共花費' };
         }),
       ],
     }],

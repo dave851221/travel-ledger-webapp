@@ -28,7 +28,7 @@ import TripUsage from '../features/quota/TripUsage';
 import { useSession } from '../features/auth/session';
 import { useMyMembership } from '../features/auth/membership';
 import type { Trip, Expense } from '../types';
-import { exportExpensesToCSV, getCurrencyPrecision } from '../utils/finance';
+import { exportExpensesToCSV, NEW_CURRENCY_DECIMALS } from '../utils/finance';
 import { isSubmitEnter } from '../utils/keyboard';
 import { normalizeTripDates } from '../utils/tripDates';
 import TripDatesField from './TripDatesField';
@@ -527,7 +527,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       // 1:1 只是佔位，順手查今日匯率填進去（查不到就留著讓使用者自己改）
       void updateRatesFromSource([code]);
       // 以前只有 TWD 給 0 位，加 JPY／KRW 會變成 2 位小數，分帳拆出 333.33 日圓
-      setPrecisionStr({ ...precisionStr, [code]: String(getCurrencyPrecision(code)) });
+      setPrecisionStr({ ...precisionStr, [code]: String(NEW_CURRENCY_DECIMALS) });
       setNewCurrency('');
     }
   };
@@ -881,7 +881,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                             </label>
                           )}
                           <label className={`flex items-center gap-1.5 shrink-0 ${isBase ? 'ml-auto' : ''}`}>
-                            <span className="text-xs text-muted whitespace-nowrap">小數</span>
+                            <span className="text-xs text-muted whitespace-nowrap">小數位數</span>
                             <span className="w-14 shrink-0">
                               <input type="text" inputMode="numeric" aria-label={`${code} 小數位數`} className={`${ui.input} num py-1.5 text-center`} value={precisionStr[code] ?? ''} onChange={e => setPrecisionStr({ ...precisionStr, [code]: e.target.value })} />
                             </span>

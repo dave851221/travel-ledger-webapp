@@ -11,15 +11,31 @@ import { photoUrl } from '../../utils/storage';
 import MemberAvatar from '../dashboard/MemberAvatar';
 import { canGoSolo, canSave, canSplitByItems, changeAmount, toggleMember } from './draftOps';
 import type { ChatItem, DraftExpense, DraftItem, SummarySection } from './types';
+import { isMapUrl, isUrl, linkLabel, parseReply, URL_PATTERN } from './replyText';
 
-/** 網址變成可以點的連結，其餘照原樣（保留換行） */
+const InlineText: React.FC<{ text: string }> = ({ text }) => (
+  <>
+    {text.split(URL_PATTERN).map((p, i) => (isUrl(p)
+      ? <a key={i} href={p} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-md bg-info/10 text-info text-[13px] px-1.5 mx-0.5 hover:underline">{linkLabel(p)}</a>
+      : <React.Fragment key={i}>{p}</React.Fragment>))}
+  </>
+);
+
+/** 回覆文字：網址變成短標籤，條列的地點變成卡片 */
 export const RichText: React.FC<{ text: string }> = ({ text }) => {
-  const parts = text.split(/(https?:\/\/[^\s<>「」（）()]+)/g);
+  const lines = parseReply(text);
   return (
     <>
-      {parts.map((p, i) => (/^https?:\/\//.test(p)
-        ? <a key={i} href={p} target="_blank" rel="noreferrer" className="text-info underline break-all">{p}</a>
-        : <React.Fragment key={i}>{p}</React.Fragment>))}
+      {lines.map((l, i) => l.kind === 'place' ? (
+        <a key={i} href={l.url} target="_blank" rel="noreferrer"
+          className="my-1 flex items-center gap-2 rounded-xl border border-line bg-canvas px-3 py-2 hover:bg-sunk transition-colors no-underline">
+          <span className="text-base shrink-0" aria-hidden>{isMapUrl(l.url) ? '📍' : '🔗'}</span>
+          <span className="flex-1 min-w-0 text-[13px] leading-snug text-ink">{l.label}</span>
+          <span className="shrink-0 text-xs font-bold text-accent">{isMapUrl(l.url) ? '地圖' : '開啟'} ›</span>
+        </a>
+      ) : (
+        <React.Fragment key={i}>{l.text === '' ? <br /> : <span className="block"><InlineText text={l.text} /></span>}</React.Fragment>
+      ))}
     </>
   );
 };
