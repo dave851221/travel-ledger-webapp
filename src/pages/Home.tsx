@@ -13,14 +13,30 @@ import { peekReturnTo, signOut, useSession } from '../features/auth/session';
 import SignInPanel from '../features/auth/SignInPanel';
 import { useToast } from '../hooks/useToast';
 import { useBackClose } from '../hooks/useBackClose';
-import { applyLayout, defaultGroups, layoutFromGroups, sameOrder, UNCATEGORIZED, type HomeLayout, type TripGroup } from '../features/home/homeLayout';
+import { applyLayout, pickFeatured, defaultGroups, layoutFromGroups, sameOrder, UNCATEGORIZED, type HomeLayout, type TripGroup } from '../features/home/homeLayout';
 import { fetchLayout, readCachedLayout, saveLayout } from '../features/home/homeLayoutStore';
 import { FeaturedTrip, TripRow } from '../features/home/TripCards';
 import SortEditor from '../features/home/SortEditor';
+import TripDatesField from '../components/TripDatesField';
+import { normalizeTripDates } from '../utils/tripDates';
+import { getLocalDateString } from '../utils/date';
 
 const TRIPS_PER_GROUP = 3;
 const APP_NAME = PRODUCT_NAME;
 const DEFAULT_CATEGORIES = ['餐飲', '交通', '住宿', '購物', '景點', '其他'];
+
+const EMPTY_NEW_TRIP = {
+  name: '',
+  members: '',
+  access_code: '',
+  base_currency: 'TWD',
+  category: '',
+  // 開放版：建立者自己在這趟的名字（必須是參與人員之一）
+  my_name: '',
+  // 旅程日期（選填）
+  start_date: '',
+  end_date: '',
+};
 
 const categorySlug = (name: string) => `cat-${encodeURIComponent(name)}`;
 
@@ -61,15 +77,7 @@ const Home: React.FC = () => {
   const [sortDraft, setSortDraft] = useState<TripGroup[] | null>(null);
   const [savingOrder, setSavingOrder] = useState(false);
 
-  const [newTrip, setNewTrip] = useState({
-    name: '',
-    members: '',
-    access_code: '',
-    base_currency: 'TWD',
-    category: '',
-    // 開放版：建立者自己在這趟的名字（必須是參與人員之一）
-    my_name: ''
-  });
+  const [newTrip, setNewTrip] = useState(EMPTY_NEW_TRIP);
   const [submitting, setSubmitting] = useState(false);
   // 建立旅程的錯誤顯示在表單裡；專案禁用原生 alert()
   const [createError, setCreateError] = useState<string | null>(null);
@@ -131,8 +139,8 @@ const Home: React.FC = () => {
     }
   };
 
-  // trips 已依建立時間新到舊排序，第一筆沒封存的就是最近的旅程
-  const featuredTrip = useMemo(() => trips.find(t => !t.is_archived) ?? null, [trips]);
+  // 正在進行的旅程優先，否則是日期最新的一趟（沒填日期用建立時間），見 pickFeatured
+  const featuredTrip = useMemo(() => pickFeatured(trips, getLocalDateString()), [trips]);
 
   // 分組與排序規則在 features/home/homeLayout.ts：沒有自訂順序時，分組依最近一趟進行中的旅程排，
   // 組內進行中的在前；有自訂順序就照存下來的，之後才出現的旅程放最上面
@@ -193,6 +201,8 @@ const Home: React.FC = () => {
     // input 的 required 擋不住只打空白或逗號的情況，會建出沒有名字或沒有成員的旅程
     if (!tripName) { setCreateError('請輸入旅程名稱'); return; }
     if (membersArray.length === 0) { setCreateError('請至少輸入一位參與人員'); return; }
+    const dates = normalizeTripDates(newTrip.start_date, newTrip.end_date);
+    if ('error' in dates) { setCreateError(dates.error); return; }
 
     if (IS_PUBLIC) {
       // 開放版：trips 沒有 INSERT 權限，一律走 app.create_trip（建立者成為 owner 並加入）
@@ -209,10 +219,12 @@ const Home: React.FC = () => {
           p_category: newTrip.category.trim() || null,
           // 精度與舊版建立時一致，跟建立一起寫進去
           p_precision_config: { [newTrip.base_currency]: getCurrencyPrecision(newTrip.base_currency) },
+          p_start_date: dates.start_date,
+          p_end_date: dates.end_date,
         });
         if (error) throw error;
         setIsModalOpen(false);
-        setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
+        setNewTrip(EMPTY_NEW_TRIP);
         navigate(`/trip/${newId}/dashboard`);
       } catch (err) {
         // supabase 的錯誤不是 Error 的實例，但有 message
@@ -237,6 +249,8 @@ const Home: React.FC = () => {
           access_code: newTrip.access_code.trim() || null,
           base_currency: newTrip.base_currency,
           category: newTrip.category.trim() || null,
+          start_date: dates.start_date,
+          end_date: dates.end_date,
           categories: DEFAULT_CATEGORIES,
           rates: { [newTrip.base_currency]: 1 },
           // 以前只有 TWD 給 0 位，JPY 主幣的旅程會顯示成 ¥1,000.00、分帳拆出 333.33
@@ -248,7 +262,7 @@ const Home: React.FC = () => {
 
       setTrips([data[0], ...trips]);
       setIsModalOpen(false);
-      setNewTrip({ name: '', members: '', access_code: '', base_currency: 'TWD', category: '', my_name: '' });
+      setNewTrip(EMPTY_NEW_TRIP);
     } catch (err) {
       setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -460,7 +474,7 @@ const Home: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setCreateError(null); }}
         title="建立新旅程"
-        dirty={[newTrip.name, newTrip.members, newTrip.category, newTrip.access_code].some(v => v.trim() !== '')}
+        dirty={[newTrip.name, newTrip.members, newTrip.category, newTrip.access_code, newTrip.start_date, newTrip.end_date].some(v => v.trim() !== '')}
       >
         <form onSubmit={handleCreateTrip} className="space-y-4">
           <div>
@@ -506,6 +520,12 @@ const Home: React.FC = () => {
               {knownCategories.map(c => <option key={c} value={c} />)}
             </datalist>
           </div>
+          <TripDatesField
+            idPrefix="trip-dates"
+            start={newTrip.start_date}
+            end={newTrip.end_date}
+            onChange={(start_date, end_date) => setNewTrip({ ...newTrip, start_date, end_date })}
+          />
           {IS_PUBLIC && (
             <div>
               <label htmlFor="trip-my-name" className={ui.label}>

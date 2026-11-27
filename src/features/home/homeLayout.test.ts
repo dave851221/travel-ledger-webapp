@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Trip } from '../../types';
 import {
-  applyLayout, defaultGroups, layoutFromGroups, moveItem, orderSiblings, sameOrder, sanitizeLayout, UNCATEGORIZED,
+  applyLayout, defaultGroups, layoutFromGroups, moveItem, orderSiblings, pickFeatured, sameOrder, sanitizeLayout, UNCATEGORIZED,
 } from './homeLayout';
 
 const trip = (id: string, category: string | null, created: string, archived = false): Trip => ({
@@ -100,5 +100,24 @@ describe('orderSiblings', () => {
     const sibs = [trip('b', 'G', '2026-01-01'), trip('a', 'G', '2025-01-01')];
     expect(orderSiblings(sibs, 'G', { groups: ['G'], trips: { G: ['a', 'b'] } }).map(t => t.id)).toEqual(['a', 'b']);
     expect(orderSiblings(sibs, 'G', null).map(t => t.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('dates', () => {
+  const dated = (id: string, start: string, end: string | null, created: string, archived = false): Trip =>
+    ({ ...trip(id, 'G', created, archived), start_date: start, end_date: end });
+
+  it('sorts by the trip date when set, falling back to the creation time', () => {
+    // 先建立、日期比較晚的旅程排前面
+    const list = [trip('made-late', 'G', '2026-06-01'), dated('trip-late', '2026-09-01', null, '2026-01-01')];
+    expect(shape(defaultGroups(list))).toEqual([['G', ['trip-late', 'made-late']]]);
+  });
+
+  it('features the ongoing trip first, else the latest one', () => {
+    const now = dated('now', '2026-11-25', '2026-11-30', '2026-01-01');
+    const later = dated('later', '2027-03-01', null, '2026-02-01');
+    expect(pickFeatured([later, now], '2026-11-27')?.id).toBe('now');
+    expect(pickFeatured([later, now], '2026-12-05')?.id).toBe('later');
+    expect(pickFeatured([dated('arch', '2026-11-27', null, '2026-01-01', true)], '2026-11-27')).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Archive, ChevronRight, Users } from 'lucide-react';
+import { Archive, CalendarDays, ChevronRight, Users } from 'lucide-react';
 import type { Trip } from '../../types';
+import { formatTripDates, formatTripDatesShort, tripDayCount, tripStampParts } from '../../utils/tripDates';
 
 const currencyList = (trip: Trip) => Object.keys(trip.rates || {}).join(' · ');
 
@@ -25,32 +26,47 @@ export const FeaturedTrip: React.FC<{ trip: Trip; onClick: () => void }> = ({ tr
       </span>
     </div>
     <div className="perforation self-stretch" style={{ ['--notch-bg' as string]: 'var(--app-bg)' }} />
-    <div className="w-full grid grid-cols-3 gap-2 px-5 pt-3.5 pb-4 text-xs text-navy-sub">
-      <div>成員<b className="block num text-sm font-bold text-navy-fg mt-0.5">{trip.members.length} 人</b></div>
-      <div className="min-w-0">幣別<b className="block num text-sm font-bold text-navy-fg mt-0.5 truncate">{currencyList(trip)}</b></div>
-      <div>建立於<b className="block num text-sm font-bold text-navy-fg mt-0.5">{formatCreated(trip.created_at)}</b></div>
-    </div>
+    {formatTripDates(trip) ? (
+      // 有旅程日期：日期占一半寬（一段時間的字比較長），成員、幣別各四分之一
+      <div className="w-full grid grid-cols-4 gap-2 px-5 pt-3.5 pb-4 text-xs text-navy-sub">
+        <div className="col-span-2 min-w-0">
+          日期{(tripDayCount(trip) ?? 1) > 1 && <span className="num">・{tripDayCount(trip)} 天</span>}
+          <b className="block num text-sm font-bold text-navy-fg mt-0.5 truncate">{formatTripDates(trip)}</b>
+        </div>
+        <div>成員<b className="block num text-sm font-bold text-navy-fg mt-0.5">{trip.members.length} 人</b></div>
+        <div className="min-w-0">幣別<b className="block num text-sm font-bold text-navy-fg mt-0.5 truncate">{currencyList(trip)}</b></div>
+      </div>
+    ) : (
+      <div className="w-full grid grid-cols-3 gap-2 px-5 pt-3.5 pb-4 text-xs text-navy-sub">
+        <div>成員<b className="block num text-sm font-bold text-navy-fg mt-0.5">{trip.members.length} 人</b></div>
+        <div className="min-w-0">幣別<b className="block num text-sm font-bold text-navy-fg mt-0.5 truncate">{currencyList(trip)}</b></div>
+        <div>建立於<b className="block num text-sm font-bold text-navy-fg mt-0.5">{formatCreated(trip.created_at)}</b></div>
+      </div>
+    )}
   </button>
 );
 
-/** 旅程建立的年月，畫成左邊的小日期章；封存的旅程整列淡一點 */
+/** 旅程的年月（有填旅程日期用開始日，沒有用建立時間），畫成左邊的小日期章；封存的旅程整列淡一點 */
 export const TripStamp: React.FC<{ trip: Trip }> = ({ trip }) => {
-  const d = new Date(trip.created_at);
+  const { year, month } = tripStampParts(trip);
   return (
     <span
-      title={`建立於 ${formatCreated(trip.created_at)}`}
+      title={formatTripDates(trip) ?? `建立於 ${formatCreated(trip.created_at)}`}
       className={`shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center leading-none num ${
         trip.is_archived ? 'bg-sunk text-muted' : 'bg-accent/15 text-ink'
       }`}
     >
-      <span className="text-[10px] font-medium opacity-70">{d.getFullYear()}</span>
-      <span className="text-[15px] font-bold mt-1">{d.getMonth() + 1}月</span>
+      <span className="text-[10px] font-medium opacity-70">{year}</span>
+      <span className="text-[15px] font-bold mt-1">{month}月</span>
     </span>
   );
 };
 
 export const TripMeta: React.FC<{ trip: Trip }> = ({ trip }) => (
   <p className="text-xs text-muted mt-0.5 flex items-center gap-2 min-w-0">
+    {formatTripDatesShort(trip) && (
+      <span className="shrink-0 inline-flex items-center gap-1 num"><CalendarDays size={12} />{formatTripDatesShort(trip)}</span>
+    )}
     <span className="shrink-0 inline-flex items-center gap-1"><Users size={12} />{trip.members.length} 人</span>
     <span className="num truncate">{currencyList(trip)}</span>
   </p>

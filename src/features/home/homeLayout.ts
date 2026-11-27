@@ -1,14 +1,15 @@
 /**
  * 首頁旅程清單的分組與排序（純函式，homeLayout.test.ts）。
  *
- * 預設排法：分組依「還沒封存的旅程裡最新的建立時間」排，越新越上面；全部封存的分組排在後面；
- * 「未分類」最後。組內進行中的排前面，各自依建立時間新到舊。
+ * 預設排法：分組依「還沒封存的旅程裡最新的日期」（有填旅程日期用開始日，沒有用建立時間）排，越新越上面；全部封存的分組排在後面；
+ * 「未分類」最後。組內進行中的排前面，各自依日期新到舊。
  *
  * 使用者可以自訂順序（首頁的「排序」）。存下來的只有兩份清單：分組名稱的順序、每組裡旅程 id 的順序。
  * 套用時以存下來的順序為準；之後才出現的分組或旅程（存的時候還沒有）放在最上面 ——
  * 新建的旅程多半就是接下來要用的那一趟。只有「未分類」與已封存的新旅程例外，照預設放最後。
  */
 import type { Trip } from '../../types';
+import { tripTime } from '../../utils/tripDates';
 
 export const UNCATEGORIZED = '未分類';
 
@@ -31,7 +32,8 @@ const MAX_TRIPS_PER_GROUP = 500;
 export const groupKey = (trip: Pick<Trip, 'category'>): string =>
   (trip.category && trip.category.trim()) || UNCATEGORIZED;
 
-const time = (t: Trip) => new Date(t.created_at).getTime() || 0;
+/** 有填旅程日期用開始日期，沒有就用建立時間 */
+const time = (t: Trip) => tripTime(t);
 const newest = (list: Trip[]) => list.reduce((max, t) => Math.max(max, time(t)), -Infinity);
 
 /** 預設排法（沒有自訂順序時、以及新出現的項目之間的相對順序） */
@@ -123,4 +125,15 @@ export function moveItem<T>(list: T[], from: number, to: number): T[] {
 export function orderSiblings(siblings: Trip[], category: string | null | undefined, layout: HomeLayout | null): Trip[] {
   const saved = layout?.trips[(category && category.trim()) || UNCATEGORIZED];
   return orderBy(siblings, saved, t => t.id, t => t.is_archived);
+}
+
+/**
+ * 首頁最上面的「最近的旅程」：還沒封存的旅程裡，今天正在進行的那一趟優先（有填日期、今天落在日期內）；
+ * 沒有的話取日期最新的一趟（沒填日期的用建立時間）。`today` 是 YYYY-MM-DD。
+ */
+export function pickFeatured(trips: Trip[], today: string): Trip | null {
+  const active = trips.filter(t => !t.is_archived);
+  const ongoing = active.find(t => t.start_date && t.start_date <= today && (t.end_date || t.start_date) >= today);
+  if (ongoing) return ongoing;
+  return active.reduce<Trip | null>((best, t) => (!best || time(t) > time(best) ? t : best), null);
 }

@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS app.trips (
     category              TEXT,
     base_currency         TEXT        NOT NULL,
     timezone              TEXT,
+    -- 旅程日期（選填）：一天只填 start_date；end_date 含當天
+    start_date            DATE,
+    end_date              DATE,
     rates                 JSONB       NOT NULL DEFAULT '{}'::jsonb,
     precision_config      JSONB       NOT NULL DEFAULT '{}'::jsonb,
     is_archived           BOOLEAN     NOT NULL DEFAULT FALSE,
@@ -63,6 +66,7 @@ CREATE TABLE IF NOT EXISTS app.trips (
     created_by            UUID        REFERENCES auth.users(id) ON DELETE SET NULL,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- 密碼模式一定要有密碼，否則等於「有連結就能看」卻顯示成要密碼
+    CONSTRAINT trips_dates_check CHECK (end_date IS NULL OR (start_date IS NOT NULL AND end_date >= start_date)),
     CONSTRAINT trips_password_needs_hash CHECK (visibility <> 'password' OR view_password_hash IS NOT NULL)
 );
 
@@ -120,11 +124,11 @@ REVOKE ALL ON ALL TABLES IN SCHEMA app FROM anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON app.profiles TO authenticated;
 GRANT SELECT ON app.line_identities TO authenticated;
 
-GRANT SELECT (id, name, members, categories, category, base_currency, timezone, rates, precision_config,
+GRANT SELECT (id, name, members, categories, category, base_currency, timezone, start_date, end_date, rates, precision_config,
               is_archived, default_currency, default_category, default_payer, default_split_members,
               ai_preference, visibility, share_token, invite_token, created_by, created_at)
     ON app.trips TO authenticated;
-GRANT UPDATE (name, categories, category, base_currency, timezone, rates, precision_config,
+GRANT UPDATE (name, categories, category, base_currency, timezone, start_date, end_date, rates, precision_config,
               is_archived, default_currency, default_category, default_payer, default_split_members,
               ai_preference)
     ON app.trips TO authenticated;

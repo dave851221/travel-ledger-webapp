@@ -30,6 +30,8 @@ export interface TripRow {
    * NULL／undefined 代表沒設，Bot 會退回從幣別推測（主幣 TWD 的日本旅程會猜錯，M4）。
    */
   timezone?: string | null
+  start_date?: string | null
+  end_date?: string | null
   default_currency?: string
   default_category?: string
   default_payer?: string[]

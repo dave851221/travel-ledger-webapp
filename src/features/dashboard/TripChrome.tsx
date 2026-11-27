@@ -4,6 +4,7 @@ import type { Trip } from '../../types';
 import BrandMark from '../../components/BrandMark';
 import { ASSISTANT_CHAT_TITLE, ASSISTANT_NAME } from '../../config/assistant';
 import { ui } from '../../components/ui';
+import { formatTripDates, formatTripDatesShort } from '../../utils/tripDates';
 import Dropdown, { MenuDivider, MenuItem, MenuLabel } from './Dropdown';
 import MemberAvatar from './MemberAvatar';
 import type { TabDef, TabType } from './tabs';
@@ -62,7 +63,7 @@ export const MobileTopBar: React.FC<ChromeProps> = ({
         <div className="flex-1 min-w-0 leading-tight">
           <p className="text-[11px] text-muted truncate flex items-center gap-1">
             {trip.is_archived && <Lock size={10} />}
-            {[trip.category?.trim(), `${trip.members.length} 人`, trip.is_archived ? '已封存' : null].filter(Boolean).join(' · ')}
+            {[trip.category?.trim(), formatTripDatesShort(trip), `${trip.members.length} 人`, trip.is_archived ? '已封存' : null].filter(Boolean).join(' · ')}
           </p>
           <h1 className="text-base font-bold truncate">{trip.name}</h1>
         </div>
@@ -159,6 +160,7 @@ export const DesktopHeader: React.FC<IdentityProps & { onAdd?: () => void; onCat
           {trip.category?.trim() ? (
             <button onClick={onCategory} className="hover:text-ink transition-colors" title="查看同分類的旅程">{trip.category}</button>
           ) : '旅程'}
+          {formatTripDates(trip) && <span className="num">· {formatTripDates(trip)}</span>}
           {trip.is_archived && <span className="inline-flex items-center gap-1 text-warn"><Lock size={11} />已封存，只能查看</span>}
         </p>
         <h1 className="text-2xl font-bold leading-tight mt-0.5 text-balance">{trip.name}</h1>

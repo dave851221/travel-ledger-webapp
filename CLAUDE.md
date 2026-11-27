@@ -119,10 +119,11 @@ supabase functions deploy line-webhook --no-verify-jwt      # 部署（旗標必
   同樣的查詢在背景跑完再換上最新的，國外連雪梨的 Supabase 不必每次盯著載入畫面；離線冷開也看得到。
   垃圾桶（`list_trip_trash` 與逾期清理）不擋首屏。`syncing` 期間不判斷「記住的身分已不是成員」、不自動跳出選身分（舊快取可能還沒有新成員）。
   首頁旅程清單同樣先畫 `trips_list_cache`（只有 `TRIP_COLUMNS`）。**這些都沒有多打任何請求**（Supabase 免費方案 Disk IO 很緊）。
-- **首頁**（`pages/Home.tsx` + `features/home/`）：最近的旅程（登機證）＋分類捷徑（手機一排可滑的膠囊、`lg` 以上是登機證旁的分類目錄）＋各分類清單（`md` 以上兩欄瀑布流 `columns-2`，不用 grid，不然矮的那組下面會空一塊）。每列左邊是建立年月的小日期章，封存的整列淡一點。
+  Google Fonts 的 CSS 不擋首屏（`media="print"` onload 切換），CSS 與字型檔由 PWA runtime cache 快取。
+- **首頁**（`pages/Home.tsx` + `features/home/`）：最近的旅程（登機證）＋分類捷徑（手機一排可滑的膠囊、`lg` 以上是登機證旁的分類目錄）＋各分類清單（`md` 以上兩欄瀑布流 `columns-2`，不用 grid，不然矮的那組下面會空一塊）。每列左邊是年月的小日期章，封存的整列淡一點。
+  **旅程日期**（`trips.start_date`／`end_date`，選填，2026-11-27）：一天只填開始；建立表單與設定頁共用 `components/TripDatesField.tsx`，規則與格式在 `utils/tripDates.ts`（`tripDates.test.ts`）。有填就用開始日排序、畫日期章、登機證與清單顯示日期，沒填才用建立時間。「最近的旅程」是今天正在進行的那趟優先，否則日期最新的一趟（`pickFeatured`）。兩版都有 CHECK（結束不早於開始），開放版 `create_trip` 多 `p_start_date`／`p_end_date`。
   **自訂排序**（右上「排序」）：分類與組內旅程都能拖曳把手或用上下箭頭調整（`useDragSort`，監聽掛在 window，因為清單重排時把手節點會被搬動），返回鍵＝取消，按「完成」才寫一次。規則與純函式在 `homeLayout.ts`（`homeLayout.test.ts`）：存的是分類名稱順序＋每組旅程 id 順序，之後才出現的分類／旅程放最上面（「未分類」與已封存的新旅程放最後），跟預設排法一樣就存 NULL。
   存在哪（`homeLayoutStore.ts`）：舊版是 `public.home_layout` 一列（id = 1，大家看到同一個順序；表不存在或寫入失敗就只存在這台裝置並提示），開放版是登入帳號的 `user_metadata.home_layout`（每人一份，不用新表）。兩版都快取在 localStorage `home_layout`（開放版 `tlb:` 前綴），Dashboard 的「其他旅程」照這份快取排、不另外查。
-  Google Fonts 的 CSS 不擋首屏（`media="print"` onload 切換），CSS 與字型檔由 PWA runtime cache 快取。
 - **PWA 更新**是 `registerType: 'autoUpdate'`：新版本裝好就直接換上並重新整理，正在填的表單會被清掉
   （使用者明確接受）。曾改成 prompt（按橫幅才換），大家都停在舊版，2026-10-30 改回來。
   `App.tsx` 在回到前景與每小時主動檢查一次。

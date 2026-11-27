@@ -21,6 +21,12 @@ export interface Trip {
    * NULL／undefined 代表沒設，Bot 會退回從幣別推測（主幣 TWD 的日本旅程會猜錯，M4）。
    */
   timezone?: string | null;
+  /**
+   * 旅程日期（選填，YYYY-MM-DD）。一天的旅程只有 start_date；一段時間再加 end_date（含當天）。
+   * 都沒填的舊旅程，首頁用建立時間代替。見 utils/tripDates.ts
+   */
+  start_date?: string | null;
+  end_date?: string | null;
   default_currency?: string;
   default_category?: string;
   default_payer?: string[];
