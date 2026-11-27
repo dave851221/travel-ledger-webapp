@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Ban, Check, Loader2 } from 'lucide-react';
+import { ArrowLeft, Ban, Loader2 } from 'lucide-react';
+import Toast from '../components/Toast';
+import { useToast } from '../hooks/useToast';
 import { supabase } from '../api/supabase';
 import { ui } from '../components/ui';
 import TripsPanel from '../features/admin/TripsPanel';
@@ -45,21 +47,21 @@ const Admin: React.FC = () => {
   const [accounts, setAccounts] = useState<AccountRow[] | null>(null);
   const [editing, setEditing] = useState<TripRow | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // 成功／失敗用浮動的 toast，不插在版面裡（David 2026-11-27：通知一出現下面整排會跳動）
+  const { toast, showToast, dismissToast } = useToast();
 
   const loadOverview = useCallback(async () => {
     const { data, error: err } = await supabase.rpc('admin_overview');
-    if (err) setError('讀不到總覽'); else setOverview(data as Overview);
-  }, []);
+    if (err) showToast('讀不到總覽', 'error'); else setOverview(data as Overview);
+  }, [showToast]);
   const loadTrips = useCallback(async () => {
     const { data, error: err } = await supabase.rpc('admin_trips', { p_search: null, p_limit: 200 });
-    if (err) setError('讀不到旅程'); else setTrips(data as TripRow[]);
-  }, []);
+    if (err) showToast('讀不到旅程', 'error'); else setTrips(data as TripRow[]);
+  }, [showToast]);
   const loadAccounts = useCallback(async () => {
     const { data, error: err } = await supabase.rpc('admin_accounts', { p_limit: 200 });
-    if (err) setError('讀不到帳號'); else setAccounts(data as AccountRow[]);
-  }, []);
+    if (err) showToast('讀不到帳號', 'error'); else setAccounts(data as AccountRow[]);
+  }, [showToast]);
 
   // 確認是管理員之後才讀總覽；其他分頁點下去才讀
   useEffect(() => {
@@ -81,11 +83,11 @@ const Admin: React.FC = () => {
   };
 
   const run = async (label: string, fn: () => PromiseLike<{ error: unknown }>, after: () => Promise<void>) => {
-    setBusy(true); setError(null); setNotice(null);
+    setBusy(true);
     const { error: err } = await fn();
     setBusy(false);
-    if (err) { setError(`${label}失敗`); return; }
-    setNotice(`${label}完成`);
+    if (err) { showToast(`${label}失敗`, 'error'); return; }
+    showToast(`${label}完成`);
     await after();
   };
 
@@ -114,8 +116,6 @@ const Admin: React.FC = () => {
           ))}
         </div>
 
-        {error && <div className={ui.errorBox}><AlertCircle size={16} className="shrink-0 mt-0.5" />{error}</div>}
-        {notice && <div className="flex items-center gap-2 rounded-xl bg-pos/10 text-pos px-3 py-2.5 text-sm"><Check size={16} />{notice}</div>}
 
         {tab === 'overview' && (overview === null ? <Loader2 className="animate-spin text-muted" /> : (
           <div className="space-y-4">
@@ -174,6 +174,7 @@ const Admin: React.FC = () => {
           }), async () => { setEditing(null); await loadTrips(); })}
         />
       )}
+      <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 };
