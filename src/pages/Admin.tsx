@@ -178,12 +178,28 @@ const Admin: React.FC = () => {
   );
 };
 
-const NumField: React.FC<{ label: string; value: number; onChange: (n: number) => void }> = ({ label, value, onChange }) => (
-  <label className="block">
-    <span className={ui.label}>{label}</span>
-    <input type="number" min={0} className={ui.input} value={value} onChange={e => onChange(Math.max(0, Number(e.target.value) || 0))} />
-  </label>
-);
+/**
+ * 數字欄位：打字時留著使用者看到的字（可以整個刪掉，不會卡在 0、打成「060」），
+ * 只把合法的數字往外送；離開欄位時空白就回到 0。
+ */
+const NumField: React.FC<{ label: string; value: number; onChange: (n: number) => void }> = ({ label, value, onChange }) => {
+  const [text, setText] = useState(String(value));
+  const [lastValue, setLastValue] = useState(value);
+  // 外面的值變了（例如重新讀取）才跟著換，打字中不打斷
+  if (value !== lastValue) { setLastValue(value); setText(String(value)); }
+  return (
+    <label className="block">
+      <span className={ui.label}>{label}</span>
+      <input type="text" inputMode="numeric" className={`${ui.input} num`} value={text}
+        onChange={e => {
+          const t = e.target.value.replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
+          setText(t);
+          if (t !== '') { const n = Number(t); setLastValue(n); onChange(n); }
+        }}
+        onBlur={() => { if (text === '') { setText('0'); setLastValue(0); onChange(0); } }} />
+    </label>
+  );
+};
 
 const SettingsCard: React.FC<{
   overview: Overview; busy: boolean;
