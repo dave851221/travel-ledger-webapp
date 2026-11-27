@@ -313,7 +313,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         if (membersErr) {
           if (membersErr.message.includes('member_claimed')) throw new Error('有成員已經用這個名字加入，不能直接移除。請他先在「我是誰」換成別人');
           if (membersErr.message.includes('invalid_name')) throw new Error('成員名字要 1～20 個字');
-          if (membersErr.message.includes('invalid_members')) throw new Error('成員名稱不能重複，最多 50 位');
+          if (membersErr.message.includes('invalid_members')) throw new Error('成員名稱不能重複，最多 150 位');
           throw new Error(membersErr.message);
         }
         setMemberOrigins(finalMembers);
@@ -732,7 +732,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                   onLeft={() => { onClose(); window.location.hash = '#/'; }}
                 />
               )}
-              {IS_PUBLIC && <p className="text-sm font-bold pt-2">帳上的成員名字 <span className="text-xs font-normal text-muted">· 最多 50 位</span></p>}
+              {IS_PUBLIC && <p className="text-sm font-bold pt-2">帳上的成員名字 <span className="text-xs font-normal text-muted">· 最多 150 位</span></p>}
               {canAdmin && <div className="flex gap-2">
                 <input type="text" aria-label="新成員名稱" placeholder="新增成員" className={ui.input} value={newMember} onChange={e => setNewMember(e.target.value)} onKeyDown={e => isSubmitEnter(e) && addMember()} />
                 <button onClick={addMember} aria-label="新增成員" className={`${ui.btnPrimary} px-4 shrink-0`}><Plus size={18} strokeWidth={2.6} /></button>

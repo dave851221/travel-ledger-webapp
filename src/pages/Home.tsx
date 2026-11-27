@@ -275,7 +275,7 @@ const Home: React.FC = () => {
         // supabase 的錯誤不是 Error 的實例，但有 message
         const msg = (err as { message?: string } | null)?.message ?? String(err);
         setCreateError(msg.includes('invalid_name') ? '每位成員的名字要 1～20 個字'
-          : msg.includes('too_many_members') ? '成員最多 50 位'
+          : msg.includes('too_many_members') ? '成員最多 150 位'
           : msg.includes('trips_name_check') ? '旅程名稱最多 60 個字'
           : '建立失敗，請再試一次');
       } finally {

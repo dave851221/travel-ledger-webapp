@@ -252,7 +252,7 @@ RETURNS INT
 LANGUAGE sql
 IMMUTABLE
 SET search_path = ''
-AS $$ SELECT 50 $$;
+AS $$ SELECT 150 $$;
 
 REVOKE ALL ON FUNCTION app.max_members() FROM PUBLIC, anon, authenticated;
 
