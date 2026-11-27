@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { supabase } from '../api/supabase';
 import { RECEIPTS_BUCKET } from '../utils/storage';
+import { quotaMessage } from '../features/quota/quotaErrors';
 
 type ShowToast = (message: string, type?: 'success' | 'error') => void;
 
@@ -42,7 +43,7 @@ export const useTrash = (tripId: string | undefined, showToast: ShowToast) => {
       showToast('紀錄已還原');
       return true;
     } catch (err) {
-      showToast('還原失敗: ' + errorMessage(err), 'error');
+      showToast(quotaMessage(err) ?? '還原失敗: ' + errorMessage(err), 'error');
       return false;
     }
   }, [showToast]);

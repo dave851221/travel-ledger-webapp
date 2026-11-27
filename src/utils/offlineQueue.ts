@@ -1,6 +1,7 @@
 import { supabase } from '../api/supabase';
 import { globalStorageKey } from '../config/mode';
 import type { Expense } from '../types';
+import { rethrowQuota } from '../features/quota/quotaErrors';
 
 /**
  * 離線記帳：連不上資料庫時，新增的支出先存在這支手機上，恢復連線後再上傳。
@@ -135,6 +136,6 @@ export const insertExpenseOrQueue = async (record: NewExpenseRecord): Promise<{ 
     return { id: data?.id ?? null, queued: false };
   } catch (err) {
     if (isNetworkError(err)) return queue();
-    throw err;
+    rethrowQuota(err);
   }
 };
