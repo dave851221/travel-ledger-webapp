@@ -44,7 +44,7 @@ if (error) throw error;
 
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const up = await upload(a.token, tripId, jpeg, 'image/jpeg', 'chat');
-check(up.status === 200 && new RegExp(`^expenses/${tripId}/chat_[0-9a-f-]+\.jpg$`).test(up.body.path), `成員可以上傳（${up.status}）`);
+check(up.status === 200 && new RegExp(`^expenses/${tripId}/chat_[0-9a-f-]+\\.jpg$`).test(up.body.path), `成員可以上傳（${up.status}）`);
 const path = up.body.path;
 
 check((await upload(b.token, tripId, jpeg)).status === 403, '不是成員不能上傳');
