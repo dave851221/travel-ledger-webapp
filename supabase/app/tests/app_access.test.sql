@@ -7,7 +7,7 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(52);
+SELECT plan(58);
 
 -- ── 測試用帳號：A 建立旅程、B 被邀請、C 是路人 ─────────────────
 INSERT INTO auth.users (id, email, aud, role)
@@ -171,6 +171,28 @@ SELECT is(jsonb_array_length(app.get_trip_snapshot((SELECT v::uuid FROM ids WHER
 SELECT ok(NOT (app.get_trip_snapshot((SELECT v::uuid FROM ids WHERE k = 'trip'),
                                      (SELECT v FROM ids WHERE k = 'share'), 'secret1') -> 'trip') ? 'invite_token',
           '分享出去的資料不含邀請碼');
+RESET ROLE;
+
+-- ── 8. 成員的登入方式：看得到名稱與遮過的 email，路人看不到 ──────
+INSERT INTO auth.identities (provider_id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+VALUES ('g-aaa', 'aaaaaaaa-0000-0000-0000-000000000001', 'google',
+        '{"email": "daisy.wang@gmail.com", "full_name": "王小美", "sub": "g-aaa"}', now(), now(), now());
+UPDATE app.line_identities SET display_name = '代杰' WHERE line_user_id = 'Uaaa';
+SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+SELECT is((SELECT jsonb_array_length(app.my_logins())), 2, '自己的帳號列出 LINE 與 Google');
+SELECT is((SELECT x ->> 'account' FROM jsonb_array_elements(app.my_logins()) x WHERE x ->> 'provider' = 'google'),
+          'd***g@gmail.com', 'email 中間遮掉');
+SELECT ok(app.trip_member_accounts((SELECT v::uuid FROM ids WHERE k = 'trip'))::text NOT LIKE '%daisy%',
+          '成員清單裡沒有完整 email');
+SELECT ok(app.trip_member_accounts((SELECT v::uuid FROM ids WHERE k = 'trip'))::text NOT LIKE '%Uaaa%',
+          '成員清單裡沒有 LINE userId');
+RESET ROLE;
+SELECT pg_temp.as_user('cccccccc-0000-0000-0000-000000000003');
+SELECT throws_ok($$ SELECT app.trip_member_accounts((SELECT v::uuid FROM ids WHERE k = 'trip')) $$,
+                 'not_member', '路人看不到成員的登入方式');
+RESET ROLE;
+SELECT pg_temp.as_anon();
+SELECT throws_ok($$ SELECT app.my_logins() $$, '42501', NULL, '沒登入不能查登入方式');
 RESET ROLE;
 
 SELECT * FROM finish();

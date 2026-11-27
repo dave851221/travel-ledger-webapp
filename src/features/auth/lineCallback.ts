@@ -18,12 +18,15 @@ export interface LineOAuthState {
   at: number;
   nonce: string;
   redirectUri: string;
+  /** link：已登入的人把 LINE 連到目前帳號（不是登入） */
+  mode?: 'signin' | 'link';
 }
 
 export interface LinePending {
   code: string;
   nonce: string;
   redirectUri: string;
+  mode?: 'signin' | 'link';
 }
 
 export const AUTH_ERROR_KEY = 'tlb:auth_error';
@@ -36,7 +39,9 @@ function captureAuthError(url: URL): boolean {
   const hashParams = new URLSearchParams(url.hash.startsWith('#error') ? url.hash.slice(1) : '');
   const error = url.searchParams.get('error') || hashParams.get('error');
   if (!error) return false;
-  sessionStorage.setItem(AUTH_ERROR_KEY, error);
+  // error_code 比較具體（例如 identity_already_exists：要連的 Google 已經是別的帳號）
+  const code = url.searchParams.get('error_code') || hashParams.get('error_code');
+  sessionStorage.setItem(AUTH_ERROR_KEY, code || error);
   ['error', 'error_code', 'error_description', 'sb'].forEach(k => url.searchParams.delete(k));
   url.hash = '#/';
   window.history.replaceState(window.history.state, '', url.toString());
@@ -58,7 +63,7 @@ function capture(): void {
   if (!saved || saved.state !== state || Date.now() - (saved.at || 0) > 15 * 60 * 1000) return;
 
   localStorage.removeItem(LINE_STATE_KEY);
-  const pending: LinePending = { code, nonce: saved.nonce, redirectUri: saved.redirectUri };
+  const pending: LinePending = { code, nonce: saved.nonce, redirectUri: saved.redirectUri, mode: saved.mode };
   sessionStorage.setItem(LINE_PENDING_KEY, JSON.stringify(pending));
 
   url.searchParams.delete('code');

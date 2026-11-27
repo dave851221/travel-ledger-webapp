@@ -4,9 +4,11 @@ import { supabase } from '../../api/supabase';
 import { ui } from '../../components/ui';
 import type { Trip } from '../../types';
 import Modal from '../../components/Modal';
+import LoginBadges from './LoginBadges';
+import type { LoginInfo } from './loginInfo';
 
 type Role = 'owner' | 'admin' | 'editor';
-interface Row { user_id: string; member_name: string; role: Role }
+interface Row { user_id: string; member_name: string; role: Role; logins: LoginInfo[] }
 
 const ROLE_LABEL: Record<Role, string> = { owner: '建立者', admin: '管理員', editor: '成員' };
 
@@ -26,7 +28,8 @@ const MemberManager: React.FC<{ trip: Trip; myUserId: string | null; myRole: Rol
   const [confirm, setConfirm] = useState<{ row: Row; leave: boolean } | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('trip_members').select('user_id, member_name, role').eq('trip_id', trip.id).order('joined_at');
+    // 帳號資訊（登入方式、LINE／Google 名稱、遮過的 email）由資料庫組好，不直接讀 auth 的資料
+    const { data } = await supabase.rpc('trip_member_accounts', { p_trip_id: trip.id });
     return (data ?? []) as Row[];
   }, [trip.id]);
 
@@ -80,8 +83,11 @@ const MemberManager: React.FC<{ trip: Trip; myUserId: string | null; myRole: Rol
                 {row.role === 'owner' ? <Crown size={16} className="text-accent shrink-0" />
                   : row.role === 'admin' ? <Shield size={16} className="text-ink-2 shrink-0" />
                   : <span className="w-4 shrink-0" />}
-                <span className="flex-1 min-w-0 truncate text-sm">
-                  {row.member_name}{me && <span className="text-muted">（你）</span>}
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate text-sm">
+                    {row.member_name}{me && <span className="text-muted">（你）</span>}
+                  </span>
+                  <LoginBadges logins={row.logins ?? []} />
                 </span>
                 <span className="text-xs text-muted shrink-0">{ROLE_LABEL[row.role]}</span>
                 {myRole === 'owner' && row.role !== 'owner' && (
