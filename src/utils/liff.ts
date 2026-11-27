@@ -122,6 +122,14 @@ function rewriteToHash(params: URLSearchParams) {
   window.history.replaceState(null, '', `${import.meta.env.BASE_URL}#${route}${query ? `?${query}` : ''}`);
 }
 
+/**
+ * 編輯頁一打開就先叫醒通知函式（GET 只回 405，不做事）：
+ * Edge Function 冷啟動要一兩秒，以前都卡在按下存入之後，頁面遲遲不關（David 2026-11-27）。
+ */
+export function warmLineNotify(): void {
+  void supabase.functions.invoke(NOTIFY_FN, { method: 'GET' }).catch(() => {});
+}
+
 export type LineNotifyResult = 'ok' | 'quota' | 'failed';
 
 /**

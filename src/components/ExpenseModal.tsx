@@ -50,6 +50,8 @@ interface ExpenseModalProps {
 
 const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, currentUser, onSuccess, showToast, editData, standalone = false }) => {
   const [loading, setLoading] = useState(false);
+  // LIFF：存好之後還要等 LINE 確認訊息送出，按鈕要說清楚現在在做什麼，使用者才不會以為好了就關掉
+  const [savingLabel, setSavingLabel] = useState('儲存中…');
   const [error, setError] = useState<string | null>(null);
 
   // Form State
@@ -545,14 +547,14 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           const { error: rmErr } = await supabase.storage.from(RECEIPTS_BUCKET).remove(removedPhotos);
           if (rmErr) console.error('[PHOTO] failed to remove replaced photos:', rmErr);
         }
-        showToast('已更新支出紀錄！');
+        // LIFF 的成功提示等 LINE 確認訊息送出後才顯示（David 2026-11-27：太早說成功，使用者會直接關掉）
+        if (!liffMeta?.line_user_id) showToast('已更新支出紀錄！');
       } else {
         // --- Insert --- 連不上時排進離線佇列（LIFF 草稿除外：它要通知機器人，得真的寫進去）
         if (liffMeta?.line_user_id) {
           const { data: saved, error: iErr } = await supabase.from('expenses').insert([record]).select('id').single();
           if (iErr) throw iErr;
           savedExpenseId = saved?.id ?? null;
-          showToast('已新增支出紀錄！');
         } else {
           const { id: savedId, queued } = await insertExpenseOrQueue(record);
           savedExpenseId = savedId;
@@ -565,6 +567,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       //    一筆 `saved`，使用者接著說「取消上一筆」就會刪掉那筆剛編輯好的舊支出，
       //    而不是最近新增的那一筆；推播文字也會謊稱「已存入」。
       if (liffMeta?.line_user_id) {
+        setSavingLabel('已存好，通知 LINE 中…');
         const notified = await notifyLineAfterSave({
           line_user_id: liffMeta.line_user_id,
           expense_id: savedExpenseId,
@@ -578,6 +581,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
           showToast('已存好！但 LINE 本月推播額度用完，聊天室這次不會有確認訊息');
         } else if (notified === 'failed') {
           showToast('已存好！但 LINE 確認訊息沒送出');
+        } else {
+          showToast(editData?.id ? '已更新支出紀錄！' : '已新增支出紀錄！');
         }
       }
 
@@ -593,7 +598,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         else await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);
       }
       setError(quotaMessage(err) ?? (err instanceof Error ? err.message : String(err)));
-    } finally { setLoading(false); }
+    } finally { setLoading(false); setSavingLabel('儲存中…'); }
   };
 
   const ValidationBadge = ({ isValid, current, target }: { isValid: boolean, current: number, target: number }) => (
@@ -944,8 +949,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         <div className="sticky bottom-0 -mx-5 px-5 pt-3 -mb-1 bg-gradient-to-t from-surface from-70% to-transparent">
           <button disabled={loading || compressing} type="submit" className={`${ui.btnPrimary} w-full py-3.5 text-[15px]`}>
             {loading ? <Loader2 className="animate-spin" size={18} /> : (editData?.id ? <Save size={18} /> : <Plus size={18} strokeWidth={2.6} />)}
-            {loading ? '儲存中…' : (editData?.id ? '儲存修改' : '新增支出')}
+            {loading ? savingLabel : (editData?.id ? '儲存修改' : '新增支出')}
           </button>
+          {loading && standalone && (
+            <p className="text-center text-xs text-muted mt-2">請先不要關閉，完成後會自動回到 LINE</p>
+          )}
         </div>
       </form>
     </Modal>

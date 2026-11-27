@@ -20,26 +20,29 @@ async function authorize(req: Request, lineUserId: string, expenseId: unknown): 
   if (!IS_PUBLIC) return true
   const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
   if (!jwt || typeof expenseId !== 'string') return false
-  const { data: { user } } = await supabase.auth.getUser(jwt)
-  if (!user) return false
-  const { data: exp } = await supabase.from('expenses').select('trip_id').eq('id', expenseId).maybeSingle()
-  if (!exp) return false
-  const [{ data: member }, { data: state }] = await Promise.all([
-    supabase.from('trip_members').select('user_id').eq('trip_id', exp.trip_id).eq('user_id', user.id).maybeSingle(),
+  // 互不相依的三個查詢一起送，LIFF 頁按下存入後才不會等太久
+  const [{ data: { user } }, { data: exp }, { data: state }] = await Promise.all([
+    supabase.auth.getUser(jwt),
+    supabase.from('expenses').select('trip_id').eq('id', expenseId).maybeSingle(),
     supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', lineUserId).maybeSingle(),
   ])
-  return !!member && state?.current_trip_id === exp.trip_id
+  if (!user || !exp || state?.current_trip_id !== exp.trip_id) return false
+  const { data: member } = await supabase.from('trip_members').select('user_id')
+    .eq('trip_id', exp.trip_id).eq('user_id', user.id).maybeSingle()
+  return !!member
 }
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey, x-client-info',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
-  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+  // GET＝LIFF 頁打開時先叫醒這支函式（src/utils/liff.ts 的 warmLineNotify），什麼都不做
+  if (req.method === 'GET') return new Response('warm', { headers: CORS })
+  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405, headers: CORS })
 
   try {
     const { line_user_id, expense_id, description, amount, currency, mode, deliver, record } = await req.json()

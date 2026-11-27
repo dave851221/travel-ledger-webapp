@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { getLiffDisplayName, initLiff } from '../utils/liff';
+import { getLiffDisplayName, initLiff, warmLineNotify } from '../utils/liff';
 import { IS_PUBLIC } from '../config/mode';
 import { ensureLiffSession } from '../features/auth/liffSession';
 import { resolveMember } from '../utils/member';
@@ -57,7 +57,8 @@ const LiffEdit: React.FC = () => {
   const handleSuccess = useCallback(() => {
     setIsSuccess(true);
     // 關不掉的話就別嘗試，避免使用者看到畫面閃一下卻什麼都沒發生
-    if (canCloseWindow) setTimeout(closeLiffWindow, 800);
+    // 確認訊息已經送出才會到這裡，不必多等
+    if (canCloseWindow) setTimeout(closeLiffWindow, 300);
   }, [closeLiffWindow, canCloseWindow]);
 
   useEffect(() => {
@@ -69,6 +70,8 @@ const LiffEdit: React.FC = () => {
           liffRef.current = liff;
           setCanCloseWindow(typeof liff.closeWindow === 'function');
         }
+        // 存檔後要叫的通知函式先叫醒，按下存入時就不用等冷啟動
+        warmLineNotify();
         // 開放版：資料在 RLS 後面，先用 LINE 身分登入（見 features/auth/liffSession.ts）
         await ensureLiffSession(liff);
         // 跟查旅程同時進行，不拖慢開啟
