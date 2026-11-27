@@ -19,7 +19,7 @@ import { useSession } from '../features/auth/session';
 interface PlanRow { plan: string; max_entries: number; max_ai_calls: number; max_photos: number }
 interface Overview {
   accounts: number; paid_accounts: number; trips: number; paid_trips: number; expenses: number;
-  ai_today: number; ai_7d: number; ai_total: number; ai_30d: number; ai_kind_30d: Record<string, number>; photos: number; line_chats: number;
+  ai_today: number; ai_7d: number; ai_total: number; ai_30d: number; ai_kind_30d: Record<string, number>; photos: number; photo_bytes?: number; line_chats: number;
   ai_by_day: { day: string; calls: number }[];
   settings: { ai_enabled: boolean; free_trip_creations: number };
   plans: PlanRow[];
@@ -40,6 +40,34 @@ const Stat: React.FC<{ label: string; value: React.ReactNode }> = ({ label, valu
     <p className="text-xl font-bold num mt-0.5">{value}</p>
   </div>
 );
+
+/** Cloudflare R2 免費方案的儲存空間 */
+const R2_FREE_BYTES = 10 * 1024 ** 3;
+
+const formatBytes = (n: number): string =>
+  n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : `${Math.round(n / 1024 ** 2)} MB`;
+
+/** 照片空間：已用多少、離 R2 免費 10 GB 還有多遠 */
+const PhotoStorage: React.FC<{ bytes: number; photos: number }> = ({ bytes, photos }) => {
+  const pct = Math.min(100, (bytes / R2_FREE_BYTES) * 100);
+  const avg = photos > 0 ? bytes / photos : 0;
+  const tone = pct >= 90 ? 'bg-neg' : pct >= 70 ? 'bg-accent' : 'bg-primary';
+  return (
+    <section className={`${ui.card} p-4 space-y-2`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-sm font-bold">照片空間（Cloudflare R2）</p>
+        <p className="text-sm num"><span className="font-bold">{formatBytes(bytes)}</span><span className="text-muted"> / 10 GB 免費</span></p>
+      </div>
+      <div className="h-2 rounded-full bg-sunk overflow-hidden">
+        <div className={`h-full ${tone}`} style={{ width: `${Math.max(pct, bytes > 0 ? 1 : 0)}%` }} />
+      </div>
+      <p className="text-xs text-muted">
+        {photos > 0 ? `平均一張 ${Math.round(avg / 1024)} KB，免費空間大約還能放 ${Math.max(0, Math.floor((R2_FREE_BYTES - bytes) / avg)).toLocaleString()} 張。` : '還沒有照片。'}
+        超過後每 GB 每月 0.015 美元。
+      </p>
+    </section>
+  );
+};
 
 const Admin: React.FC = () => {
   const navigate = useNavigate();
@@ -134,6 +162,8 @@ const Admin: React.FC = () => {
               <Stat label="照片" value={overview.photos} />
               <Stat label="綁定的 LINE 聊天" value={overview.line_chats} />
             </div>
+
+            <PhotoStorage bytes={overview.photo_bytes ?? 0} photos={overview.photos} />
 
             <section className={`${ui.card} p-4 space-y-3`}>
               <div className="flex items-baseline justify-between gap-2">

@@ -46,6 +46,10 @@ const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const up = await upload(a.token, tripId, jpeg, 'image/jpeg', 'chat');
 check(up.status === 200 && new RegExp(`^expenses/${tripId}/chat_[0-9a-f-]+\\.jpg$`).test(up.body.path), `成員可以上傳（${up.status}）`);
 const path = up.body.path;
+const svc = createClient(URL, env.SERVICE_ROLE_KEY, opts);
+const { data: row } = await svc.from('trip_photos').select('bytes').eq('path', path).maybeSingle();
+// 沒設 R2 時照片在 Storage，表上不留列（張數算 Storage 的）
+check(!row || row.bytes === jpeg.length, `記下檔案大小（${row?.bytes ?? '走 Storage'}）`);
 
 check((await upload(b.token, tripId, jpeg)).status === 403, '不是成員不能上傳');
 check((await fetch(`${FN}?action=upload&tripId=${tripId}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg', apikey: KEY }, body: jpeg })).status === 401, '沒登入不能上傳');

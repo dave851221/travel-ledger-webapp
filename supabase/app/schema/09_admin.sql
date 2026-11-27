@@ -96,6 +96,10 @@ BEGIN
             LEFT JOIN (SELECT (at AT TIME ZONE 'Asia/Taipei')::date AS day, count(*) AS n
                        FROM app.ai_calls WHERE at > now() - interval '15 days' GROUP BY 1) c ON c.day = d.day::date),
         'photos', (SELECT count(*) FROM app.trip_photos) + (SELECT count(*) FROM storage.objects o WHERE o.bucket_id = 'app-images' AND NOT EXISTS (SELECT 1 FROM app.trip_photos p WHERE p.path = o.name)),
+        -- 照片佔的空間（bytes）：R2 上的＋還留在 Storage app-images、表上沒有的
+        'photo_bytes', (SELECT coalesce(sum(bytes), 0) FROM app.trip_photos)
+                     + (SELECT coalesce(sum((o.metadata->>'size')::bigint), 0) FROM storage.objects o
+                        WHERE o.bucket_id = 'app-images' AND NOT EXISTS (SELECT 1 FROM app.trip_photos p WHERE p.path = o.name)),
         'line_chats', (SELECT count(*) FROM app.line_user_states WHERE current_trip_id IS NOT NULL),
         'settings', (SELECT to_jsonb(s) - 'id' FROM app.quota_settings s WHERE id),
         'plans', (SELECT jsonb_agg(to_jsonb(p) ORDER BY p.plan) FROM app.plan_limits p)

@@ -46,7 +46,8 @@ export function createR2Store(cfg: R2Config, db: SupabaseClient): PhotoStore {
       if (!tripId) throw new Error('invalid_photo_path')
       const res = await client.fetch(url(path), { method: 'PUT', body: body as BodyInit, headers: { 'Content-Type': contentType } })
       if (!res.ok) throw new Error(`r2_put_${res.status}`)
-      const { error } = await db.from('trip_photos').upsert({ path, trip_id: tripId, created_by: createdBy ?? null }, { onConflict: 'path', ignoreDuplicates: true })
+      const bytes = body instanceof Blob ? body.size : body.byteLength
+      const { error } = await db.from('trip_photos').upsert({ path, trip_id: tripId, created_by: createdBy ?? null, bytes }, { onConflict: 'path' })
       if (error) console.error('[PHOTO] trip_photos insert failed', error.message)
     },
     async download(path) {
