@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, Link2, Loader2, LogOut } from 'lucide-react';
+import { AlertCircle, Gauge, Link2, Loader2, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../api/supabase';
 import Modal from '../../components/Modal';
 import { ui } from '../../components/ui';
@@ -17,12 +18,16 @@ const AccountModal: React.FC<{ isOpen: boolean; onClose: () => void; onSignOut: 
   const [logins, setLogins] = useState<LoginInfo[] | null>(null);
   const [busy, setBusy] = useState<'line' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 開發者才看得到後台入口（權限仍由資料庫判斷）
+  const [isAdmin, setIsAdmin] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!isOpen) return;
     let alive = true;
     // 每次打開重新讀一次（剛連結完回來就會看到新的）
     supabase.rpc('my_logins').then(({ data }) => { if (alive) setLogins((data ?? []) as LoginInfo[]); });
+    supabase.rpc('is_site_admin').then(({ data }) => { if (alive) setIsAdmin(data === true); });
     return () => { alive = false; };
   }, [isOpen]);
 
@@ -90,6 +95,11 @@ const AccountModal: React.FC<{ isOpen: boolean; onClose: () => void; onSignOut: 
 
         {error && <div className={ui.errorBox}><AlertCircle size={16} className="shrink-0 mt-0.5" />{error}</div>}
 
+        {isAdmin && (
+          <button type="button" onClick={() => { onClose(); navigate('/admin'); }} className={`${ui.btnSecondary} w-full`}>
+            <Gauge size={16} />開發者後台
+          </button>
+        )}
         <button type="button" onClick={onSignOut} className={`${ui.btnSecondary} w-full text-neg`}>
           <LogOut size={16} />登出
         </button>

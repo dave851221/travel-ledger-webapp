@@ -30,6 +30,8 @@ ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'
 ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS extra_entries  INTEGER NOT NULL DEFAULT 0 CHECK (extra_entries >= 0);
 ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS extra_ai_calls INTEGER NOT NULL DEFAULT 0 CHECK (extra_ai_calls >= 0);
 ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS extra_photos   INTEGER NOT NULL DEFAULT 0 CHECK (extra_photos >= 0);
+-- 開發者後台可以單獨暫停一趟的 AI（例如被拿來大量叫 AI、或內容有問題），帳照常能記
+ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS ai_suspended   BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE app.trips DROP CONSTRAINT IF EXISTS trips_plan_fkey;
 ALTER TABLE app.trips ADD CONSTRAINT trips_plan_fkey FOREIGN KEY (plan) REFERENCES app.plan_limits(plan);
 -- 成員看得到自己旅程的方案（顯示用量），但改不了（UPDATE 的欄位清單在 01_tables 沒有這幾個）
@@ -274,6 +276,10 @@ BEGIN
     PERFORM 1 FROM app.trips WHERE id = p_trip_id FOR UPDATE;
     IF NOT FOUND THEN
         RETURN jsonb_build_object('ok', FALSE, 'reason', 'no_trip');
+    END IF;
+    -- 開發者後台暫停了這趟的 AI（09_admin.sql）
+    IF (SELECT ai_suspended FROM app.trips WHERE id = p_trip_id) THEN
+        RETURN jsonb_build_object('ok', FALSE, 'reason', 'suspended');
     END IF;
 
 
