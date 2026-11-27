@@ -46,7 +46,6 @@ export function preferenceQuickReply(tripId: string, showGroupToggle: boolean, g
 
 export function preferenceQuickReplyItem(tripId: string) {
   // 開放版還沒有 LIFF：改成送出「設定?」，由機器人說明怎麼用文字設定
-  if (IS_PUBLIC) return { type: "action", action: { type: "message", label: "⚙️ 記帳偏好", text: "設定?" } }
   return {
     type: "action",
     action: { type: "uri", label: "⚙️ 記帳偏好", uri: preferenceLiffUrl(tripId) },
@@ -123,8 +122,6 @@ export function getQuickReply(
  *    舊格式 LiffEdit 仍然看得懂，已發出去的卡片不會壞。
  */
 export function buildEditLiffUrl(expense: { id: string }, tripId: string, sourceId: string): string {
-  // 開放版：存好的帳到網頁上改（要登入、是成員）
-  if (IS_PUBLIC) return tripWebUrl(tripId)
   return liffPageUrl('/liff/edit', `tripId=${tripId}&id=${expense.id}&u=${encodeURIComponent(sourceId)}`)
 }
 
@@ -134,14 +131,11 @@ export function buildEditLiffUrl(expense: { id: string }, tripId: string, source
  * LiffEdit 自己去撈（順便就能發現這張卡片已經被確認或取消過了）。
  */
 export function buildDraftLiffUrl(tripId: string, nonce: string, sourceId: string): string {
-  // 開放版沒有 LIFF，草稿的內容只在機器人這邊：不給按鈕（空字串），用打字修改（「改 500」）
-  if (IS_PUBLIC) return ''
   return liffPageUrl('/liff/edit', `tripId=${tripId}&n=${nonce}&u=${encodeURIComponent(sourceId)}`)
 }
 
 /** 🧾 逐項分：同一個 LIFF 編輯頁，先開品項清單點「這是誰的」，再進表單確認 */
 export function buildItemsLiffUrl(tripId: string, nonce: string, sourceId: string): string {
-  if (IS_PUBLIC) return ''
   return `${buildDraftLiffUrl(tripId, nonce, sourceId)}&mode=items`
 }
 
@@ -293,7 +287,7 @@ export function buildExpenseCard(opts: {
   const cancelButton = { type: "button", style: "secondary", action: { type: "postback", label: "❌ 取消", data: JSON.stringify({ act: "cancel", n: nonce }) } }
   const webButton = { type: "button", style: "primary", color: "#AF52DE", action: { type: "uri", label: "🌐 查看網頁", uri: webUrl } }
   const editButton = { type: "button", style: "primary", color: "#5AC8FA", action: { type: "uri", label: "✏️ 編輯", uri: liffUrl } }
-  // 開放版沒有 LIFF：liffUrl 是空字串，編輯／填金額的按鈕都不出現（改用打字）
+  // 沒有 LIFF 網址（空字串）時不出現編輯／填金額按鈕
   const hasLiff = !!liffUrl
   const row = (...contents: unknown[]) => ({ type: "box", layout: "horizontal", spacing: "sm", contents })
   const pairUp = (buttons: unknown[]) => {

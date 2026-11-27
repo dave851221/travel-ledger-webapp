@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { initLiff } from '../utils/liff';
+import { ensureLiffSession } from '../features/auth/liffSession';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import { ui } from '../components/ui';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
@@ -58,6 +59,9 @@ const LiffPreference: React.FC = () => {
           liffRef.current = liff;
           setCanCloseWindow(typeof liff.closeWindow === 'function');
         }
+
+        // 開放版：先用 LINE 身分登入（旅程資料只有成員讀得到）
+        await ensureLiffSession(liff);
 
         const tripId = searchParams.get('tripId');
         if (!tripId) throw new Error('缺少必要參數 tripId');

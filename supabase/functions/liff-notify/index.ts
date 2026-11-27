@@ -2,12 +2,34 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { buildSavedText } from "./format.ts"
 import { buildLiffEchoMarker, LIFF_NOTICE_ROLE, type LiffNotice } from "../_shared/liffEcho.ts"
+import { isPublicApp } from "../_shared/appMode.ts"
 
-const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN') || ''
+// 開放版（tlb-liff-notify）跟舊版共用這份：旅行喵喵的金鑰、app schema，而且要驗身分（見下面 authorize）
+const IS_PUBLIC = isPublicApp()
+const LINE_CHANNEL_ACCESS_TOKEN = Deno.env.get(IS_PUBLIC ? 'TLB_BOT_ACCESS_TOKEN' : 'LINE_CHANNEL_ACCESS_TOKEN') || ''
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { db: { schema: IS_PUBLIC ? 'app' : 'public' } })
+
+/**
+ * 開放版：只有「這筆支出那趟的成員」才能叫機器人回確認，而且只能送到綁定那趟的聊天室。
+ * 不然任何人都能拿這支函式往別人的群組塞訊息、或往別人的對話紀錄寫東西。
+ */
+async function authorize(req: Request, lineUserId: string, expenseId: unknown): Promise<boolean> {
+  if (!IS_PUBLIC) return true
+  const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
+  if (!jwt || typeof expenseId !== 'string') return false
+  const { data: { user } } = await supabase.auth.getUser(jwt)
+  if (!user) return false
+  const { data: exp } = await supabase.from('expenses').select('trip_id').eq('id', expenseId).maybeSingle()
+  if (!exp) return false
+  const [{ data: member }, { data: state }] = await Promise.all([
+    supabase.from('trip_members').select('user_id').eq('trip_id', exp.trip_id).eq('user_id', user.id).maybeSingle(),
+    supabase.from('line_user_states').select('current_trip_id').eq('line_user_id', lineUserId).maybeSingle(),
+  ])
+  return !!member && state?.current_trip_id === exp.trip_id
+}
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +54,11 @@ serve(async (req) => {
     if (!line_user_id || !description) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), {
         status: 400, headers: { ...CORS, 'Content-Type': 'application/json' }
+      })
+    }
+    if (!(await authorize(req, line_user_id, expense_id))) {
+      return new Response(JSON.stringify({ error: 'forbidden' }), {
+        status: 403, headers: { ...CORS, 'Content-Type': 'application/json' }
       })
     }
 

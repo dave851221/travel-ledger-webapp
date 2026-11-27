@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { getLiffDisplayName, initLiff } from '../utils/liff';
+import { IS_PUBLIC } from '../config/mode';
+import { ensureLiffSession } from '../features/auth/liffSession';
 import { resolveMember } from '../utils/member';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip, Expense } from '../types';
@@ -67,6 +69,8 @@ const LiffEdit: React.FC = () => {
           liffRef.current = liff;
           setCanCloseWindow(typeof liff.closeWindow === 'function');
         }
+        // 開放版：資料在 RLS 後面，先用 LINE 身分登入（見 features/auth/liffSession.ts）
+        await ensureLiffSession(liff);
         // 跟查旅程同時進行，不拖慢開啟
         const openerNamePromise = getLiffDisplayName(liff);
 
@@ -110,8 +114,13 @@ const LiffEdit: React.FC = () => {
           decoded = { ...row, u: sourceId ?? undefined };
         } else if (nonce) {
           // 草稿：內容存在 line_chat_history 的 pending 列，卡片只帶 nonce。
-          // RLS 對匿名完全開放（見 supabase/schema/05_policies.sql），前端讀得到。
-          const [{ data: used }, { data: rows }] = await Promise.all([
+          // 舊版：RLS 對匿名完全開放（見 supabase/schema/05_policies.sql），前端直接讀。
+          // 開放版：那兩張表只有 service role 能碰，走 app.liff_draft（要是草稿那趟的成員）。
+          const [{ data: used }, { data: rows }] = IS_PUBLIC ? await (async () => {
+            const { data: r, error: dErr } = await supabase.rpc('liff_draft', { p_source_id: sourceId ?? '', p_nonce: nonce });
+            if (dErr) throw new Error(dErr.message.includes('not_member') ? '你不是這趟旅程的成員，打不開這張卡片。' : '讀不到這張卡片，請再試一次。');
+            return [{ data: r?.used ? { nonce } : null }, { data: r?.draft ? [{ content: JSON.stringify(r.draft) }] : [] }];
+          })() : await Promise.all([
             supabase.from('line_processed_actions').select('nonce').eq('nonce', nonce).maybeSingle(),
             supabase.from('line_chat_history')
               .select('content')

@@ -8,9 +8,17 @@
  * 送不出去時退回推播，跟以前一樣。
  */
 import { supabase } from '../api/supabase';
+import { IS_PUBLIC } from '../config/mode';
 
-/** LIFF app 的 ID（不是密鑰，LINE Developers → LINE Login channel → LIFF）。可用 VITE_LIFF_ID 覆寫 */
-export const LIFF_ID: string = import.meta.env.VITE_LIFF_ID || '2012713943-msELyw4c';
+/**
+ * LIFF app 的 ID（不是密鑰，LINE Developers → LINE Login channel → LIFF）。可用 VITE_LIFF_ID 覆寫。
+ * 開放版是另一個 LIFF app（掛在旅行小本本的 LINE Login channel 2012815845 底下，endpoint 是 /next/），
+ * 跟 LINE 登入同一個 channel，LIFF 拿到的 access token 才能交給 auth-line 換成網站的登入。
+ */
+export const LIFF_ID: string = import.meta.env.VITE_LIFF_ID || (IS_PUBLIC ? '2012815845-0THqm2DV' : '2012713943-msELyw4c');
+
+/** 存檔後通知機器人的 Edge Function：開放版是 tlb-liff-notify（要登入、是成員，寫 app schema、用旅行喵喵的金鑰） */
+const NOTIFY_FN = IS_PUBLIC ? 'tlb-liff-notify' : 'liff-notify';
 
 const SDK_URL = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
 
@@ -123,7 +131,7 @@ export type LineNotifyResult = 'ok' | 'quota' | 'failed';
  */
 export async function notifyLineAfterSave(body: Record<string, unknown>): Promise<LineNotifyResult> {
   if (canSendMessages(ready)) {
-    const { data, error } = await supabase.functions.invoke('liff-notify', { body: { ...body, deliver: 'client' } });
+    const { data, error } = await supabase.functions.invoke(NOTIFY_FN, { body: { ...body, deliver: 'client' } });
     if (!error && typeof data?.marker === 'string') {
       try {
         await ready.sendMessages([{ type: 'text', text: data.marker }]);
@@ -139,7 +147,7 @@ export async function notifyLineAfterSave(body: Record<string, unknown>): Promis
 }
 
 async function push(body: Record<string, unknown>): Promise<LineNotifyResult> {
-  const { data, error } = await supabase.functions.invoke('liff-notify', { body });
+  const { data, error } = await supabase.functions.invoke(NOTIFY_FN, { body });
   if (data?.reason === 'line_quota') return 'quota';
   if (error) {
     console.error('[LIFF] notify error:', error);

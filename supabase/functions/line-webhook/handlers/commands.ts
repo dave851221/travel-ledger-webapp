@@ -296,10 +296,8 @@ if (isBound && (cleanText === '設定?' || cleanText === '設定？')) {
   }
   const config = prefTrip.ai_preference
   const msg = config
-    ? `⚙️ 這趟旅程目前的 AI 記帳偏好：\n\n${config}\n\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）\n\n${IS_PUBLIC ? '要修改請輸入「設定: 新的內容」，或到網頁的旅程設定修改。' : '要修改請按下方「⚙️ 記帳偏好」，或輸入「設定: 新的內容」。'}`
-    : IS_PUBLIC
-      ? '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n輸入「設定: 預設由我付款，大家均分」，或到網頁的旅程設定填寫。'
-      : '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n按下方「⚙️ 記帳偏好」開啟編輯畫面，或輸入「設定: 預設由我付款，大家均分」。'
+    ? `⚙️ 這趟旅程目前的 AI 記帳偏好：\n\n${config}\n\n（整趟旅程共用一份，網頁的旅程設定頁也看得到）\n\n要修改請按下方「⚙️ 記帳偏好」，或輸入「設定: 新的內容」。`
+    : '⚙️ 這趟旅程還沒設定 AI 記帳偏好。\n\n按下方「⚙️ 記帳偏好」開啟編輯畫面，或輸入「設定: 預設由我付款，大家均分」。'
   await replyMessage(replyToken, [{
     type: 'text', text: msg, quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
   }], sourceId)

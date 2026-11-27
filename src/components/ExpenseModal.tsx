@@ -23,6 +23,7 @@ import Modal from './Modal';
 import AmountCalculator from './AmountCalculator';
 import { ui } from './ui';
 import { notifyLineAfterSave } from '../utils/liff';
+import { IS_PUBLIC } from '../config/mode';
 import { supabase } from '../api/supabase';
 import type { Trip, Expense } from '../types';
 import { calculateDistribution, getCurrencyPrecision } from '../utils/finance';
@@ -474,12 +475,15 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       // --- LIFF 防重複：在所有操作前先佔用 nonce ---
       // 若 nonce 已被 LINE 的「確認存入」或「取消」使用，則中止，避免重複寫入
       if (liffMeta?.nonce && liffMeta?.line_user_id) {
-        const { error: nonceErr } = await supabase.from('line_processed_actions').insert({
-          nonce: liffMeta.nonce,
-          line_user_id: liffMeta.line_user_id,
-          action_type: 'save'
-        });
-        if (nonceErr) {
+        // 開放版：line_processed_actions 只有 service role 能寫，走 app.liff_claim_nonce（要是草稿那趟的成員）
+        const { data: claimed, error: nonceErr } = IS_PUBLIC
+          ? await supabase.rpc('liff_claim_nonce', { p_source_id: liffMeta.line_user_id, p_nonce: liffMeta.nonce })
+          : await supabase.from('line_processed_actions').insert({
+              nonce: liffMeta.nonce,
+              line_user_id: liffMeta.line_user_id,
+              action_type: 'save'
+            }).then(r => ({ data: !r.error, error: r.error }));
+        if (nonceErr || !claimed) {
           showToast('此操作已處理過，請勿重複提交。', 'error');
           onClose();
           return;
@@ -585,7 +589,8 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
       }
       // 上傳或寫入失敗時把 nonce 鎖放掉，否則那張 LINE 卡片之後再也存不進去
       if (nonceLocked && liffMeta?.nonce) {
-        await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);
+        if (IS_PUBLIC) await supabase.rpc('liff_release_nonce', { p_source_id: liffMeta.line_user_id ?? '', p_nonce: liffMeta.nonce });
+        else await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);
       }
       setError(quotaMessage(err) ?? (err instanceof Error ? err.message : String(err)));
     } finally { setLoading(false); }
