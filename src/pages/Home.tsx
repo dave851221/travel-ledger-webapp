@@ -4,6 +4,7 @@ import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
 import BrandMark from '../components/BrandMark';
+import { CatTraveler } from '../components/TravelCat';
 import Toast from '../components/Toast';
 import { ui } from '../components/ui';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -324,6 +325,7 @@ const Home: React.FC = () => {
           ) : (
             <div className="mt-6 sm:mt-10 space-y-6">
               <div className="text-center px-2">
+                <CatTraveler size={132} className="mx-auto -mb-1" title="旅行喵喵" />
                 <h1 className="text-2xl font-bold text-balance">在 LINE 群組裡拍收據，帳就分好了</h1>
                 <p className="text-sm text-muted mt-2">一起出去玩的旅伴都能記帳，回來還有一支回顧影片。</p>
               </div>
@@ -411,9 +413,13 @@ const Home: React.FC = () => {
           </div>
         ) : trips.length === 0 ? (
           <div className={`${ui.card} mt-4 px-6 py-14 text-center`}>
-            <span className="inline-flex w-14 h-14 rounded-2xl bg-sunk text-muted items-center justify-center mb-4">
-              <Plane size={26} />
-            </span>
+            {IS_PUBLIC ? (
+              <CatTraveler size={112} className="mx-auto mb-2" title="旅行喵喵" />
+            ) : (
+              <span className="inline-flex w-14 h-14 rounded-2xl bg-sunk text-muted items-center justify-center mb-4">
+                <Plane size={26} />
+              </span>
+            )}
             <h2 className="text-lg font-bold">還沒有任何旅程</h2>
             <p className="text-sm text-muted mt-1.5 mb-6">建立一趟旅程，邀請旅伴一起記帳。</p>
             <button onClick={() => setIsModalOpen(true)} className={ui.btnPrimary}>
