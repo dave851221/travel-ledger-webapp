@@ -376,7 +376,7 @@ const Home: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
-      <main className="w-full max-w-5xl mx-auto px-4 sm:px-8 pt-[max(16px,env(safe-area-inset-top))] pb-10">
+      <main className="w-full max-w-5xl lg:max-w-6xl mx-auto px-4 sm:px-8 pt-[max(16px,env(safe-area-inset-top))] pb-10">
         <header className="flex items-center gap-2 sm:gap-3 py-3 sm:py-6">
           <BrandMark />
           <span className="text-lg sm:text-xl font-bold truncate">{APP_NAME}</span>
@@ -425,20 +425,22 @@ const Home: React.FC = () => {
             </button>
           </div>
         ) : (
-          <div className="mt-1 sm:mt-0 space-y-7 sm:space-y-9">
+          // 電腦（lg 以上）：左邊固定一欄放最近的旅程＋分類目錄，右邊各分類由上往下排 ——
+          // 以前兩欄瀑布流，各組高度不同，左右兩欄參差不齊（David 2026-11-27：電腦版不整齊）
+          <div className={`mt-1 sm:mt-0 space-y-7 sm:space-y-9 ${featuredTrip || showGroupNav ? 'lg:space-y-0 lg:grid lg:grid-cols-[340px_minmax(0,1fr)] lg:gap-8 lg:items-start' : ''}`}>
             {(featuredTrip || showGroupNav) && (
-              <section className={`grid gap-x-6 gap-y-4 ${featuredTrip && showGroupNav ? 'lg:grid-cols-5' : ''}`}>
+              <section className="grid gap-y-4 lg:gap-y-6 lg:sticky lg:top-6">
                 {featuredTrip && (
-                  <div className={`min-w-0 flex flex-col ${showGroupNav ? 'lg:col-span-3' : 'md:max-w-xl'}`}>
+                  <div className={`min-w-0 flex flex-col ${showGroupNav ? '' : 'md:max-w-xl lg:max-w-none'}`}>
                     <h2 className="text-sm font-bold text-ink mb-2.5 px-1">最近的旅程</h2>
                     <div className="flex-1"><FeaturedTrip trip={featuredTrip} onClick={() => openTrip(featuredTrip)} /></div>
                   </div>
                 )}
                 {showGroupNav && (
-                  <nav aria-label="旅程分類" className={`min-w-0 flex flex-col ${featuredTrip ? 'lg:col-span-2' : ''}`}>
+                  <nav aria-label="旅程分類" className="min-w-0 flex flex-col">
                     <h2 className="text-sm font-bold text-ink mb-2.5 px-1 hidden lg:block">分類</h2>
                     {/* 手機：一排可以左右滑的分類；電腦：登機證旁邊的分類目錄 */}
-                    <div className="flex lg:flex-col gap-2 lg:gap-0.5 overflow-x-auto lg:overflow-visible no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0 lg:flex-1 lg:bg-surface lg:border lg:border-line lg:rounded-2xl lg:p-1.5">
+                    <div className="flex lg:flex-col gap-2 lg:gap-0.5 overflow-x-auto lg:overflow-visible no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0 lg:bg-surface lg:border lg:border-line lg:rounded-2xl lg:p-1.5">
                       {groupedTrips.map(({ category, trips: groupTrips }) => {
                         const active = groupTrips.filter(t => !t.is_archived).length;
                         return (
@@ -459,8 +461,8 @@ const Home: React.FC = () => {
               </section>
             )}
 
-            {/* 兩欄瀑布流：每組高度不同，用 grid 會在矮的那組下面留一塊空白 */}
-            <div className="md:columns-2 md:gap-6">
+            {/* 平板兩欄瀑布流（每組高度不同，用 grid 會在矮的那組下面留一塊空白）；電腦右欄一組接一組 */}
+            <div className={`md:columns-2 md:gap-6 ${featuredTrip || showGroupNav ? 'lg:columns-1' : ''}`}>
               {groupedTrips.map(({ category, trips: groupTrips }) => {
                 const isExpanded = !!expandedGroups[category];
                 const visibleTrips = isExpanded ? groupTrips : groupTrips.slice(0, TRIPS_PER_GROUP);
