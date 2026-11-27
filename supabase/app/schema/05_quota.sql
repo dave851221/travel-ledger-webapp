@@ -3,7 +3,7 @@
 --
 -- 規則（David 2026-11-26／27）：
 --   · 免費、付費旅程都有上限，只設用量、不設有效期。數字放在 app.plan_limits，改數字不用改程式
---     （免費 50 筆／15 次 AI／15 張照片；解鎖 600／300／300；加量包加在 trips.extra_*）
+--     （免費 60 筆／30 次 AI／30 張照片；解鎖 600／300／600；加量包加在 trips.extra_*）
 --   · AI 次數 LINE 與網頁共用；被 AI 拒絕的呼叫也算（真的花了錢）
 --   · 不限每個人每分鐘／每天的次數，只用「每趟」當上限（David 2026-11-27）
 --   · 防止一直開新的免費旅程刷 AI：從沒付過費的帳號最多「建立」5 趟（刪掉的也算；加入別人的不算），
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS app.plan_limits (
 );
 
 INSERT INTO app.plan_limits (plan, max_entries, max_ai_calls, max_photos) VALUES
-    ('free', 50, 15, 15),
-    ('paid', 600, 300, 300)
+    ('free', 60, 30, 30),
+    ('paid', 600, 300, 600)
 ON CONFLICT (plan) DO NOTHING;
 
 -- 旅程的方案與加量（只有 service role 能改：付款流程或開發者手動）
