@@ -26,7 +26,7 @@ export const TRIP_COLUMNS = 'id, name, members, categories, category, base_curre
  * 開放版的 trips 是欄位級權限，`*` 會因為碰到 view_password_hash 而被拒絕。
  */
 export const TRIP_DETAIL_COLUMNS: string = IS_PUBLIC
-  ? `${TRIP_COLUMNS}, visibility, share_token, invite_token, created_by`
+  ? `${TRIP_COLUMNS}, visibility, share_token, invite_token, created_by, itinerary_sheet`
   : '*';
 
 /**

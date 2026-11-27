@@ -15,6 +15,7 @@
 | [`docs/AI_TOOLING.md`](docs/AI_TOOLING.md) | 讓 AI 直接操作 Supabase（MCP 設定與風險） | 想請 AI 跑 SQL 或部署函式時 |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 待辦、已知風險、未來規劃 | 想知道什麼還沒做、哪裡有雷 |
 | [`docs/MCP_SERVER_DESIGN.md`](docs/MCP_SERVER_DESIGN.md) | MCP server 設計構想 | 規劃 LINE 以外的記帳管道時 |
+| [`docs/ITINERARY_SHEET.md`](docs/ITINERARY_SHEET.md) | 開放版用 Google 試算表排行程（模板、格式、讀取流程） | 動開放版的行程分頁時 |
 | [`docs/ART_PLAN.md`](docs/ART_PLAN.md) | 開放版旅行喵喵的美術插槽（檔名、尺寸、內容）；圖放進 `public/art/` 就會出現 | 要加或換插圖時 |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | 開放版（旅行小本本，`app` schema）的資料防護規則與本機權限測試 | 動開放版的任何資料表、RPC、Edge Function 之前 |
 

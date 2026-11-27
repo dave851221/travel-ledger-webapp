@@ -84,9 +84,9 @@ const AccountsPanel: React.FC<{ accounts: AdminAccountRow[]; busy: boolean; onSe
           {shown.map(a => (
             <li key={a.id} className="px-4 py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0 space-y-1">
-                <div className="flex items-center gap-1.5">
-                  <LoginBadges logins={a.logins} />
-                  {a.admin && <ShieldCheck size={14} className="text-accent shrink-0" aria-label="管理員" />}
+                <div className="flex items-start gap-1.5">
+                  <span className="flex-1 min-w-0"><LoginBadges logins={a.logins} /></span>
+                  {a.admin && <ShieldCheck size={14} className="text-accent shrink-0 mt-1.5" aria-label="管理員" />}
                 </div>
                 <p className="text-xs text-muted num">
                   註冊 {day(a.created_at)}・登入 {day(a.last_sign_in_at)}・旅程 {a.trips}・建立 {a.allowance.created}
