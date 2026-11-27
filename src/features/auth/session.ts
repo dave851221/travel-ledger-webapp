@@ -100,6 +100,23 @@ export async function signInWithGoogle(returnTo: string): Promise<void> {
   if (error) throw error;
 }
 
+/** 連結 Google 前記一下，回來時 AuthBootstrap 才知道要說「已連結」 */
+export const GOOGLE_LINK_KEY = 'tlb:google_link';
+
+/**
+ * 把 Google 連到目前登入的帳號（Supabase 的 manual linking，要在 Auth 設定打開）。
+ * 那個 Google 已經是別的帳號時，Supabase 會帶 error_code=identity_already_exists 回來，見 lineCallback.ts
+ */
+export async function linkGoogle(returnTo: string): Promise<void> {
+  rememberReturnTo(returnTo);
+  try { localStorage.setItem(GOOGLE_LINK_KEY, String(Date.now())); } catch { /* ignore */ }
+  const { error } = await supabase.auth.linkIdentity({ provider: 'google', options: { redirectTo: siteRootUrl() } });
+  if (error) {
+    try { localStorage.removeItem(GOOGLE_LINK_KEY); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
 /** 本機開發專用：Email 一次性登入（信在本機 Supabase 的 Inbucket）。正式環境沒有開 Email 登入 */
 export async function signInWithDevEmail(email: string, returnTo: string): Promise<void> {
   rememberReturnTo(returnTo);

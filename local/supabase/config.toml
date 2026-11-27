@@ -52,6 +52,8 @@ site_url = "http://localhost:5173"
 additional_redirect_urls = ["http://localhost:5173/**"]
 jwt_expiry = 3600
 enable_signup = true
+# 「我的帳號」裡把 Google 連到已登入的帳號（supabase.auth.linkIdentity）；正式環境同樣要打開
+enable_manual_linking = true
 
 # 本機測試用：用 Email 一次性密碼登入（信件在 http://localhost:54324 看）。
 # 正式環境只開 LINE 與 Google，見 docs/SECURITY.md。

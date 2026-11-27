@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check, X } from 'lucide-react';
+import { Plus, Lock, Unlock, Loader2, AlertCircle, ChevronDown, Plane, ArrowDownUp, RotateCcw, GripVertical, Check, X, UserRound } from 'lucide-react';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import type { Trip } from '../types';
 import Modal from '../components/Modal';
@@ -13,6 +13,7 @@ import { isSubmitEnter } from '../utils/keyboard';
 import { globalStorageKey, IS_PUBLIC, PRODUCT_NAME } from '../config/mode';
 import { peekReturnTo, signOut, useSession } from '../features/auth/session';
 import SignInPanel from '../features/auth/SignInPanel';
+import AccountModal from '../features/auth/AccountModal';
 import { useToast } from '../hooks/useToast';
 import { useBackClose } from '../hooks/useBackClose';
 import { applyLayout, pickFeatured, defaultGroups, layoutFromGroups, sameOrder, UNCATEGORIZED, type HomeLayout, type TripGroup } from '../features/home/homeLayout';
@@ -122,8 +123,10 @@ const Home: React.FC = () => {
     setLoading(cached.length === 0);
   }
 
+  const [accountOpen, setAccountOpen] = useState(false);
   const handleSignOut = async () => {
     // 快取由 ensureCacheOwner 在登出時整批清掉（session.ts），這裡只清畫面
+    setAccountOpen(false);
     setTrips([]);
     await signOut();
   };
@@ -375,12 +378,13 @@ const Home: React.FC = () => {
               <Plus size={16} strokeWidth={2.6} />新旅程
             </button>
             {IS_PUBLIC && (
-              <button onClick={handleSignOut} className="text-xs text-muted hover:text-ink underline-offset-2 hover:underline">
-                登出
+              <button onClick={() => setAccountOpen(true)} className={`${ui.btnSecondary} px-3`} aria-label="我的帳號" title="我的帳號（登入方式、登出）">
+                <UserRound size={15} /><span className="hidden sm:inline">帳號</span>
               </button>
             )}
           </div>
         </header>
+        {IS_PUBLIC && <AccountModal isOpen={accountOpen} onClose={() => setAccountOpen(false)} onSignOut={handleSignOut} />}
 
         {error && (
           <div className={`${ui.errorBox} mb-6`}>

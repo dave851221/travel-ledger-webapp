@@ -41,6 +41,10 @@
 - **LINE 登入**：只收網頁 OAuth 的 code（伺服器自己換 ID token、驗 nonce）或 LIFF 的 access token
   （伺服器向 LINE 確認是發給我們 channel 的）；前端送來的 ID token 一律不收（有效期內可以重放）。
   `auth-line` 的 CORS 只對 `APP_ALLOWED_ORIGINS` 裡的網站回 Allow-Origin。
+- **成員看得到的帳號資訊**：只走 `trip_member_accounts`／`my_logins`（SECURITY DEFINER，要是成員／本人），
+  給 LINE／Google 顯示名稱與遮過的 email（`d***e@gmail.com`）；不給完整 email、LINE userId、auth 的 id 以外的東西。
+- **連結帳號**：Google 用 `supabase.auth.linkIdentity`（Auth 要開 manual linking）；LINE 走 `auth-line` 的 `link`，
+  伺服器用呼叫者的 JWT 認人，那個 LINE 已經屬於別的帳號就拒絕（不合併、不搶）。
 
 ## 上線時要做的設定（還沒做）
 
