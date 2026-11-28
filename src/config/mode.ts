@@ -65,4 +65,4 @@ export function clearUserStorage(): void {
  * 開放版（旅行小本本）的網址。舊版首頁的「搬家」提示連過去（David 2026-11-27：舊版不再建立新旅程）。
  * 之後搬到 Cloudflare Pages／自己的網域時改這裡。
  */
-export const PUBLIC_SITE_URL = 'https://dave851221.github.io/travel-ledger-webapp/next/';
+export const PUBLIC_SITE_URL: string = import.meta.env.VITE_SITE_URL || 'https://dave851221.github.io/travel-ledger-webapp/next/';

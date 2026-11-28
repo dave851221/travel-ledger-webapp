@@ -118,3 +118,18 @@ Repo 的 Settings → Secrets and variables → Actions 需要設定：
 ## 6. 新增行程頁
 
 見 [`ITINERARY_AUTHORING.md`](ITINERARY_AUTHORING.md)。
+
+## Cloudflare Pages（開放版搬家，2026-11-28 準備）
+
+開放版（旅行小本本）從 GitHub Pages 的 `/next/` 搬到 Cloudflare Pages，先用免費的 `*.pages.dev` 網址，之後買網域再接上。舊版照舊留在 GitHub Pages。
+
+**Cloudflare 那邊（David 做）**：Workers & Pages → Create → Pages → Connect to Git → 選 `travel-ledger-webapp`
+- Build command：`npm run build`；Output directory：`dist`；Framework preset：None
+- Environment variables：`VITE_APP_MODE=public`、`VITE_BASE=/`、`VITE_SITE_URL=https://<專案>.pages.dev/`、`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`（跟 GitHub repo secrets 一樣）、`NODE_VERSION=22`
+
+**接上之後要一起改的地方**（網址換了，登入與 LINE 都要認得新網址）：
+1. Supabase Auth 的 Site URL／Redirect URLs 加新網址（Google 登入回來的地方）
+2. Edge Function secrets：`APP_ALLOWED_ORIGINS` 加新網址（`auth-line` 的 CORS）、`TLB_WEBAPP_URL` 改新網址（旅行喵喵的連結、讀行程 JSON），重新部署 `tlb-*` 與 `auth-line`
+3. LINE Developers：LINE Login channel 的 Callback URL 加新網址、開放版 LIFF 的 Endpoint URL 改新網址
+4. Cloudflare R2 bucket 的 CORS 加新網址（回顧影片讀原圖）
+5. GitHub Actions 建舊版時帶 `VITE_SITE_URL`（舊版首頁的「前往旅行小本本」），`/next/` 改成轉址到新網址

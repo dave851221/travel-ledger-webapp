@@ -43,7 +43,9 @@ function itineraryJson(): Plugin {
 // 開放版（旅行小本本）：建置時設環境變數 VITE_APP_MODE=public（見 src/config/mode.ts）。
 // 開發與封測期放在同一個 GitHub Pages 網站的 /next/ 底下。
 const IS_PUBLIC_BUILD = process.env.VITE_APP_MODE === 'public';
-const BASE = IS_PUBLIC_BUILD ? '/travel-ledger-webapp/next/' : '/travel-ledger-webapp/';
+// 搬到 Cloudflare Pages（自己的網址、放在根目錄）時用 VITE_BASE=/ 與 VITE_SITE_URL 覆寫（docs/SETUP.md「Cloudflare Pages」）
+const BASE = process.env.VITE_BASE || (IS_PUBLIC_BUILD ? '/travel-ledger-webapp/next/' : '/travel-ledger-webapp/');
+const PUBLIC_SITE = process.env.VITE_SITE_URL || 'https://dave851221.github.io/travel-ledger-webapp/next/';
 const PRODUCT = IS_PUBLIC_BUILD ? '旅行小本本' : '旅遊小本本';
 // 開放版的圖示是旅行喵喵的頭貼（David 提供的美術，public/art/avatar.png 縮出來的 public/cat-*），舊版照舊是車票
 const ICON = IS_PUBLIC_BUILD
@@ -60,7 +62,8 @@ function publicHtml(): Plugin {
         .replaceAll('旅遊小本本', '旅行小本本')
         .replace('type="image/svg+xml" href="/favicon.svg"', `type="${ICON.faviconType}" href="/${ICON.favicon}"`)
         .replace('href="/apple-touch-icon.png"', `href="/${ICON.apple}"`)
-        .replace('content="https://dave851221.github.io/travel-ledger-webapp/"', 'content="https://dave851221.github.io/travel-ledger-webapp/next/"');
+        .replace('content="https://dave851221.github.io/travel-ledger-webapp/"', `content="${PUBLIC_SITE}"`)
+        .replace('content="https://dave851221.github.io/travel-ledger-webapp/og-image.png"', `content="${PUBLIC_SITE}og-image.png"`);
     } },
   };
 }
