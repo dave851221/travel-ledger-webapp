@@ -48,17 +48,13 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # 舊版首頁的「前往旅行小本本」連到新網站
+          VITE_SITE_URL: https://meowtrip.pages.dev/
 
-      # 開放版（旅行小本本）：同一份程式碼用 VITE_APP_MODE=public 再建一次，放在 /next/ 底下。
-      # 舊版的建置不受影響（上一步照舊）。見 src/config/mode.ts、docs/SECURITY.md。
-      - name: Build public version (/next/)
-        run: npx vite build --outDir dist/next --emptyOutDir
-        env:
-          VITE_APP_MODE: public
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          # LINE Login 的 Channel ID 本來就會出現在登入網址裡，不是秘密
-          VITE_LINE_LOGIN_CHANNEL_ID: '2012815845'
+      # 開放版（旅行小本本）2026-11-28 搬到 Cloudflare Pages（https://meowtrip.pages.dev/，main 自動部署）。
+      # 舊網址 /next/ 只放轉址頁（帶著 ?query 與 #hash 轉過去）和一個會自己註銷的 Service Worker。
+      - name: Redirect /next/ to the new site
+        run: mkdir -p dist/next && cp next-redirect/index.html next-redirect/sw.js dist/next/
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

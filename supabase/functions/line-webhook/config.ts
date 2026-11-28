@@ -41,7 +41,7 @@ export const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 
 export const WEBAPP_URL = IS_PUBLIC
-  ? (Deno.env.get('TLB_WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp/next')
+  ? (Deno.env.get('TLB_WEBAPP_URL') || 'https://meowtrip.pages.dev')
   : (Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp')
 /**
  * LIFF app 的 ID（不是密鑰）。有值時卡片按鈕改開 https://liff.line.me/<ID>，

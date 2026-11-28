@@ -581,6 +581,7 @@ GitHub 還沒登記好 artifact，報 `No artifacts named "github-pages"` 或 `F
 （對照表見 [`docs/ROADMAP.md`](docs/ROADMAP.md) 開頭）。
 特別注意 **LIFF 編輯頁屬於前端**，改了要 push 才會生效。
 
+- **開放版前端**：Cloudflare Pages 專案 `meowtrip`（https://meowtrip.pages.dev/），`main` 有更新就自動建置（環境變數見 docs/SETUP.md「Cloudflare Pages」）；GitHub Pages 的 `/next/` 只剩轉址頁（`next-redirect/`）。
 - **前端**：推送到 `main` 觸發 `.github/workflows/deploy.yml`，自動部署到 GitHub Pages。
   workflow 是 `build` → `deploy` 兩個 job，**不要合併成一個**（見踩坑紀錄「GitHub Pages 部署」）。推完要確認 run 成功。
   Repo Secrets 需要 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`。
