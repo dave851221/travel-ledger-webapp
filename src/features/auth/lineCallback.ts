@@ -89,9 +89,14 @@ export function takeEarlySignIn(): Promise<AuthLineResult> | null {
   return p;
 }
 
-/** auth-line 的網址。這個檔案不能 import api/supabase，所以自己組 */
+/**
+ * auth-line 的網址。這個檔案不能 import api/supabase，所以自己組。
+ * 指定在雪梨跑（資料庫所在地）：預設會跑在離使用者最近的東京，登入要打的資料庫／Auth 每趟都要跨到雪梨，
+ * 實測 2026-11-28 光那兩段就 0.9～1.8 秒；在雪梨跑只是 LINE token 那一趟變遠（約 0.3 秒）。
+ * 叫醒（GET）與登入（POST）一定要打同一個區域，才會落在剛叫醒的那個實例。
+ */
 export function authLineUrl(): string {
-  return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-line`;
+  return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-line?forceFunctionRegion=ap-southeast-2`;
 }
 
 /**
