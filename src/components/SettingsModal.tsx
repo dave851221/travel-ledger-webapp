@@ -37,6 +37,7 @@ import { CURRENCIES, currencyColor, currencyLabel, currencyName, normalizeCurren
 
 const OTHER_CURRENCY = '__other__';
 import Decimal from 'decimal.js';
+import { errorText } from '../utils/errorText';
 
 /**
  * 旅程時區的候選清單（M4）。
@@ -378,7 +379,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       onSuccess();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
     } finally {
       setLoading(false);
     }
@@ -469,7 +470,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
       const when = updatedAt ? `資料時間 ${updatedAt.getMonth() + 1}/${updatedAt.getDate()}。` : '';
       setTodayNote(`${when}${missing.length > 0 ? `${missing.join('、')} 查不到今日匯率。` : ''}按「套用」才會改，存檔後生效。`);
     } catch (err) {
-      setError('查詢今日匯率失敗：' + (err instanceof Error ? err.message : String(err)));
+      setError('查詢今日匯率失敗：' + errorText(err));
     } finally {
       setRatesLoading(false);
     }
@@ -496,7 +497,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
         missing.length > 0 ? `${missing.join('、')} 查不到匯率，請手動填寫。` : '',
       ].filter(Boolean).join(''));
     } catch (err) {
-      setError('更新匯率失敗：' + (err instanceof Error ? err.message : String(err)));
+      setError('更新匯率失敗：' + errorText(err));
     } finally {
       setRatesLoading(false);
     }

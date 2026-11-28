@@ -38,6 +38,7 @@ import TrashTab from '../features/dashboard/TrashTab';
 import SiblingsTab from '../features/dashboard/SiblingsTab';
 import AlbumTab from '../features/dashboard/AlbumTab';
 import MemberAvatar, { MemberColorProvider } from '../features/dashboard/MemberAvatar';
+import { errorText } from '../utils/errorText';
 
 // 統計分頁帶著圖表套件（recharts，壓縮前 300 KB），行程分頁帶著版面元件，都等點到才下載
 const StatsTab = lazy(() => import('../features/dashboard/StatsTab'));
@@ -63,7 +64,9 @@ const Dashboard: React.FC = () => {
   const {
     trip, expenses, deletedExpenses, siblingTrips, loading, syncing,
     refetchTrip, refetchExpenses, refetchDeleted,
-  } = useTripData(authed ? id : undefined, useCallback(() => navigate('/'), [navigate]));
+  } = useTripData(authed ? id : undefined, useCallback(() => navigate('/', {
+    state: { notice: IS_PUBLIC ? '打不開這趟旅程：可能已經被刪除，或你已經不是成員了。' : '找不到這趟旅程，可能已經被刪除了。' },
+  }), [navigate]));
   // 目前的分頁記在網址（?tab=ledger）：重新整理、或 PWA 自動更新重新載入之後還留在同一頁。
   // 用 replace 而不是 push —— 分頁不疊進瀏覽紀錄，按返回仍然是回到所有旅程。
   const [searchParams, setSearchParams] = useSearchParams();
@@ -349,7 +352,7 @@ const Dashboard: React.FC = () => {
       });
       setSettleConfirm(null); setSettleFromManual(false); refetchExpenses();
       showToast(queued ? '目前離線，結清已先存在手機，恢復連線後會自動上傳' : '已記錄結清');
-    } catch (err) { showToast('結清失敗：' + (err instanceof Error ? err.message : String(err)), 'error'); }
+    } catch (err) { showToast('結清失敗：' + errorText(err), 'error'); }
   };
 
   if (loading) {
