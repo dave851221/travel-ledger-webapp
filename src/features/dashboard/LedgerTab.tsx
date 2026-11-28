@@ -210,7 +210,7 @@ const LedgerTab: React.FC<Props> = ({
       )}
 
       <div className="hidden lg:grid grid-cols-[30px_minmax(0,1fr)_88px_92px_112px_100px] gap-x-3 px-4 pt-1 text-[11.5px] text-muted">
-        <span /><span>項目</span><span>付款</span><span>分攤</span><span className="text-right">金額</span><span className="text-right">我的份額</span>
+        <span /><span>項目</span><span>付款</span><span>分攤</span><span className="text-right">金額</span><span className="text-right">{currentUser ? '我的份額' : ''}</span>
       </div>
 
       <div className="space-y-3 lg:space-y-0 lg:bg-surface lg:border lg:border-line lg:rounded-2xl lg:overflow-hidden">

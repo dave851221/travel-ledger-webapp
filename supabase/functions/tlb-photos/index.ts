@@ -7,7 +7,7 @@
 //        → 是成員、沒超過照片張數上限才存（app.add_trip_photo 先占位置），回 { path }
 //   POST { action: 'sign', paths }        → { urls: { [path]: 簽名網址 } }（12 小時，只簽自己是成員的旅程）
 //   POST { action: 'remove', paths }      → 刪掉（只刪自己是成員的旅程裡的）
-//   POST { action: 'remove_trip', tripId } → 整趟刪光（只有 owner；刪旅程、刪帳號之前呼叫）
+//   POST { action: 'remove_trip', tripId } → 整趟刪光（owner；或旅程已經刪掉後清孤兒照片。刪帳號之前、刪旅程之後呼叫）
 //   POST { action: 'sign_shared', tripId, token, password?, paths } → 分享頁（沒登入）看照片：分享連結對了才簽，只簽這趟的
 // 部署：supabase functions deploy tlb-photos --no-verify-jwt（身分在這裡自己驗）
 // ============================================================
@@ -145,8 +145,12 @@ serve(async (req) => {
       case 'remove_trip': {
         const tripId = typeof body.tripId === 'string' ? body.tripId : ''
         if (!UUID_RE.test(tripId)) return json({ error: 'invalid_trip' }, 400)
-        const roles = await rolesIn(userId, [tripId])
-        if (roles.get(tripId) !== 'owner') return json({ error: 'not_owner' }, 403)
+        // owner 才能刪；旅程已經從資料庫刪掉時（刪旅程是先刪資料、再清照片）剩下的是孤兒照片，誰清都可以
+        const [roles, { data: still }] = await Promise.all([
+          rolesIn(userId, [tripId]),
+          db.from('trips').select('id').eq('id', tripId).maybeSingle(),
+        ])
+        if (still && roles.get(tripId) !== 'owner') return json({ error: 'not_owner' }, 403)
         await store.removeTrip(tripId)
         return json({ ok: true })
       }

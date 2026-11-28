@@ -12,7 +12,7 @@ ALTER TABLE app.line_identities ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS line_identities_self ON app.line_identities;
 CREATE POLICY line_identities_self ON app.line_identities
     FOR SELECT TO authenticated
-    USING (user_id = auth.uid());
+    USING (user_id = (SELECT auth.uid()));
 
 ALTER TABLE app.trips        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.trip_members ENABLE ROW LEVEL SECURITY;
@@ -22,8 +22,8 @@ ALTER TABLE app.expenses     ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS profiles_self ON app.profiles;
 CREATE POLICY profiles_self ON app.profiles
     FOR ALL TO authenticated
-    USING (user_id = auth.uid())
-    WITH CHECK (user_id = auth.uid());
+    USING (user_id = (SELECT auth.uid()))
+    WITH CHECK (user_id = (SELECT auth.uid()));
 
 -- ── trips：成員可看、可改一般設定；owner 才能刪 ────────────────
 -- 建立只能走 app.create_trip（沒有 INSERT 權限）；
@@ -55,7 +55,7 @@ DROP POLICY IF EXISTS trip_members_delete ON app.trip_members;
 CREATE POLICY trip_members_delete ON app.trip_members
     FOR DELETE TO authenticated
     -- 自己離開；建立者可以移除任何人；管理員只能移除一般成員
-    USING (user_id = auth.uid() OR app.is_owner(trip_id) OR (app.is_admin(trip_id) AND role = 'editor'));
+    USING (user_id = (SELECT auth.uid()) OR app.is_owner(trip_id) OR (app.is_admin(trip_id) AND role = 'editor'));
 
 -- ── expenses：成員可讀寫 ───────────────────────────────────────
 DROP POLICY IF EXISTS expenses_member ON app.expenses;
