@@ -22,8 +22,8 @@ const UL: React.FC<{ items: React.ReactNode[] }> = ({ items }) => (
 const Table: React.FC<{ head: string[]; rows: string[][] }> = ({ head, rows }) => (
   <div className="overflow-x-auto mb-3">
     <table className="w-full text-sm border border-line rounded-xl overflow-hidden">
-      <thead className="bg-sunk"><tr>{head.map(h => <th key={h} className="text-left font-bold px-3 py-2 border-b border-line">{h}</th>)}</tr></thead>
-      <tbody>{rows.map((r, i) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className="px-3 py-2 align-top text-ink-2">{c}</td>)}</tr>)}</tbody>
+      <thead className="bg-sunk"><tr>{head.map(h => <th key={h} className="text-left font-bold px-3 py-2 border-b border-line whitespace-nowrap">{h}</th>)}</tr></thead>
+      <tbody>{rows.map((r, i) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className="px-3 py-2 align-top text-ink-2 min-w-[5.5rem]">{c}</td>)}</tr>)}</tbody>
     </table>
   </div>
 );

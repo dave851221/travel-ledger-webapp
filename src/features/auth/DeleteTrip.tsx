@@ -21,10 +21,11 @@ const DeleteTrip: React.FC<{ trip: Trip; onDeleted: () => void }> = ({ trip, onD
     if (!ready) return;
     setBusy(true);
     setError(null);
-    await removeTripPhotos(trip.id);
+    // 先刪資料再清照片：刪除失敗時旅程與照片都還在（以前先清照片，失敗就留下一趟照片全破的旅程）
     const { error: err, count } = await supabase.from('trips').delete({ count: 'exact' }).eq('id', trip.id);
+    if (err || !count) { setBusy(false); setError('刪除沒有成功，請再試一次'); return; }
+    await removeTripPhotos(trip.id).catch(() => {});
     setBusy(false);
-    if (err || !count) { setError('刪除沒有成功，請再試一次'); return; }
     onDeleted();
   };
 
