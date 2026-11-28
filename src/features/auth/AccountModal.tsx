@@ -105,6 +105,11 @@ const AccountModal: React.FC<{ isOpen: boolean; onClose: () => void; onSignOut: 
           <LogOut size={16} />登出
         </button>
         <DeleteAccount onDeleted={onSignOut} />
+        <p className="text-center text-xs text-muted pt-1">
+          <a href="#/terms" onClick={onClose} className="hover:text-ink">服務條款</a>
+          <span aria-hidden className="mx-2">·</span>
+          <a href="#/privacy" onClick={onClose} className="hover:text-ink">隱私權政策</a>
+        </p>
       </div>
     </Modal>
   );

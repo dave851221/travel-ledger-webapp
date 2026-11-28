@@ -14,6 +14,7 @@ const LiffPreference = lazy(() => import('./pages/LiffPreference'));
 const AuthBootstrap = lazy(() => import('./features/auth/AuthBootstrap'));
 const JoinTrip = lazy(() => import('./pages/JoinTrip'));
 const SharedTrip = lazy(() => import('./pages/SharedTrip'));
+const Legal = lazy(() => import('./pages/Legal'));
 const Admin = lazy(() => import('./pages/Admin'));
 
 const PageLoading = () => (
@@ -109,6 +110,9 @@ function App() {
             <Route path="/trip/:id" element={IS_PUBLIC ? <Navigate to="dashboard" replace /> : <TripPortal />} />
             {IS_PUBLIC && <Route path="/join/:id/:token" element={<JoinTrip />} />}
             {IS_PUBLIC && <Route path="/s/:id/:token" element={<SharedTrip />} />}
+            {/* 服務條款與隱私權政策：不用登入就能看 */}
+            {IS_PUBLIC && <Route path="/terms" element={<Legal section="terms" />} />}
+            {IS_PUBLIC && <Route path="/privacy" element={<Legal section="privacy" />} />}
             {/* 開發者後台：權限在資料庫（app.site_admins），不是管理員只會看到「沒有權限」 */}
             {IS_PUBLIC && <Route path="/admin" element={<Admin />} />}
             <Route path="/trip/:id/dashboard" element={<Dashboard />} />
