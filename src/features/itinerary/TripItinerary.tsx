@@ -6,7 +6,7 @@ import { getItinerary, isPlan } from './registry';
 import ItineraryView from './ItineraryView';
 import ItinerarySettings from './ItinerarySettings';
 import SheetItinerary, { type ShareView } from './SheetItinerary';
-import { isStyleKey, isThemeKey, type StyleKey, type ThemeKey } from './themes';
+import { isThemeKey, normalizeStyle, type StyleKey, type ThemeKey } from './themes';
 import type { ItineraryPlan } from './types';
 
 /**
@@ -28,12 +28,12 @@ const TripItinerary: React.FC<{
   const applyLook = useCallback((plan: ItineraryPlan): ItineraryPlan => ({
     ...plan,
     theme: isThemeKey(trip.itinerary_color) ? trip.itinerary_color : plan.theme,
-    style: isStyleKey(trip.itinerary_style) ? trip.itinerary_style : plan.style,
+    style: normalizeStyle(trip.itinerary_style) ?? plan.style,
   }), [trip.itinerary_color, trip.itinerary_style]);
 
   const basePlan = entry && isPlan(entry) ? entry : null;
   const currentTheme: ThemeKey = isThemeKey(trip.itinerary_color) ? trip.itinerary_color : basePlan?.theme ?? 'default';
-  const currentStyle: StyleKey = isStyleKey(trip.itinerary_style) ? trip.itinerary_style : basePlan?.style ?? 'classic';
+  const currentStyle: StyleKey = normalizeStyle(trip.itinerary_style) ?? basePlan?.style ?? 'classic';
 
   const settingsButton = manage ? (
     <button
