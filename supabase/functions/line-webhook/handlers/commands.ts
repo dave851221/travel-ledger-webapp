@@ -13,7 +13,7 @@
 //    快捷查詢之後也是 —— 兩者都會落到 AI 核心去。
 // ============================================================
 
-import { convertToBase, formatAmount, sumByCurrency } from "../../_shared/finance.ts"
+import { convertToBase, formatAmountDisplay, sumByCurrency } from "../../_shared/finance.ts"
 import { Decimal } from "../../_shared/deps.ts"
 import { getSettlementPlan } from "../../_shared/tools/balance.ts"
 import { deleteExpense } from "../../_shared/tools/expenses.ts"
@@ -683,7 +683,7 @@ if (isBinding) {
           }],
           notes: rateWarning ? [rateWarning] : [],
           webUrl: `${WEBAPP_URL}/#/trip/${tripId}/dashboard`,
-          altText: `結算建議：${settlements.map(s => `${s.from}→${s.to} ${formatAmount(s.amount, baseCurrency, settlePrecision)} ${baseCurrency}`).join('、')}`,
+          altText: `結算建議：${settlements.map(s => `${s.from}→${s.to} ${formatAmountDisplay(s.amount, baseCurrency, settlePrecision)} ${baseCurrency}`).join('、')}`,
         }),
         quickReply: boundQR,
       }], sourceId)

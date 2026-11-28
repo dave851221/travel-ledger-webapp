@@ -51,7 +51,7 @@ import { recognizeReceipt } from "../_shared/assistant/receipt.ts"
 import { tripToday } from "../_shared/assistant/time.ts"
 import type { DraftExpense, OutstandingDraft } from "../_shared/assistant/types.ts"
 import type { SupabaseClient } from "../_shared/deps.ts"
-import { formatAmount } from "../_shared/finance.ts"
+import { formatAmountDisplay } from "../_shared/finance.ts"
 import { buildSavedText } from "../_shared/savedText.ts"
 import { optionalString } from "../_shared/tools/args.ts"
 import { commitExpense, commitExpenseUpdate, deleteExpense, expenseRef, resolveExpenseRef } from "../_shared/tools/expenses.ts"
@@ -381,7 +381,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
         expenseId: existing.id,
         existing: {
           description: existing.description, date: existing.date,
-          amount: formatAmount(existing.amount, existing.currency, precision), currency: existing.currency,
+          amount: formatAmountDisplay(existing.amount, existing.currency, precision), currency: existing.currency,
         },
         changes: upd.changes.map(c => ({
           field: c.field, label: FIELD_LABELS[c.field] ?? c.field,
@@ -410,7 +410,7 @@ export async function handleMessage(scope: ChatScope, req: ChatRequest): Promise
         expenseId: existing.id,
         existing: {
           description: existing.description, date: existing.date,
-          amount: formatAmount(existing.amount, existing.currency, precision),
+          amount: formatAmountDisplay(existing.amount, existing.currency, precision),
           currency: existing.currency, category: existing.category,
         },
       })
@@ -450,7 +450,7 @@ async function analyzeReceipt(
 ): Promise<{ text: string; history: string }> {
   const { db, trip } = scope
   const question = optionalString(args.question) ?? '請詳細描述此收據的所有品項與金額'
-  const label = (e: RecentExpense) => `${e.description} ${formatAmount(e.amount, e.currency, precision)} ${e.currency}`
+  const label = (e: RecentExpense) => `${e.description} ${formatAmountDisplay(e.amount, e.currency, precision)} ${e.currency}`
 
   const byRef = await findExpenseByRef(db, trip.id, args.expense_ref)
   // 沒指名已存的那一筆、而聊天室裡有一張還沒存的收據草稿：問的就是那一張（LINE 只能找已存的）

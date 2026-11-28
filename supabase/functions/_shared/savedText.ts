@@ -11,7 +11,7 @@
 // 純函式：只 import finance.ts，vitest 能直接測。
 // ============================================================
 
-import { formatAmount } from './finance.ts'
+import { formatAmountDisplay } from './finance.ts'
 
 export type SavedExpense = {
   date?: string | null
@@ -40,7 +40,7 @@ export function buildSavedText(
   precisionConfig: Record<string, number> = {},
 ): string {
   const currency = expense.currency
-  const fmt = (v: number | string) => formatAmount(Number(v) || 0, currency, precisionConfig)
+  const fmt = (v: number | string) => formatAmountDisplay(Number(v) || 0, currency, precisionConfig)
   const rows = (data: Record<string, number | string> | null | undefined) => {
     const entries = Object.entries(data ?? {}).filter(([, v]) => Number(v) !== 0)
     return entries.length > 0

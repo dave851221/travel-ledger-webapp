@@ -31,7 +31,8 @@ describe('formatMoney', () => {
 
   it('falls back to the ISO code for unknown currencies', () => {
     expect(currencySymbol('MYR')).toBe('MYR ');
-    expect(formatMoney(10, 'MYR', { MYR: 2 })).toBe('MYR 10.00');
+    expect(formatMoney(10, 'MYR', { MYR: 2 })).toBe('MYR 10');
+    expect(formatMoney(10.5, 'MYR', { MYR: 2 })).toBe('MYR 10.50');
   });
 });
 

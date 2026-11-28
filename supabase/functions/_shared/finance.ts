@@ -24,6 +24,19 @@ export function formatAmount(
 }
 
 /**
+ * 給人看的金額：同 formatAmount，但小數全是 0 時不顯示（1200.00 → 1200；12.50 照舊）。
+ * David 2026-11-28：新增的幣別預設 2 位小數，帳上沒有小數的金額不要拖著 .00。
+ * 前端在 src/utils/money.ts 的 groupDigits 做同一件事。
+ */
+export function formatAmountDisplay(
+  amount: number,
+  currency: string,
+  precisionConfig: Record<string, number> = {},
+): string {
+  return formatAmount(amount, currency, precisionConfig).replace(/\.0+$/, '')
+}
+
+/**
  * 依幣別加總一批支出。
  *
  * 快捷查詢（今日／本月／旅程總覽）以前是用原生的 `totals[c] += e.amount` 累加，
