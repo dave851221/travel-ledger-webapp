@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle, Crown, Loader2, LogOut, Shield, UserMinus } from 'lucide-react';
 import { supabase } from '../../api/supabase';
 import { ui } from '../../components/ui';
 import type { Trip } from '../../types';
 import Modal from '../../components/Modal';
+import Toast from '../../components/Toast';
+import { useToast } from '../../hooks/useToast';
 import LoginBadges from './LoginBadges';
 import type { LoginInfo } from './loginInfo';
 
@@ -26,6 +29,7 @@ const MemberManager: React.FC<{ trip: Trip; myUserId: string | null; myRole: Rol
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ row: Row; leave: boolean } | null>(null);
+  const { toast, showToast, dismissToast } = useToast();
 
   const load = useCallback(async () => {
     // 帳號資訊（登入方式、LINE／Google 名稱、遮過的 email）由資料庫組好，不直接讀 auth 的資料
@@ -63,6 +67,8 @@ const MemberManager: React.FC<{ trip: Trip; myUserId: string | null; myRole: Rol
     }
     if (!count) { setError('沒有權限移除這位成員'); return; }
     if (leave) { onLeft(); return; }
+    // 資料庫同時換了新的邀請連結（被移除的人拿舊連結回不來），簡單提示一下
+    showToast('已移除，邀請連結已更新');
     void refresh();
   };
 
@@ -71,6 +77,7 @@ const MemberManager: React.FC<{ trip: Trip; myUserId: string | null; myRole: Rol
 
   return (
     <div className="space-y-2">
+      {createPortal(<Toast toast={toast} onDismiss={dismissToast} />, document.body)}
       <p className="text-sm font-bold">登入的成員 <span className="text-xs font-normal text-muted">· 用邀請連結加入的帳號</span></p>
       {rows === null ? (
         <div className="flex justify-center py-4 text-muted"><Loader2 className="animate-spin" size={18} /></div>

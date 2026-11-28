@@ -762,6 +762,29 @@ CREATE TRIGGER tr_app_keep_one_owner
     BEFORE DELETE ON app.trip_members
     FOR EACH ROW EXECUTE FUNCTION app.keep_one_owner();
 
+-- 有人被移出旅程（不是自己離開）時自動換一個新的邀請連結，舊連結立刻失效：
+-- 被移除的人手上的邀請連結不能再拿來加回來（David 2026-11-28）。
+-- 自己離開、刪帳號、整趟刪除不換（旅程不在了就不用換）。
+CREATE OR REPLACE FUNCTION app.rotate_invite_on_remove()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF auth.uid() IS NOT NULL AND OLD.user_id <> auth.uid() THEN
+        UPDATE app.trips SET invite_token = app.random_token() WHERE id = OLD.trip_id;
+    END IF;
+    RETURN OLD;
+END;
+$$;
+REVOKE ALL ON FUNCTION app.rotate_invite_on_remove() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS tr_app_rotate_invite_on_remove ON app.trip_members;
+CREATE TRIGGER tr_app_rotate_invite_on_remove
+    AFTER DELETE ON app.trip_members
+    FOR EACH ROW EXECUTE FUNCTION app.rotate_invite_on_remove();
+
 -- ── 權限分級（David 2026-11-26）────────────────────────────────
 -- 一般成員能改：記帳、預設值、匯率與小數位數、分類、AI 記帳偏好
 -- 管理員以上才能改：旅程名稱、旅程分組、主幣別、時區、封存、行程試算表與行程的色系／呈現方式（以及隱私、連結、成員名單，走各自的 RPC）
