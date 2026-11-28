@@ -9,11 +9,15 @@ import type { ItineraryPlan } from './types';
 
 /**
  * 模板的「建立副本」連結（https://docs.google.com/spreadsheets/d/<id>/copy）。
- * David 把 docs/itinerary-sheet-template.xlsx 上傳成 Google 試算表、開放檢視之後填這裡；空字串時不顯示「複製模板」。
+ * 用 David 的「旅行小本本範例」（2026-11-28，京都三天的範例＋下拉選單＋使用說明分頁）；空字串時不顯示「複製模板」。
+ * 範例要維持「知道連結的任何人：檢視者」，/copy 才複製得了、別人也改不到原檔。
  */
-export const SHEET_TEMPLATE_COPY_URL = '';
+export const SHEET_TEMPLATE_COPY_URL = 'https://docs.google.com/spreadsheets/d/12LfnaUsjqkc65FIyOfdoRD-3gRRFMwoHHrGE4LtgLew/copy';
 
 export const sheetEditUrl = (sheetId: string) => `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+
+/** 範例下載成 Excel（不用 Google 帳號也能先看看） */
+export const SHEET_TEMPLATE_XLSX_URL = SHEET_TEMPLATE_COPY_URL.replace(/\/copy$/, '/export?format=xlsx');
 
 export type SheetError = 'not_shared' | 'no_itinerary' | 'fetch_failed' | 'no_sheet' | 'invalid_link' | 'network';
 

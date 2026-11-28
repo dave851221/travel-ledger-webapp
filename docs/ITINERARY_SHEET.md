@@ -5,6 +5,10 @@ David 2026-11-27：開放版的使用者自己用 Google 試算表排行程，�
 
 ## 模板
 
+**範例（給使用者複製）**：David 的「旅行小本本範例」<https://docs.google.com/spreadsheets/d/12LfnaUsjqkc65FIyOfdoRD-3gRRFMwoHHrGE4LtgLew>（2026-11-28 填好京都三天的範例、下拉選單、日期時間欄純文字、凍結標題列、使用說明分頁）。
+行程分頁的「複製範例到我的 Google 雲端」連 `/copy`，「下載 Excel」連 `/export?format=xlsx`（`src/features/itinerary/sheet.ts`）。**這份要維持「知道連結的任何人：檢視者」**，開成編輯者的話任何人都能改壞範例。
+下面的 xlsx 是同樣格式的備份，範例壞掉時可以重新上傳。
+
 - 產生：`python scripts/make-itinerary-template.py` → `docs/itinerary-sheet-template.xlsx`
 - 上架：上傳到 Google 雲端硬碟 → 用 Google 試算表開啟 → 檔案 → 儲存為 Google 試算表 → 共用改「知道連結的任何人：檢視者」
   → 網址的 `/edit…` 換成 `/copy`，填進 `src/features/itinerary/sheet.ts` 的 `SHEET_TEMPLATE_COPY_URL`（空字串時設定頁改成教人自己開欄位）。
