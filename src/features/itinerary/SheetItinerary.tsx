@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Download, ExternalLink, FileSpreadsheet, Link2, Loader2, RefreshCw, Replace, Unlink } from 'lucide-react';
+import { AlertCircle, Download, ExternalLink, FileSpreadsheet, Link2, Loader2, RefreshCw } from 'lucide-react';
 import { supabase } from '../../api/supabase';
 import { ui } from '../../components/ui';
 import type { Trip } from '../../types';
@@ -11,12 +11,42 @@ import {
 
 /**
  * 開放版的行程分頁：行程寫在 Google 試算表（David 2026-11-27）。
- * 還沒連結 → 三個步驟＋貼連結；連結了 → 先畫這台裝置上次讀到的，同時去讀最新的。
+ * 還沒連結 → 三個步驟＋貼連結（只有建立者、管理員能連）；連結了 → 先畫這台裝置上次讀到的，同時去讀最新的。
+ * 換一份、取消連結、色系、呈現方式都在「行程設定」視窗（ItinerarySettings，只有管理員看得到入口）。
  */
-const SheetItinerary: React.FC<{ trip: Trip; readOnly: boolean; onChanged: () => void }> = ({ trip, readOnly, onChanged }) => {
+export type ShareView = { token: string; password: string | null };
+
+export interface SheetItineraryProps {
+  trip: Trip;
+  /** 建立者、管理員：可以連結、換試算表 */
+  canManage: boolean;
+  /** 正在「換一份」：顯示貼連結的畫面 */
+  changing: boolean;
+  onCancelChange: () => void;
+  onChanged: () => void;
+  /** 把這趟存的色系、呈現方式套到讀到的行程上 */
+  applyLook: (plan: ItineraryPlan) => ItineraryPlan;
+  /** 放在工具列右邊（行程設定按鈕） */
+  actions?: React.ReactNode;
+  share?: ShareView;
+}
+
+const SheetItinerary: React.FC<SheetItineraryProps> = ({ trip, canManage, changing, onCancelChange, onChanged, applyLook, actions, share }) => {
   const sheetId = trip.itinerary_sheet ?? null;
-  if (!sheetId) return <SheetSetup tripId={trip.id} readOnly={readOnly} onLinked={onChanged} />;
-  return <LinkedSheet key={sheetId} trip={trip} sheetId={sheetId} readOnly={readOnly} onChanged={onChanged} />;
+  // 分享頁只能看：沒連試算表就只說一聲
+  if (!sheetId && share) return <p className="text-center text-sm text-muted py-20">這趟旅程還沒有行程</p>;
+  if (!sheetId || changing) {
+    return (
+      <SheetSetup
+        tripId={trip.id}
+        readOnly={trip.is_archived}
+        canManage={canManage}
+        onCancel={sheetId ? onCancelChange : undefined}
+        onLinked={() => { onCancelChange(); onChanged(); }}
+      />
+    );
+  }
+  return <LinkedSheet key={sheetId} trip={trip} sheetId={sheetId} applyLook={applyLook} actions={actions} share={share} />;
 };
 
 const Step: React.FC<{ n: number; title: string; children?: React.ReactNode }> = ({ n, title, children }) => (
@@ -30,7 +60,9 @@ const Step: React.FC<{ n: number; title: string; children?: React.ReactNode }> =
 );
 
 /** 連結試算表（第一次，或「換一份」時；onCancel 有給就是換一份，可以取消回到原本那份） */
-const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => void; onCancel?: () => void }> = ({ tripId, readOnly, onLinked, onCancel }) => {
+const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; canManage: boolean; onLinked: () => void; onCancel?: () => void }> = ({
+  tripId, readOnly, canManage, onLinked, onCancel,
+}) => {
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SheetError | 'save_failed' | null>(null);
@@ -62,6 +94,8 @@ const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => 
 
         {readOnly ? (
           <p className="text-sm text-muted">這趟旅程已封存，不能再連結試算表。</p>
+        ) : !canManage ? (
+          <p className="text-sm text-muted">請建立者或管理員連結行程試算表（旅程設定 → 成員，可以看誰是管理員）。</p>
         ) : (
           <>
             <ol className="space-y-4">
@@ -114,63 +148,49 @@ const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => 
   );
 };
 
-const LinkedSheet: React.FC<{ trip: Trip; sheetId: string; readOnly: boolean; onChanged: () => void }> = ({ trip, sheetId, readOnly, onChanged }) => {
+const LinkedSheet: React.FC<{
+  trip: Trip; sheetId: string; applyLook: (plan: ItineraryPlan) => ItineraryPlan; actions?: React.ReactNode; share?: ShareView;
+}> = ({ trip, sheetId, applyLook, actions, share }) => {
   const [cached] = useState(() => readCachedSheet(trip.id, sheetId));
   const [plan, setPlan] = useState<ItineraryPlan | null>(cached?.plan ?? null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<SheetError | null>(null);
-  const [unlinking, setUnlinking] = useState(false);
-  const [changing, setChanging] = useState(false);
+  const shareToken = share?.token;
+  const sharePassword = share?.password ?? null;
 
-  const refresh = useCallback(async () => {
+  const fetchPlan = useCallback(
+    () => fetchSheetPlan(trip.id, undefined, shareToken ? { token: shareToken, password: sharePassword } : undefined),
+    [trip.id, shareToken, sharePassword],
+  );
+
+  const refresh = async () => {
     setLoading(true);
-    const r = await fetchSheetPlan(trip.id);
+    const r = await fetchPlan();
     setLoading(false);
     if (r.ok) { setPlan(r.plan); setError(null); } else setError(r.error);
-  }, [trip.id]);
+  };
 
   // 打開分頁時讀一次最新的（試算表沒有推播，改了要重新整理才看得到）
   useEffect(() => {
     let alive = true;
-    fetchSheetPlan(trip.id).then(r => {
+    fetchPlan().then(r => {
       if (!alive) return;
       setLoading(false);
       if (r.ok) { setPlan(r.plan); setError(null); } else setError(r.error);
     });
     return () => { alive = false; };
-  }, [trip.id]);
-
-  const unlink = async () => {
-    setUnlinking(true);
-    const { error: upErr } = await supabase.from('trips').update({ itinerary_sheet: null }).eq('id', trip.id);
-    setUnlinking(false);
-    if (!upErr) onChanged();
-  };
-
-  // 隨時可以換一份試算表或取消連結（David 2026-11-28）
-  if (changing) {
-    return <SheetSetup tripId={trip.id} readOnly={readOnly} onCancel={() => setChanging(false)} onLinked={() => { setChanging(false); onChanged(); }} />;
-  }
+  }, [fetchPlan]);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <a href={sheetEditUrl(sheetId)} target="_blank" rel="noopener noreferrer" className={`${ui.btnSecondary} h-9 py-0`}>
-          <FileSpreadsheet size={15} />到試算表編輯
+          <FileSpreadsheet size={15} />打開試算表
         </a>
         <button onClick={refresh} disabled={loading} className={`${ui.btnSecondary} h-9 py-0`} aria-label="重新讀取試算表">
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{loading ? '讀取中' : '更新'}
         </button>
-        {!readOnly && (
-          <span className="ml-auto flex items-center">
-            <button onClick={() => setChanging(true)} className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink px-2 h-9" title="改連另一份試算表">
-              <Replace size={13} />換一份
-            </button>
-            <button onClick={unlink} disabled={unlinking} className="inline-flex items-center gap-1 text-xs text-muted hover:text-neg px-2 h-9" title="這趟不再使用這份試算表（試算表本身不會被刪除，之後可以再連）">
-              {unlinking ? <Loader2 size={13} className="animate-spin" /> : <Unlink size={13} />}取消連結
-            </button>
-          </span>
-        )}
+        {actions && <span className="ml-auto">{actions}</span>}
       </div>
       {error && (
         <div className={ui.errorBox}>
@@ -178,7 +198,7 @@ const LinkedSheet: React.FC<{ trip: Trip; sheetId: string; readOnly: boolean; on
           <span>{SHEET_ERROR_TEXT[error]}{plan ? '（下面是上次讀到的內容）' : ''}</span>
         </div>
       )}
-      {plan ? <ItineraryView plan={plan} /> : loading ? (
+      {plan ? <ItineraryView plan={applyLook(plan)} /> : loading ? (
         <div className="flex justify-center py-20"><Loader2 className="animate-spin text-muted" /></div>
       ) : null}
     </div>

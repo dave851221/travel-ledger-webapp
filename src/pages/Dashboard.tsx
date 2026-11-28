@@ -494,7 +494,7 @@ const Dashboard: React.FC = () => {
 
           {activeTab === 'itinerary' && id && (
             <Suspense fallback={<TabLoading />}>
-              <TripItinerary trip={trip} readOnly={readOnly} onChanged={refetchTrip} />
+              <TripItinerary trip={trip} canManage={!IS_PUBLIC || membership?.role === 'owner' || membership?.role === 'admin'} onChanged={refetchTrip} />
             </Suspense>
           )}
 

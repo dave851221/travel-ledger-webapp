@@ -8,6 +8,7 @@
 //   POST { action: 'sign', paths }        → { urls: { [path]: 簽名網址 } }（12 小時，只簽自己是成員的旅程）
 //   POST { action: 'remove', paths }      → 刪掉（只刪自己是成員的旅程裡的）
 //   POST { action: 'remove_trip', tripId } → 整趟刪光（只有 owner；刪旅程、刪帳號之前呼叫）
+//   POST { action: 'sign_shared', tripId, token, password?, paths } → 分享頁（沒登入）看照片：分享連結對了才簽，只簽這趟的
 // 部署：supabase functions deploy tlb-photos --no-verify-jwt（身分在這裡自己驗）
 // ============================================================
 
@@ -95,22 +96,41 @@ async function upload(req: Request, userId: string, url: URL): Promise<Response>
   return json({ path })
 }
 
+/** 分享頁：不用登入，分享連結（與密碼）對了才簽這趟的照片 */
+async function signShared(body: { tripId?: unknown; token?: unknown; password?: unknown; paths?: unknown }): Promise<Response> {
+  const tripId = typeof body.tripId === 'string' ? body.tripId : ''
+  if (!UUID_RE.test(tripId) || typeof body.token !== 'string') return json({ error: 'invalid_request' }, 400)
+  const { data: ok } = await db.rpc('share_access_ok', {
+    p_trip_id: tripId, p_token: body.token, p_password: typeof body.password === 'string' ? body.password : null,
+  })
+  if (ok !== true) return json({ error: 'no_access' }, 403)
+  const paths = (Array.isArray(body.paths) ? body.paths : [])
+    .filter((p): p is string => typeof p === 'string' && tripOf(p) === tripId).slice(0, MAX_PATHS)
+  const entries = await Promise.all([...new Set(paths)].map(async p => [p, await store.viewUrl(p, SIGN_TTL)] as const))
+  return json({ urls: Object.fromEntries(entries.filter(([, u]) => u)), ttl: SIGN_TTL })
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
-  const userId = await userOf(req)
-  if (!userId) return json({ error: 'not_signed_in' }, 401)
-
   const url = new URL(req.url)
-  try {
-    if (url.searchParams.get('action') === 'upload') return await upload(req, userId, url)
+  const isUpload = url.searchParams.get('action') === 'upload'
 
-    let body: { action?: string; paths?: unknown; tripId?: unknown }
+  let body: { action?: string; paths?: unknown; tripId?: unknown; token?: unknown; password?: unknown } = {}
+  if (!isUpload) {
     try {
       body = await req.json()
     } catch {
       return json({ error: 'invalid_json' }, 400)
     }
+  }
+  try {
+    if (body.action === 'sign_shared') return await signShared(body)
+
+    const userId = await userOf(req)
+    if (!userId) return json({ error: 'not_signed_in' }, 401)
+    if (isUpload) return await upload(req, userId, url)
+
     switch (body.action) {
       case 'sign': {
         const paths = await allowedPaths(userId, body.paths)

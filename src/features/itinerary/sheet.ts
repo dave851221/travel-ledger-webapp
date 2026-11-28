@@ -57,8 +57,12 @@ export function readCachedSheet(tripId: string, sheetId: string): CachedSheet | 
  * 讀試算表。sheet 給了就先試讀那一份（貼連結時檢查用），不給就讀這趟存的。
  * 成功時（讀存好的那份）順便快取在這台裝置，離線也看得到上次的內容。
  */
-export async function fetchSheetPlan(tripId: string, sheet?: string): Promise<{ ok: true; plan: ItineraryPlan; sheetId: string } | { ok: false; error: SheetError }> {
-  const { data, error } = await supabase.functions.invoke('tlb-itinerary', { body: sheet ? { tripId, sheet } : { tripId } });
+export async function fetchSheetPlan(
+  tripId: string, sheet?: string, share?: { token: string; password: string | null },
+): Promise<{ ok: true; plan: ItineraryPlan; sheetId: string } | { ok: false; error: SheetError }> {
+  // share：分享頁（沒登入）用分享連結讀這趟存的那份
+  const body = share ? { tripId, token: share.token, password: share.password } : sheet ? { tripId, sheet } : { tripId };
+  const { data, error } = await supabase.functions.invoke('tlb-itinerary', { body });
   if (error) {
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
     return { ok: false, error: offline ? 'network' : 'fetch_failed' };

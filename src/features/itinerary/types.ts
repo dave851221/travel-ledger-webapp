@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { ThemeKey } from './themes';
+import type { StyleKey, ThemeKey } from './themes';
 
 /**
  * 行程資料格式。行程頁 = 一份 ItineraryPlan + 共用的 ItineraryView。
@@ -116,6 +116,8 @@ export interface ItineraryPlan {
   /** 封面上的小標籤，例如「京都 3 晚」 */
   tags?: string[];
   theme: ThemeKey;
+  /** 呈現方式（版面），沒填就是經典 */
+  style?: StyleKey;
   /** 目的地時區，用來判斷「今天」與「下一站」；不填就用手機的時區 */
   timeZone?: string;
   flights?: Flight[];

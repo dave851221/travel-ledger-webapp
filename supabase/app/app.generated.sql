@@ -569,6 +569,11 @@ BEGIN
             'base_currency', v_trip.base_currency, 'timezone', v_trip.timezone,
             'rates', v_trip.rates, 'precision_config', v_trip.precision_config,
             'is_archived', v_trip.is_archived, 'visibility', v_trip.visibility,
+            'start_date', v_trip.start_date, 'end_date', v_trip.end_date,
+            'default_currency', v_trip.default_currency, 'default_category', v_trip.default_category,
+            -- 分享頁也看得到行程（試算表由 tlb-itinerary 讀，它會再驗一次分享連結）
+            'itinerary_sheet', v_trip.itinerary_sheet,
+            'itinerary_color', v_trip.itinerary_color, 'itinerary_style', v_trip.itinerary_style,
             'created_at', v_trip.created_at
         ),
         'expenses', coalesce((
@@ -582,6 +587,30 @@ $$;
 
 REVOKE ALL ON FUNCTION app.get_trip_snapshot(UUID, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.get_trip_snapshot(UUID, TEXT, TEXT) TO anon, authenticated;
+
+-- 分享連結對不對（給 Edge Function 用：分享頁的照片簽名網址、試算表行程）。規則同 get_trip_snapshot。
+CREATE OR REPLACE FUNCTION app.share_access_ok(p_trip_id UUID, p_token TEXT, p_password TEXT DEFAULT NULL)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_trip app.trips%ROWTYPE;
+BEGIN
+    SELECT * INTO v_trip FROM app.trips WHERE id = p_trip_id;
+    IF NOT FOUND OR coalesce(p_token, '') = '' OR v_trip.share_token <> p_token OR v_trip.visibility = 'members' THEN
+        RETURN FALSE;
+    END IF;
+    IF v_trip.visibility = 'password' THEN
+        RETURN p_password IS NOT NULL AND extensions.crypt(p_password, v_trip.view_password_hash) = v_trip.view_password_hash;
+    END IF;
+    RETURN TRUE;
+END;
+$$;
+REVOKE ALL ON FUNCTION app.share_access_ok(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION app.share_access_ok(UUID, TEXT, TEXT) TO service_role;
 
 -- ── 成員清單與改名 ─────────────────────────────────────────────
 -- 等同舊版的 rename_trip_members，另外：
@@ -735,7 +764,7 @@ CREATE TRIGGER tr_app_keep_one_owner
 
 -- ── 權限分級（David 2026-11-26）────────────────────────────────
 -- 一般成員能改：記帳、預設值、匯率與小數位數、分類、AI 記帳偏好
--- 管理員以上才能改：旅程名稱、旅程分組、主幣別、時區、封存（以及隱私、連結、成員名單，走各自的 RPC）
+-- 管理員以上才能改：旅程名稱、旅程分組、主幣別、時區、封存、行程試算表與行程的色系／呈現方式（以及隱私、連結、成員名單，走各自的 RPC）
 -- 欄位級權限只分得出「登入的人」，分不出角色，所以用 trigger 擋。
 CREATE OR REPLACE FUNCTION app.trips_guard_update()
 RETURNS TRIGGER
@@ -753,6 +782,9 @@ BEGIN
         OR NEW.base_currency IS DISTINCT FROM OLD.base_currency
         OR NEW.timezone IS DISTINCT FROM OLD.timezone
         OR NEW.is_archived IS DISTINCT FROM OLD.is_archived
+        OR NEW.itinerary_sheet IS DISTINCT FROM OLD.itinerary_sheet
+        OR NEW.itinerary_color IS DISTINCT FROM OLD.itinerary_color
+        OR NEW.itinerary_style IS DISTINCT FROM OLD.itinerary_style
     ) THEN
         RAISE EXCEPTION 'not_admin' USING ERRCODE = '42501';
     END IF;
@@ -2189,6 +2221,17 @@ ALTER TABLE app.trips ADD CONSTRAINT trips_itinerary_sheet_check
 
 GRANT SELECT (itinerary_sheet) ON app.trips TO authenticated;
 GRANT UPDATE (itinerary_sheet) ON app.trips TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
+
+-- 行程頁的色系與呈現方式（David 2026-11-28）：管理員以上才能改（trips_guard_update 擋）；值對應 src/features/itinerary/themes.ts
+ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS itinerary_color TEXT;
+ALTER TABLE app.trips ADD COLUMN IF NOT EXISTS itinerary_style TEXT;
+ALTER TABLE app.trips DROP CONSTRAINT IF EXISTS trips_itinerary_look_check;
+ALTER TABLE app.trips ADD CONSTRAINT trips_itinerary_look_check
+    CHECK ((itinerary_color IS NULL OR itinerary_color ~ '^[a-z]{2,20}$') AND (itinerary_style IS NULL OR itinerary_style ~ '^[a-z]{2,20}$'));
+GRANT SELECT (itinerary_color, itinerary_style) ON app.trips TO authenticated;
+GRANT UPDATE (itinerary_color, itinerary_style) ON app.trips TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
 

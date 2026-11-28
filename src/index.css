@@ -186,6 +186,16 @@ select,
 .it-theme-plum { --t-accent: #8e3b6b; --t-soft: #f3e5ee; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #4b1e3a 0%, #8e3b6b 60%, #c77a8f 100%); }
 .it-theme-mystery { --t-accent: #5a4bc4; --t-soft: #ece9fb; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #17132e 0%, #2e2766 55%, #5a4bc4 100%); }
 .it-theme-alpine { --t-accent: #3d7a4f; --t-soft: #e3efe6; --t-on: #ffffff; --t-cover: linear-gradient(160deg, #1f3b2a 0%, #3d7a4f 60%, #8fb48a 100%); }
+.it-theme-sunset { --t-accent: #c4562a; --t-soft: #fbeadf; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #7a2e14 0%, #c4562a 55%, #f0a04b 100%); }
+.it-theme-ocean { --t-accent: #1f5fae; --t-soft: #e2ecf8; --t-on: #ffffff; --t-cover: linear-gradient(160deg, #0b2e5a 0%, #1f5fae 60%, #2f7fd0 100%); }
+.it-theme-matcha { --t-accent: #5f7a2e; --t-soft: #eef2e1; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #3f5222 0%, #6d8a38 60%, #a3b86c 100%); }
+.it-theme-lavender { --t-accent: #6a52b0; --t-soft: #efeaf9; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #3d2f6b 0%, #6a52b0 60%, #a993d9 100%); }
+.it-theme-sand { --t-accent: #9a6b2e; --t-soft: #f6eee1; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #6b4f2a 0%, #a8814e 60%, #d9b98a 100%); }
+.it-theme-coral { --t-accent: #c4474f; --t-soft: #fbe8e7; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #7d2a35 0%, #c4474f 55%, #f08a7e 100%); }
+.it-theme-slate { --t-accent: #46505e; --t-soft: #eceef1; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #1f2329 0%, #3a414c 60%, #5b6573 100%); }
+.it-theme-gold { --t-accent: #9a6d10; --t-soft: #f8f0dc; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #5a3d0c 0%, #9a6d10 55%, #d4a43a 100%); }
+.it-theme-sky { --t-accent: #2a7bbf; --t-soft: #e3f1fb; --t-on: #ffffff; --t-cover: linear-gradient(160deg, #1d5f99 0%, #3f93d2 60%, #8cc8ef 100%); }
+.it-theme-citrus { --t-accent: #b07400; --t-soft: #fdf3d6; --t-on: #ffffff; --t-cover: linear-gradient(135deg, #8a5a00 0%, #d39a0e 60%, #f2c230 100%); }
 
 @media (prefers-color-scheme: dark) {
   .it-theme-default { --t-accent: #8eabe8; --t-soft: #1a2640; --t-on: #0d1320; --t-cover: linear-gradient(135deg, #111a2e 0%, #23365f 100%); }
@@ -195,7 +205,53 @@ select,
   .it-theme-plum { --t-accent: #e597c4; --t-soft: #35192b; --t-on: #22101a; --t-cover: linear-gradient(135deg, #2e1224 0%, #5c2648 60%, #80506a 100%); }
   .it-theme-mystery { --t-accent: #a99bff; --t-soft: #221d42; --t-on: #140f2e; --t-cover: linear-gradient(135deg, #0f0c22 0%, #221d4d 55%, #3d3390 100%); }
   .it-theme-alpine { --t-accent: #86c99a; --t-soft: #18291e; --t-on: #0c1a11; --t-cover: linear-gradient(160deg, #13251a 0%, #24492f 60%, #4f7a55 100%); }
+  .it-theme-sunset { --t-accent: #f5a06b; --t-soft: #3a2218; --t-on: #1f0f07; --t-cover: linear-gradient(135deg, #4a1c0c 0%, #7a3518 60%, #9c5a26 100%); }
+  .it-theme-ocean { --t-accent: #7fb2f0; --t-soft: #14243b; --t-on: #08111f; --t-cover: linear-gradient(160deg, #0a1f3d 0%, #143e72 60%, #24589a 100%); }
+  .it-theme-matcha { --t-accent: #b5cc7e; --t-soft: #212918; --t-on: #12180a; --t-cover: linear-gradient(135deg, #263218 0%, #3f5222 60%, #5f7a2e 100%); }
+  .it-theme-lavender { --t-accent: #bba8f0; --t-soft: #241d3b; --t-on: #130e24; --t-cover: linear-gradient(135deg, #241b42 0%, #3d2f6b 60%, #5b4a96 100%); }
+  .it-theme-sand { --t-accent: #e0bf8c; --t-soft: #2e2418; --t-on: #1a130a; --t-cover: linear-gradient(135deg, #3d2d16 0%, #5c4424 60%, #7d603a 100%); }
+  .it-theme-coral { --t-accent: #f59a92; --t-soft: #3a1d20; --t-on: #22100f; --t-cover: linear-gradient(135deg, #4a1820 0%, #7d2a35 60%, #a6484c 100%); }
+  .it-theme-slate { --t-accent: #aab4c2; --t-soft: #1d2229; --t-on: #101318; --t-cover: linear-gradient(135deg, #15181d 0%, #262b33 60%, #3a414c 100%); }
+  .it-theme-gold { --t-accent: #e7c06a; --t-soft: #2e2512; --t-on: #1a1406; --t-cover: linear-gradient(135deg, #3a2707 0%, #5a3d0c 60%, #80601a 100%); }
+  .it-theme-sky { --t-accent: #8ccaf2; --t-soft: #13283a; --t-on: #071522; --t-cover: linear-gradient(160deg, #0f3556 0%, #1d5f99 60%, #3f86c0 100%); }
+  .it-theme-citrus { --t-accent: #f2cc5a; --t-soft: #2f2710; --t-on: #1a1504; --t-cover: linear-gradient(135deg, #4a3100 0%, #7a5200 60%, #a37a12 100%); }
 }
+
+/*
+ * Itinerary presentation styles (src/features/itinerary/themes.ts STYLES). Hooks: .it-cover .it-motif .it-panel
+ * .it-day-title .it-item .it-rail .it-body .it-stay — classic is the base layout and needs no rules.
+ */
+.it-style-cards .it-item { grid-template-columns: 52px 0 minmax(0, 1fr); background: var(--app-surface); border: 1px solid var(--app-line); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; }
+.it-style-cards .it-rail { visibility: hidden; }
+.it-style-cards .it-body { padding-bottom: 0 !important; }
+.it-style-cards .it-item:nth-child(odd) { border-left: 3px solid var(--t-accent); }
+
+.it-style-journal .it-cover { background: repeating-linear-gradient(var(--t-soft) 0 27px, color-mix(in srgb, var(--t-accent) 22%, transparent) 27px 28px) !important; border: 1.5px dashed var(--t-accent); }
+.it-style-journal .it-cover :is(p, h2, li) { color: var(--app-ink) !important; }
+.it-style-journal .it-cover li { background: var(--app-surface) !important; }
+.it-style-journal .it-motif { color: var(--t-accent) !important; opacity: 0.3; }
+.it-style-journal .it-body { border-bottom: 1px dashed var(--app-line); margin-bottom: 10px; }
+.it-style-journal .it-day-title { text-decoration: underline wavy color-mix(in srgb, var(--t-accent) 60%, transparent); text-underline-offset: 6px; }
+.it-style-journal .it-panel, .it-style-journal .it-stay { border-style: dashed !important; }
+
+.it-style-magazine .it-cover { min-height: 210px; display: flex; flex-direction: column; justify-content: flex-end; padding: 40px 24px 24px !important; }
+.it-style-magazine .it-cover h2 { font-size: 34px !important; line-height: 1.15 !important; letter-spacing: 0.01em; }
+.it-style-magazine .it-day-title { font-size: 30px !important; line-height: 1.2 !important; }
+.it-style-magazine .it-day-title::after { content: ""; display: block; width: 48px; height: 4px; margin-top: 10px; border-radius: 9999px; background: var(--t-accent); }
+.it-style-magazine .it-body { padding-bottom: 22px !important; }
+
+.it-style-minimal .it-cover { background: transparent !important; border-radius: 0; border-bottom: 2px solid var(--t-accent); padding-left: 2px !important; padding-right: 2px !important; }
+.it-style-minimal .it-cover :is(p, h2) { color: var(--app-ink) !important; }
+.it-style-minimal .it-cover li { background: var(--app-sunk) !important; color: var(--app-ink-2) !important; }
+.it-style-minimal .it-motif { display: none; }
+.it-style-minimal .it-rail span[aria-hidden]:not(.absolute) { background: transparent !important; border: 1.5px solid var(--t-accent); }
+.it-style-minimal .it-panel, .it-style-minimal .it-stay { background: transparent !important; }
+
+.it-style-compact .it-day-title { font-size: 18px !important; }
+.it-style-compact .it-body { padding-bottom: 8px !important; }
+.it-style-compact .it-body > p:first-child { font-size: 13.5px !important; }
+.it-style-compact .it-item { grid-template-columns: 44px 22px minmax(0, 1fr); }
+
 
 /*
  * --app-top-offset is the height of the offline bar (set in App.tsx, 0 when online).

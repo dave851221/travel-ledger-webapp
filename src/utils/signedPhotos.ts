@@ -30,11 +30,20 @@ const fresh = (path: string) => {
   return hit && hit.expiresAt - Date.now() > REFRESH_BEFORE_MS ? hit.url : null;
 };
 
+/** 分享頁（沒登入）用分享連結簽；成員頁用登入身分簽 */
+export interface ShareAccess { tripId: string; token: string; password: string | null }
+let shareAccess: ShareAccess | null = null;
+export function setPhotoShareAccess(access: ShareAccess | null): void {
+  shareAccess = access;
+}
+
 async function signBatch(paths: string[]): Promise<void> {
   for (let i = 0; i < paths.length; i += BATCH) {
     const chunk = paths.slice(i, i + BATCH);
     try {
-      const { urls, ttl } = await invokePhotos<{ urls: Record<string, string>; ttl?: number }>({ action: 'sign', paths: chunk });
+      const { urls, ttl } = await invokePhotos<{ urls: Record<string, string>; ttl?: number }>(shareAccess
+        ? { action: 'sign_shared', tripId: shareAccess.tripId, token: shareAccess.token, password: shareAccess.password, paths: chunk }
+        : { action: 'sign', paths: chunk });
       const expiresAt = Date.now() + (ttl ?? TTL_SECONDS) * 1000;
       Object.entries(urls ?? {}).forEach(([path, url]) => { if (url) cache.set(path, { url, expiresAt }); });
     } catch (e) {
