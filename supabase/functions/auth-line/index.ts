@@ -242,10 +242,29 @@ async function linkToCurrentUser(req: Request, profile: LineProfile): Promise<{ 
   return { ok: true }
 }
 
+/**
+ * 叫醒時先連一次 Supabase（REST、Auth 同一個主機）與 LINE。
+ * 實測（2026-11-28，暫時的量測函式）：函式裡第一次連 Supabase 要 0.7 秒（DNS + TLS），之後每次只要 30～80 毫秒；
+ * 只叫醒、不先連的話，這 0.7 秒加上 PostgREST 第一次的慢就落在使用者等待的登入裡。
+ * line_login_lookup 用不存在的 id 呼叫：UPDATE 沒有對到任何列，不寫資料庫（不吃 Disk IO）。
+ * 最多等 3 秒；失敗也無所謂，登入時照常連。
+ */
+async function warmConnections(): Promise<void> {
+  const tasks = [
+    authAdmin('health'),
+    rest('rpc/line_login_lookup', { method: 'POST', body: { p_line_user_id: '', p_display_name: null } }),
+    fetch('https://api.line.me/oauth2/v2.1/token', { method: 'POST', body: '' }),
+  ].map(p => p.then(r => r.body?.cancel()).catch(() => {}))
+  await Promise.race([Promise.all(tasks), new Promise(r => setTimeout(r, 3000))])
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders(req) })
-  // 叫醒用（前端按「用 LINE 登入」時打一下），什麼都不做
-  if (req.method === 'GET') return new Response(null, { status: 204, headers: corsHeaders(req) })
+  // 叫醒用（前端按「用 LINE 登入」時打一下）：順便把連線先開好，回來登入時直接重用
+  if (req.method === 'GET') {
+    await warmConnections()
+    return new Response(null, { status: 204, headers: corsHeaders(req) })
+  }
   if (req.method !== 'POST') return json(req, { error: 'method_not_allowed' }, 405)
   if (!CHANNEL_ID || !CHANNEL_SECRET) {
     console.error('[AUTH_LINE] LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET not set')
