@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, processLock, type SupabaseClient } from '@supabase/supabase-js';
 import { DB_SCHEMA, IS_PUBLIC } from '../config/mode';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -38,7 +38,14 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   ? (IS_PUBLIC
       ? createClient(supabaseUrl, supabaseAnonKey, {
           db: { schema: DB_SCHEMA },
-          auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+          auth: {
+            flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true,
+            // 只在這個分頁裡排隊，不用預設的跨分頁鎖（navigator.locks）。
+            // 手機上背景分頁會被凍結，凍結時剛好拿著鎖的話，新分頁每個要 token 的請求都卡 5 秒（auth-js 的 lockAcquireTimeout）
+            // 才搶過來：LINE 登入後首頁旅程 6 秒才出現就是這個（2026-11-28 Android 實測兩次，電腦沒事）。
+            // 代價是兩個分頁可能同時刷新 token，Supabase 的 refresh token 重用寬限（10 秒）會回同一組，不會被登出。
+            lock: processLock,
+          },
         }) as unknown as SupabaseClient
       : createClient(supabaseUrl, supabaseAnonKey))
   : (null as unknown as SupabaseClient);
