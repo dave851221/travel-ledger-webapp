@@ -108,6 +108,9 @@ CREATE TABLE IF NOT EXISTS public.home_layout (
 -- 全新建立時以下皆為 no-op；若把 bootstrap 跑在舊資料庫上則會補正
 ALTER TABLE public.trips ALTER COLUMN access_code DROP NOT NULL;
 ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS ai_preference TEXT;
+-- 偏好每次叫 AI 都整段送出，上限 1000 字（David 2026-11-28；網頁輸入框與 LINE「設定:」同一個數字）
+ALTER TABLE public.trips DROP CONSTRAINT IF EXISTS trips_ai_preference_length;
+ALTER TABLE public.trips ADD CONSTRAINT trips_ai_preference_length CHECK (ai_preference IS NULL OR char_length(ai_preference) <= 1000);
 ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS start_date DATE;
 ALTER TABLE public.trips ADD COLUMN IF NOT EXISTS end_date DATE;
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS receipt_photo_urls TEXT[] DEFAULT '{}';
