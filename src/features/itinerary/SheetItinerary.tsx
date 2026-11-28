@@ -148,12 +148,18 @@ const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; canManage: boole
   );
 };
 
+/** 這次開網頁已經讀過的試算表（sheetId → 時間）：2 分鐘內切回來不再重讀，直接用手上的 */
+const lastFetched = new Map<string, number>();
+const FRESH_MS = 2 * 60 * 1000;
+
 const LinkedSheet: React.FC<{
   trip: Trip; sheetId: string; applyLook: (plan: ItineraryPlan) => ItineraryPlan; actions?: React.ReactNode; share?: ShareView;
 }> = ({ trip, sheetId, applyLook, actions, share }) => {
   const [cached] = useState(() => readCachedSheet(trip.id, sheetId));
   const [plan, setPlan] = useState<ItineraryPlan | null>(cached?.plan ?? null);
-  const [loading, setLoading] = useState(true);
+  // 只有「手上完全沒有內容」才顯示整頁讀取；按「更新」才轉按鈕；背景更新安靜地換上新內容（David 2026-11-28）
+  const [loading, setLoading] = useState(() => !cached);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<SheetError | null>(null);
   const shareToken = share?.token;
   const sharePassword = share?.password ?? null;
@@ -164,22 +170,23 @@ const LinkedSheet: React.FC<{
   );
 
   const refresh = async () => {
-    setLoading(true);
+    setRefreshing(true);
     const r = await fetchPlan();
-    setLoading(false);
-    if (r.ok) { setPlan(r.plan); setError(null); } else setError(r.error);
+    setRefreshing(false);
+    if (r.ok) { lastFetched.set(sheetId, Date.now()); setPlan(r.plan); setError(null); } else setError(r.error);
   };
 
-  // 打開分頁時讀一次最新的（試算表沒有推播，改了要重新整理才看得到）
+  // 打開分頁時讀一次最新的（試算表沒有推播）；這次開網頁 2 分鐘內讀過就不再讀
   useEffect(() => {
+    if (cached && Date.now() - (lastFetched.get(sheetId) ?? 0) < FRESH_MS) return;
     let alive = true;
     fetchPlan().then(r => {
       if (!alive) return;
       setLoading(false);
-      if (r.ok) { setPlan(r.plan); setError(null); } else setError(r.error);
+      if (r.ok) { lastFetched.set(sheetId, Date.now()); setPlan(r.plan); setError(null); } else setError(r.error);
     });
     return () => { alive = false; };
-  }, [fetchPlan]);
+  }, [fetchPlan, cached, sheetId]);
 
   return (
     <div className="space-y-3">
@@ -187,8 +194,8 @@ const LinkedSheet: React.FC<{
         <a href={sheetEditUrl(sheetId)} target="_blank" rel="noopener noreferrer" className={`${ui.btnSecondary} h-9 py-0`}>
           <FileSpreadsheet size={15} />打開試算表
         </a>
-        <button onClick={refresh} disabled={loading} className={`${ui.btnSecondary} h-9 py-0`} aria-label="重新讀取試算表">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{loading ? '讀取中' : '更新'}
+        <button onClick={refresh} disabled={refreshing} className={`${ui.btnSecondary} h-9 py-0`} aria-label="重新讀取試算表">
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />{refreshing ? '讀取中' : '更新'}
         </button>
         {actions && <span className="ml-auto">{actions}</span>}
       </div>
