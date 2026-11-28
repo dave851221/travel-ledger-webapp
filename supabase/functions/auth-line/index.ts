@@ -61,7 +61,12 @@ async function exchangeCode(code: string, redirectUri: string): Promise<string |
       client_id: CHANNEL_ID, client_secret: CHANNEL_SECRET,
     }),
   })
-  if (!res.ok) return null
+  if (!res.ok) {
+    // 只記 LINE 回的錯誤代碼（不含 code、token），查登入失敗用
+    const err = await res.json().catch(() => ({})) as { error?: string; error_description?: string }
+    console.error('[AUTH_LINE] token exchange failed', res.status, err.error ?? '', err.error_description ?? '', redirectUri)
+    return null
+  }
   const data = await res.json()
   return typeof data?.id_token === 'string' ? data.id_token : null
 }
@@ -75,7 +80,11 @@ async function verifyIdToken(idToken: string, nonce?: string): Promise<LineProfi
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params,
   })
-  if (!res.ok) return null
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: string; error_description?: string }
+    console.error('[AUTH_LINE] id token verify failed', res.status, err.error ?? '', err.error_description ?? '')
+    return null
+  }
   const data = await res.json()
   if (typeof data?.sub !== 'string' || !data.sub) return null
   return { sub: data.sub, name: typeof data.name === 'string' ? data.name : undefined }
@@ -84,7 +93,11 @@ async function verifyIdToken(idToken: string, nonce?: string): Promise<LineProfi
 /** LIFF：驗 access token 是發給我們這個 channel 的，再查 profile 拿 userId */
 async function verifyAccessToken(accessToken: string): Promise<LineProfile | null> {
   const verify = await fetch(`https://api.line.me/oauth2/v2.1/verify?access_token=${encodeURIComponent(accessToken)}`)
-  if (!verify.ok || !accessTokenIsOurs(await verify.json(), CHANNEL_ID)) return null
+  const verified = verify.ok ? await verify.json() : null
+  if (!verify.ok || !accessTokenIsOurs(verified, CHANNEL_ID)) {
+    console.error('[AUTH_LINE] access token rejected', verify.status, String((verified as { client_id?: unknown } | null)?.client_id ?? ''))
+    return null
+  }
   const profile = await fetch('https://api.line.me/v2/profile', { headers: { Authorization: `Bearer ${accessToken}` } })
   if (!profile.ok) return null
   const data = await profile.json()
