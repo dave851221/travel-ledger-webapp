@@ -517,7 +517,8 @@ const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
       className={`it-theme-${plan.theme} it-style-${style} space-y-4`}
       style={{ ['--t-title-font' as string]: TITLE_FONT_FAMILY[titleFont] }}
     >
-      <Cover plan={plan} compact={style === 'compact' || (style !== 'magazine' && view === 'daily' && plan.days.length > 1)} />
+      {/* 封面高度固定，不跟著一覽／每日／行前切換（以前每日會縮小封面、藏日期，切換時整個畫面上下跳，David 2026-11-28） */}
+      <Cover plan={plan} />
 
       {showTabs && (
         <>

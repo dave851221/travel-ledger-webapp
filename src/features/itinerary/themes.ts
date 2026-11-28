@@ -50,21 +50,26 @@ export const isThemeKey = (v: unknown): v is ThemeKey => typeof v === 'string' &
  * 行程頁的「呈現方式」（版面），跟色系分開選（app.trips.itinerary_style）。
  * 樣式在 src/index.css 的 `.it-style-<key>`；titleFont 有值時蓋過色系的字體。
  */
-export type StyleKey = 'classic' | 'cards' | 'journal' | 'magazine' | 'minimal' | 'compact';
+export type StyleKey = 'classic' | 'journal' | 'magazine' | 'minimal';
 
 export interface StyleSpec { label: string; hint: string; titleFont?: TitleFont }
 
 export const STYLES: Record<StyleKey, StyleSpec> = {
   classic: { label: '經典', hint: '彩色封面＋時間軸' },
-  cards: { label: '卡片', hint: '每一站一張卡片，一眼看清楚' },
   journal: { label: '手帳', hint: '手寫字、紙張質感、虛線格', titleFont: 'hand' },
   magazine: { label: '雜誌', hint: '大封面、大標題，適合分享', titleFont: 'serif' },
-  minimal: { label: '簡約', hint: '白底細線，安靜好讀' },
-  compact: { label: '精簡', hint: '字小行距密，一頁看更多' },
+  minimal: { label: '簡約', hint: '白底細線、字小行距密，一頁看更多' },
 };
 
 export const STYLE_KEYS = Object.keys(STYLES) as StyleKey[];
 export const isStyleKey = (v: unknown): v is StyleKey => typeof v === 'string' && v in STYLES;
+
+/** 存在資料庫的值 → 目前有的呈現方式（2026-11-28 拿掉「卡片」、「精簡」併進「簡約」，舊值照樣認得） */
+export function normalizeStyle(v: unknown): StyleKey | null {
+  if (v === 'compact') return 'minimal';
+  if (v === 'cards') return 'classic';
+  return isStyleKey(v) ? v : null;
+}
 
 export const TITLE_FONT_FAMILY: Record<TitleFont, string> = {
   sans: "'Noto Sans TC', system-ui, sans-serif",

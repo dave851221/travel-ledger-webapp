@@ -72,7 +72,7 @@ const ItinerarySettings: React.FC<{
 
           <section className="space-y-2.5">
             <h3 className="text-sm font-bold">呈現方式</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {STYLE_KEYS.map(k => {
                 const on = k === style;
                 return (

@@ -221,10 +221,6 @@ select,
  * Itinerary presentation styles (src/features/itinerary/themes.ts STYLES). Hooks: .it-cover .it-motif .it-panel
  * .it-day-title .it-item .it-rail .it-body .it-stay — classic is the base layout and needs no rules.
  */
-.it-style-cards .it-item { grid-template-columns: 52px 0 minmax(0, 1fr); background: var(--app-surface); border: 1px solid var(--app-line); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; }
-.it-style-cards .it-rail { visibility: hidden; }
-.it-style-cards .it-body { padding-bottom: 0 !important; }
-.it-style-cards .it-item:nth-child(odd) { border-left: 3px solid var(--t-accent); }
 
 .it-style-journal .it-cover { background: repeating-linear-gradient(var(--t-soft) 0 27px, color-mix(in srgb, var(--t-accent) 22%, transparent) 27px 28px) !important; border: 1.5px dashed var(--t-accent); }
 .it-style-journal .it-cover :is(p, h2, li) { color: var(--app-ink) !important; }
@@ -247,10 +243,10 @@ select,
 .it-style-minimal .it-rail span[aria-hidden]:not(.absolute) { background: transparent !important; border: 1.5px solid var(--t-accent); }
 .it-style-minimal .it-panel, .it-style-minimal .it-stay { background: transparent !important; }
 
-.it-style-compact .it-day-title { font-size: 18px !important; }
-.it-style-compact .it-body { padding-bottom: 8px !important; }
-.it-style-compact .it-body > p:first-child { font-size: 13.5px !important; }
-.it-style-compact .it-item { grid-template-columns: 44px 22px minmax(0, 1fr); }
+.it-style-minimal .it-day-title { font-size: 18px !important; }
+.it-style-minimal .it-body { padding-bottom: 8px !important; }
+.it-style-minimal .it-body > p:first-child { font-size: 13.5px !important; }
+.it-style-minimal .it-item { grid-template-columns: 44px 22px minmax(0, 1fr); }
 
 
 /*
