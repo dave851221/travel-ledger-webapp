@@ -20,7 +20,7 @@ import {
 import Modal from './Modal';
 import { ui } from './ui';
 import { supabase } from '../api/supabase';
-import { IS_PUBLIC, meKey } from '../config/mode';
+import { AI_PREFERENCE_MAX, IS_PUBLIC, meKey } from '../config/mode';
 import ShareSettings from '../features/auth/ShareSettings';
 import MemberManager from '../features/auth/MemberManager';
 import DeleteTrip from '../features/auth/DeleteTrip';
@@ -671,7 +671,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <textarea
                   rows={4}
                   aria-label="AI 記帳偏好"
-                  maxLength={10000}
+                  maxLength={AI_PREFERENCE_MAX}
                   placeholder="例如：預設由小明付款，大家均分；日幣一律不換算"
                   className={`${ui.input} resize-none`}
                   value={aiPreference}

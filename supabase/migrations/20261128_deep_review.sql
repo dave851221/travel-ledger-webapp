@@ -7,11 +7,11 @@
 
 -- ── 文字與陣列的大小上限（2026-11-28 深入 review）─────────────────
 -- 開放給陌生人用之後，一個免費帳號也能把超長的品名、偏好、JSON 塞進資料庫（免費方案只有 500 MB），
--- AI 記帳偏好更是每次叫 AI 都整段送出。數字都遠大於正常使用（品名平常 20 字內、偏好目前最長約 8000 字）；
+-- AI 記帳偏好更是每次叫 AI 都整段送出。數字都遠大於正常使用（品名平常 20 字內、偏好上限 1000 字（David 2026-11-28））；
 -- 網頁輸入框與 Edge Function 用同樣的上限（品名超過會被截斷，不會整筆存不進去）。
 ALTER TABLE app.trips DROP CONSTRAINT IF EXISTS trips_size_check;
 ALTER TABLE app.trips ADD CONSTRAINT trips_size_check CHECK (
-        (ai_preference IS NULL OR char_length(ai_preference) <= 10000)
+        (ai_preference IS NULL OR char_length(ai_preference) <= 1000)
     AND (category IS NULL OR char_length(category) <= 60)
     AND cardinality(categories) <= 100
     AND char_length(array_to_string(categories, '')) <= 2000

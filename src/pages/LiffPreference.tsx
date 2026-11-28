@@ -5,6 +5,7 @@ import { ensureLiffSession } from '../features/auth/liffSession';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import { ui } from '../components/ui';
 import { ASSISTANT_NAME } from '../config/assistant';
+import { AI_PREFERENCE_MAX } from '../config/mode';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import type { Trip } from '../types';
 import { Loader2, AlertTriangle, Bot, Save } from 'lucide-react';
@@ -145,7 +146,7 @@ const LiffPreference: React.FC = () => {
             className={`${ui.input} resize-none`}
             value={preference}
             onChange={e => setPreference(e.target.value)}
-            maxLength={10000}
+            maxLength={AI_PREFERENCE_MAX}
           />
           <p className={`${ui.hint} mt-1.5`}>
             不要寫「我是○○」：群組裡每個人看到的都是同一句，{ASSISTANT_NAME}會用 LINE 顯示名稱判斷「我」是誰。
