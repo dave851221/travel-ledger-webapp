@@ -9,7 +9,7 @@ import {
   availableViews, dateParts, itemStates, nightsBetween, defaultDayIndex, nowIn, placeUrl, todayIndex, unlinkedPlaces,
   type ItemState, type ItineraryView as View,
 } from './plan';
-import { THEMES, TITLE_FONT_FAMILY, TITLE_FONT_HREF } from './themes';
+import { STYLES, THEMES, TITLE_FONT_FAMILY, TITLE_FONT_HREF } from './themes';
 import { NoteList, RichText } from './RichText';
 import RouteMap from './RouteMap';
 
@@ -61,15 +61,15 @@ class MapBoundary extends React.Component<{ children: React.ReactNode }, { faile
 // ---------- cover ----------
 
 const Cover: React.FC<{ plan: ItineraryPlan; compact?: boolean }> = ({ plan, compact }) => {
-  const Motif = THEMES[plan.theme].motif;
+  const Motif = (THEMES[plan.theme] ?? THEMES.default).motif;
   const first = plan.days[0];
   const last = plan.days[plan.days.length - 1];
   const range = first && last
     ? `${first.date.slice(0, 4)}/${dateParts(first.date).md}（${dateParts(first.date).weekday}）– ${dateParts(last.date).md}（${dateParts(last.date).weekday}）· ${plan.days.length} 天`
     : '';
   return (
-    <header className={`relative overflow-hidden rounded-2xl text-white ${compact ? 'px-4 py-3' : 'px-5 pt-5 pb-4'}`} style={{ background: 'var(--t-cover)' }}>
-      <Motif aria-hidden className="absolute -right-3 -top-4 text-white/20" size={compact ? 84 : 120} strokeWidth={1.2} />
+    <header className={`it-cover relative overflow-hidden rounded-2xl text-white ${compact ? 'px-4 py-3' : 'px-5 pt-5 pb-4'}`} style={{ background: 'var(--t-cover)' }}>
+      <Motif aria-hidden className="it-motif absolute -right-3 -top-4 text-white/20" size={compact ? 84 : 120} strokeWidth={1.2} />
       {plan.tagline && <p className="relative text-[11px] font-bold tracking-[0.08em] text-white/75 num">{plan.tagline}</p>}
       <h2 className={`relative font-bold leading-snug text-balance ${compact ? 'text-lg' : 'text-[22px] sm:text-2xl mt-0.5'}`} style={titleStyle}>{plan.title}</h2>
       {!compact && range && <p className="relative text-[13px] text-white/85 mt-1 num">{range}</p>}
@@ -92,7 +92,7 @@ const OverviewList: React.FC<{
   highlightActive: boolean;
   onPick: (index: number) => void;
 }> = ({ plan, stays, today, active, highlightActive, onPick }) => (
-  <ol className="bg-surface border border-line rounded-2xl overflow-hidden divide-y divide-line">
+  <ol className="it-panel bg-surface border border-line rounded-2xl overflow-hidden divide-y divide-line">
     {plan.days.map((day, i) => {
       const { md, weekday } = dateParts(day.date);
       const stay = day.stay ? stays.get(day.stay) : undefined;
@@ -172,7 +172,7 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
         <p className="text-xs font-bold text-[var(--t-accent)] num">
           {md}（{weekday}）{day.city ? ` · ${day.city}` : ''}{isToday ? ' · 今天' : ''}
         </p>
-        <h3 className="text-xl sm:text-[22px] font-bold leading-snug mt-0.5 text-balance" style={titleStyle}>{day.title}</h3>
+        <h3 className="it-day-title text-xl sm:text-[22px] font-bold leading-snug mt-0.5 text-balance" style={titleStyle}>{day.title}</h3>
       </header>
 
       {day.tips && day.tips.length > 0 && (
@@ -189,7 +189,7 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
           const state = states[i];
           const isLast = i === day.items.length - 1;
           return (
-            <li key={i} className="grid grid-cols-[48px_26px_minmax(0,1fr)] gap-x-2">
+            <li key={i} className="it-item grid grid-cols-[48px_26px_minmax(0,1fr)] gap-x-2">
               <div className="text-right pt-[3px] leading-tight">
                 {item.time ? (
                   <>
@@ -200,7 +200,7 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
                   <span className="text-[11.5px] text-muted">{item.slot}</span>
                 )}
               </div>
-              <div className="relative flex justify-center">
+              <div className="it-rail relative flex justify-center">
                 {!isLast && <span className="absolute top-6 bottom-0 w-px bg-line" aria-hidden />}
                 {i > 0 && <span className="absolute top-0 h-1 w-px bg-line" aria-hidden />}
                 <span
@@ -216,7 +216,7 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
                   <Icon size={12} strokeWidth={2.2} />
                 </span>
               </div>
-              <div className={`min-w-0 ${isLast ? 'pb-1' : 'pb-4'}`}>
+              <div className={`it-body min-w-0 ${isLast ? 'pb-1' : 'pb-4'}`}>
                 <p className={`text-[15px] leading-snug flex flex-wrap items-center gap-x-1.5 gap-y-1 ${state === 'done' ? 'text-muted' : 'font-bold text-ink'}`}>
                   <span className="min-w-0"><RichText text={item.title} places={item.places} /></span>
                   {item.undecided && <span className="text-[10.5px] font-medium rounded px-1.5 leading-[17px] bg-sunk border border-line text-muted">未定</span>}
@@ -248,7 +248,7 @@ const DayDetail: React.FC<{ day: DayPlan; index: number; isToday: boolean; state
       </ol>
 
       {stay && (
-        <section className="rounded-xl bg-[var(--t-soft)] px-3.5 py-3">
+        <section className="it-stay rounded-xl bg-[var(--t-soft)] px-3.5 py-3">
           <a
             href={stay.href ?? placeUrl({ name: stay.name, query: stay.address ? `${stay.name} ${stay.address}` : stay.name })}
             target="_blank"
@@ -413,8 +413,10 @@ const PrepView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => (
  * 手機上是「一覽／每日／行前」三個分頁（依資料自動增減），電腦上一覽固定在左邊。
  */
 const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
-  const theme = THEMES[plan.theme];
-  useStylesheet(TITLE_FONT_HREF[theme.titleFont]);
+  const theme = THEMES[plan.theme] ?? THEMES.default;
+  const style = plan.style && STYLES[plan.style] ? plan.style : 'classic';
+  const titleFont = STYLES[style].titleFont ?? theme.titleFont;
+  useStylesheet(TITLE_FONT_HREF[titleFont]);
 
   const views = useMemo(() => availableViews(plan), [plan]);
   const [now, setNow] = useState(() => nowIn(plan.timeZone));
@@ -512,10 +514,10 @@ const ItineraryView: React.FC<{ plan: ItineraryPlan }> = ({ plan }) => {
   return (
     <div
       ref={rootRef}
-      className={`it-theme-${plan.theme} space-y-4`}
-      style={{ ['--t-title-font' as string]: TITLE_FONT_FAMILY[theme.titleFont] }}
+      className={`it-theme-${plan.theme} it-style-${style} space-y-4`}
+      style={{ ['--t-title-font' as string]: TITLE_FONT_FAMILY[titleFont] }}
     >
-      <Cover plan={plan} compact={view === 'daily' && plan.days.length > 1} />
+      <Cover plan={plan} compact={style === 'compact' || (style !== 'magazine' && view === 'daily' && plan.days.length > 1)} />
 
       {showTabs && (
         <>

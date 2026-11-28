@@ -29,3 +29,9 @@ David 2026-11-27：開放版的使用者自己用 Google 試算表排行程，�
 | `src/features/itinerary/SheetItinerary.tsx` | 行程分頁：還沒連結時三個步驟＋貼連結；連結後先畫這台裝置上次讀到的，同時讀最新的 |
 
 試算表沒開放檢視時 Google 回登入頁（HTML），回 `not_shared`，畫面教人改共用設定。
+
+## 外觀與權限（David 2026-11-28）
+
+- **只有建立者、管理員**能連結、換試算表、取消連結、改外觀：入口是行程分頁右上的「行程設定」（`ItinerarySettings.tsx`），取消連結收在視窗裡、還要再確認一次。資料庫的 `trips_guard_update` 也擋 `itinerary_sheet`／`itinerary_color`／`itinerary_style`。
+- **色系**（`themes.ts` 的 `THEMES`，17 種，CSS 在 `index.css` 的 `.it-theme-*`）與**呈現方式**（`STYLES`：經典、卡片、手帳、雜誌、簡約、精簡，CSS 是 `.it-style-*`，靠 `ItineraryView` 上的 `it-cover`／`it-item`／`it-rail`… 這些 class 掛勾）分開選，存在 `app.trips.itinerary_color`／`itinerary_style`；程式裡寫好的行程（registry）也會被這兩個設定蓋過。
+- **分享頁**（`SharedTrip.tsx`）也看得到行程：`tlb-itinerary` 收 `{ tripId, token, password }`，用 `app.share_access_ok` 驗分享連結。

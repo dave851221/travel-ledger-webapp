@@ -28,10 +28,23 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
-  let body: { tripId?: unknown; sheet?: unknown }
+  let body: { tripId?: unknown; sheet?: unknown; token?: unknown; password?: unknown }
   try { body = await req.json() } catch { return json({ error: 'invalid_json' }, 400) }
   const tripId = typeof body.tripId === 'string' ? body.tripId : ''
   if (!UUID_RE.test(tripId)) return json({ error: 'invalid_trip' }, 400)
+
+  // 分享頁（沒登入）：分享連結（與密碼）對了才讀這趟存的那份
+  if (typeof body.token === 'string') {
+    const [{ data: ok }, { data: shared }] = await Promise.all([
+      db.rpc('share_access_ok', { p_trip_id: tripId, p_token: body.token, p_password: typeof body.password === 'string' ? body.password : null }),
+      db.from('trips').select('name, start_date, itinerary_sheet').eq('id', tripId).maybeSingle(),
+    ])
+    if (ok !== true || !shared) return json({ error: 'no_access' }, 403)
+    const s = shared as { name: string; start_date: string | null; itinerary_sheet: string | null }
+    if (!s.itinerary_sheet) return json({ error: 'no_sheet' }, 200)
+    const r = await fetchSheetItinerary(s.itinerary_sheet, s.name, s.start_date ? Number(s.start_date.slice(0, 4)) : new Date().getFullYear())
+    return r.ok ? json({ doc: r.doc, sheetId: s.itinerary_sheet }) : json({ error: r.error, sheetId: s.itinerary_sheet }, 200)
+  }
 
   const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
   const [{ data: { user } }, { data: trip }] = await Promise.all([

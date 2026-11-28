@@ -41,6 +41,9 @@ export interface Trip {
   ai_preference?: string | null;
   /** 開放版：行程用的 Google 試算表 id（features/itinerary/sheet.ts） */
   itinerary_sheet?: string | null;
+  /** 開放版：行程頁的色系與呈現方式（features/itinerary/themes.ts 的 key；管理員才能改） */
+  itinerary_color?: string | null;
+  itinerary_style?: string | null;
   created_at: string;
 }
 
