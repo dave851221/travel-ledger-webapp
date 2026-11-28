@@ -45,6 +45,53 @@ export function accessTokenIsOurs(verify: unknown, channelId: string): boolean {
   return String(v.client_id ?? '') === channelId && Number(v.expires_in ?? 0) > 0
 }
 
+function base64UrlToBytes(s: string): Uint8Array<ArrayBuffer> {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)
+  const bin = atob(b64)
+  return Uint8Array.from(bin, c => c.charCodeAt(0))
+}
+
+export interface LocalIdTokenResult {
+  /** ok：簽章與內容都對；other：不是 HS256、格式看不懂，交給 LINE 的 verify API 判斷 */
+  status: 'ok' | 'other'
+  sub?: string
+  name?: string
+}
+
+/**
+ * 在函式裡自己驗 LINE 網頁登入的 ID token，省掉一趟 LINE verify API（登入加速，2026-11-28）。
+ * 這個 token 是伺服器剛剛用 channel secret 從 LINE token endpoint 直接換回來的（不經過瀏覽器），
+ * LINE 網頁登入的 ID token 用 channel secret 做 HS256 簽章，這裡照樣驗簽章、iss、aud、exp、nonce。
+ * 任何一項對不上或不是 HS256 都回 other，由呼叫端退回 LINE 的 verify API（結果以 LINE 為準）。
+ */
+export async function verifyIdTokenLocally(
+  idToken: string, channelId: string, channelSecret: string, nonce: string, nowSec = Math.floor(Date.now() / 1000),
+): Promise<LocalIdTokenResult> {
+  try {
+    const parts = idToken.split('.')
+    if (parts.length !== 3) return { status: 'other' }
+    const header = JSON.parse(new TextDecoder().decode(base64UrlToBytes(parts[0])))
+    if (header?.alg !== 'HS256' || !channelSecret) return { status: 'other' }
+    const key = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(channelSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'],
+    )
+    const sigOk = await crypto.subtle.verify(
+      'HMAC', key, base64UrlToBytes(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+    )
+    if (!sigOk) return { status: 'other' }
+    const p = JSON.parse(new TextDecoder().decode(base64UrlToBytes(parts[1]))) as Record<string, unknown>
+    const aud = Array.isArray(p.aud) ? p.aud.map(String) : [String(p.aud ?? '')]
+    if (p.iss !== 'https://access.line.me') return { status: 'other' }
+    if (!aud.includes(channelId)) return { status: 'other' }
+    if (typeof p.exp !== 'number' || p.exp <= nowSec) return { status: 'other' }
+    if (p.nonce !== nonce) return { status: 'other' }
+    if (typeof p.sub !== 'string' || !p.sub) return { status: 'other' }
+    return { status: 'ok', sub: p.sub, name: typeof p.name === 'string' ? p.name : undefined }
+  } catch {
+    return { status: 'other' }
+  }
+}
+
 /**
  * LINE 帳號在 Supabase Auth 裡的 email。LINE 不一定給 email，但 Supabase 的一次性登入需要一個，
  * 所以用 userId 組一個不會真的寄得出去的地址（.invalid 是保留網域）。

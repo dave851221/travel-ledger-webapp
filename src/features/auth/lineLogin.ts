@@ -9,7 +9,10 @@
  */
 import { supabase } from '../../api/supabase';
 import { rememberReturnTo, siteRootUrl } from './session';
-import { LINE_PENDING_KEY, LINE_STATE_KEY, type LineOAuthState, type LinePending } from './lineCallback';
+import {
+  authLineUrl, LINE_PENDING_KEY, LINE_STATE_KEY, postAuthLine, takeEarlySignIn,
+  type AuthLineResult, type LineOAuthState, type LinePending,
+} from './lineCallback';
 
 const CHANNEL_ID = import.meta.env.VITE_LINE_LOGIN_CHANNEL_ID as string | undefined;
 
@@ -35,6 +38,7 @@ export function startLineLogin(returnTo: string, mode: 'signin' | 'link' = 'sign
     nonce: saved.nonce,
     scope: 'openid profile',
   });
+  warmAuthLine();
   window.location.assign(`https://access.line.me/oauth2/v2.1/authorize?${params}`);
 }
 
@@ -50,11 +54,20 @@ export function pendingLineIsLink(): boolean {
 /** 連結結果，給「我的帳號」顯示一次 */
 export const LINE_LINK_RESULT_KEY = 'tlb:line_link_result';
 
-async function finish(body: Record<string, string | undefined>): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('auth-line', { body });
-  if (error || !data?.tokenHash) throw new Error((data && data.error) || 'line_signin_failed');
+async function finish(body: Record<string, string | undefined>, early?: Promise<AuthLineResult> | null): Promise<void> {
+  const data = await (early ?? postAuthLine(body)).catch(() => ({ error: 'network' } as AuthLineResult));
+  if (!data.tokenHash) throw new Error(data.error || 'line_signin_failed');
   const { error: otpErr } = await supabase.auth.verifyOtp({ token_hash: data.tokenHash, type: 'email' });
   if (otpErr) throw otpErr;
+}
+
+/**
+ * 先把 auth-line 叫醒：使用者在 LINE 授權頁停留的那幾秒，函式剛好冷啟動完，回來登入就不必再等。
+ * 只在使用者按下登入時打一次（不是排程保溫），GET 不碰資料庫。
+ * keepalive：馬上就要跳去 LINE，頁面卸載也照樣送出；no-cors：不需要讀回應、也不會觸發預檢。
+ */
+function warmAuthLine(): void {
+  try { void fetch(authLineUrl(), { method: 'GET', mode: 'no-cors', keepalive: true }).catch(() => {}); } catch { /* ignore */ }
 }
 
 /** 網頁 LINE 登入（或連結）的後半段：回到網站後呼叫一次 */
@@ -76,7 +89,8 @@ export async function completeLineSignIn(): Promise<void> {
     sessionStorage.setItem(LINE_LINK_RESULT_KEY, code);
     return;
   }
-  await finish({ action: 'signin', code: pending.code, redirectUri: pending.redirectUri, nonce: pending.nonce });
+  // lineCallback.ts 在頁面一載入就送出了，這裡接手（沒有的話才現在送）
+  await finish({ action: 'signin', code: pending.code, redirectUri: pending.redirectUri, nonce: pending.nonce }, takeEarlySignIn());
 }
 
 /**
