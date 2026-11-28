@@ -20,7 +20,7 @@
 //    彙總沒涵蓋的角度才叫模型去 list_expenses。
 // ============================================================
 
-import { formatAmount } from "../../_shared/finance.ts"
+import { formatAmountDisplay } from "../../_shared/finance.ts"
 import {
   buildConversation,
   buildTripContext,
@@ -459,7 +459,7 @@ async function proposeExpenseUpdate(scope: AiScope, args: ToolArgs, extraText?: 
         description: existing.description,
         date: existing.date,
         // 卡片上的「原本」金額照旅程精度顯示，不然 USD 會出現一長串小數
-        amount: formatAmount(existing.amount, existing.currency, precision),
+        amount: formatAmountDisplay(existing.amount, existing.currency, precision),
         currency: existing.currency,
       },
       changes: result.changes,
@@ -497,7 +497,7 @@ async function proposeExpenseDelete(scope: AiScope, args: ToolArgs, extraText?: 
         id: existing.id,
         description: existing.description,
         date: existing.date,
-        amount: formatAmount(existing.amount, existing.currency, precision),
+        amount: formatAmountDisplay(existing.amount, existing.currency, precision),
         currency: existing.currency,
         category: existing.category,
       },
@@ -534,7 +534,7 @@ async function analyzeReceipt(scope: AiScope, args: ToolArgs): Promise<void> {
   const question = optionalString(args.question) ?? '請詳細描述此收據的所有品項與金額'
 
   const label = (e: RecentExpense) =>
-    `${e.description} ${formatAmount(e.amount, e.currency, precision)} ${e.currency}`
+    `${e.description} ${formatAmountDisplay(e.amount, e.currency, precision)} ${e.currency}`
 
   /** 把選定的那一筆的**所有**收據照片一起送去分析並回覆 */
   const analyzeChosen = async (chosen: RecentExpense) => {

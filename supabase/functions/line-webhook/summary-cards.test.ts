@@ -19,7 +19,8 @@ describe('summary cards', () => {
     expect(formatMoney(4800, 'JPY', PRECISION)).toBe('¥4,800');
     expect(formatMoney(12.5, 'USD', PRECISION)).toBe('US$12.50');
     expect(formatMoney(-3611, 'TWD', PRECISION)).toBe('−NT$3,611');
-    expect(formatMoney(100, 'XYZ', PRECISION)).toBe('XYZ 100.00'); // 精度沒設的幣別預設 2 位
+    expect(formatMoney(100, 'XYZ', PRECISION)).toBe('XYZ 100'); // 精度沒設的幣別預設 2 位，小數全是 0 不顯示
+    expect(formatMoney(100.5, 'XYZ', PRECISION)).toBe('XYZ 100.50');
   });
 
   it('日期縮成「月/日（星期）」', () => {

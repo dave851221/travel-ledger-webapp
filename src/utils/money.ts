@@ -29,7 +29,9 @@ export const groupDigits = (plain: string): string => {
   const unsigned = negative ? plain.slice(1) : plain;
   const [int, frac] = unsigned.split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${negative ? '-' : ''}${grouped}${frac !== undefined ? `.${frac}` : ''}`;
+  // 小數全是 0 就不顯示（1,200.00 → 1,200；12.50 照舊）：新增的幣別預設 2 位小數，David 2026-11-28
+  const showFrac = frac !== undefined && /[1-9]/.test(frac);
+  return `${negative ? '-' : ''}${grouped}${showFrac ? `.${frac}` : ''}`;
 };
 
 /** "12,345" — rounded to the currency's precision, grouped, no symbol. */

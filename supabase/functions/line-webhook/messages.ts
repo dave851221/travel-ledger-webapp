@@ -13,7 +13,7 @@ import { buildLiffPageUrl } from "../_shared/liffEcho.ts"
 import { isMapUrl, parseReply } from "../_shared/replyText.ts"
 import { supabase } from "./db.ts"
 import { replyMessage } from "./line-api.ts"
-import { formatAmount, sumByCurrency } from "../_shared/finance.ts"
+import { formatAmountDisplay, sumByCurrency } from "../_shared/finance.ts"
 import type { ExpenseRow } from "../_shared/types.ts"
 import type { ExpenseCardData, GroupMode, OutgoingMessage, QuickReply } from "./types.ts"
 
@@ -590,7 +590,7 @@ export function formatTotals(
   precisionConfig: Record<string, number>,
 ): string {
   return Object.entries(sumByCurrency(rows))
-    .map(([currency, total]) => `${formatAmount(total.toNumber(), currency, precisionConfig)} ${currency}`)
+    .map(([currency, total]) => `${formatAmountDisplay(total.toNumber(), currency, precisionConfig)} ${currency}`)
     .join('・')
 }
 

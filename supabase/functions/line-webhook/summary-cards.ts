@@ -8,7 +8,7 @@
 // 只是排版，金額的捨入仍然走 formatAmount（Decimal、依旅程精度）。
 // ============================================================
 
-import { formatAmount } from "../_shared/finance.ts"
+import { formatAmountDisplay } from "../_shared/finance.ts"
 import type { OutgoingMessage } from "./types.ts"
 
 /** 與網頁 src/utils/money.ts 的 SYMBOLS 一致 —— 網頁與 LINE 看到的金額寫法才會相同 */
@@ -26,7 +26,7 @@ const WARN = '#E08A00'
 
 /** "NT$12,345"、"¥4,800"。在 formatAmount 的字串上加千分位，不碰浮點數 */
 export function formatMoney(amount: number, currency: string, precision: Record<string, number>): string {
-  const plain = formatAmount(amount, currency, precision)
+  const plain = formatAmountDisplay(amount, currency, precision)
   const negative = plain.startsWith('-') && /[1-9]/.test(plain)
   const [int, frac] = plain.replace(/^-/, '').split('.')
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
