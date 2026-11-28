@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ExternalLink, FileSpreadsheet, Link2, Loader2, RefreshCw, Unlink } from 'lucide-react';
+import { AlertCircle, Download, ExternalLink, FileSpreadsheet, Link2, Loader2, RefreshCw, Replace, Unlink } from 'lucide-react';
 import { supabase } from '../../api/supabase';
 import { ui } from '../../components/ui';
 import type { Trip } from '../../types';
 import ItineraryView from './ItineraryView';
 import type { ItineraryPlan } from './types';
 import {
-  fetchSheetPlan, readCachedSheet, SHEET_ERROR_TEXT, SHEET_TEMPLATE_COPY_URL, sheetEditUrl, sheetIdFromUrl, type SheetError,
+  fetchSheetPlan, readCachedSheet, SHEET_ERROR_TEXT, SHEET_TEMPLATE_COPY_URL, SHEET_TEMPLATE_XLSX_URL, sheetEditUrl, sheetIdFromUrl, type SheetError,
 } from './sheet';
 
 /**
@@ -29,7 +29,8 @@ const Step: React.FC<{ n: number; title: string; children?: React.ReactNode }> =
   </li>
 );
 
-const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => void }> = ({ tripId, readOnly, onLinked }) => {
+/** 連結試算表（第一次，或「換一份」時；onCancel 有給就是換一份，可以取消回到原本那份） */
+const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => void; onCancel?: () => void }> = ({ tripId, readOnly, onLinked, onCancel }) => {
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SheetError | 'save_failed' | null>(null);
@@ -66,9 +67,14 @@ const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => 
             <ol className="space-y-4">
               <Step n={1} title="複製一份行程表模板">
                 {SHEET_TEMPLATE_COPY_URL ? (
-                  <a href={SHEET_TEMPLATE_COPY_URL} target="_blank" rel="noopener noreferrer" className={`${ui.btnSecondary} mt-1.5 h-9 py-0`}>
-                    <ExternalLink size={14} />複製行程表模板
-                  </a>
+                  <span className="flex flex-wrap items-center gap-2 mt-1.5">
+                    <a href={SHEET_TEMPLATE_COPY_URL} target="_blank" rel="noopener noreferrer" className={`${ui.btnSecondary} h-9 py-0`}>
+                      <ExternalLink size={14} />複製範例到我的 Google 雲端
+                    </a>
+                    <a href={SHEET_TEMPLATE_XLSX_URL} className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink px-1 h-9">
+                      <Download size={13} />下載 Excel
+                    </a>
+                  </span>
                 ) : (
                   <>新增一份 Google 試算表，第一列寫上：日期、時間、類型、行程、地點、備註、連結、預訂。</>
                 )}
@@ -93,10 +99,13 @@ const SheetSetup: React.FC<{ tripId: string; readOnly: boolean; onLinked: () => 
                   <span>{error === 'save_failed' ? '讀到行程了，但存不進這趟旅程，請稍後再試。' : SHEET_ERROR_TEXT[error]}</span>
                 </div>
               )}
-              <button type="submit" disabled={busy || !link.trim()} className={`${ui.btnPrimary} w-full`}>
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
-                {busy ? '讀取中…' : '連結試算表'}
-              </button>
+              <div className="flex gap-2">
+                {onCancel && <button type="button" onClick={onCancel} className={`${ui.btnSecondary} flex-1`}>取消</button>}
+                <button type="submit" disabled={busy || !link.trim()} className={`${ui.btnPrimary} flex-1`}>
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+                  {busy ? '讀取中…' : '連結試算表'}
+                </button>
+              </div>
             </form>
           </>
         )}
@@ -111,6 +120,7 @@ const LinkedSheet: React.FC<{ trip: Trip; sheetId: string; readOnly: boolean; on
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<SheetError | null>(null);
   const [unlinking, setUnlinking] = useState(false);
+  const [changing, setChanging] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -137,6 +147,11 @@ const LinkedSheet: React.FC<{ trip: Trip; sheetId: string; readOnly: boolean; on
     if (!upErr) onChanged();
   };
 
+  // 隨時可以換一份試算表或取消連結（David 2026-11-28）
+  if (changing) {
+    return <SheetSetup tripId={trip.id} readOnly={readOnly} onCancel={() => setChanging(false)} onLinked={() => { setChanging(false); onChanged(); }} />;
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -147,9 +162,14 @@ const LinkedSheet: React.FC<{ trip: Trip; sheetId: string; readOnly: boolean; on
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{loading ? '讀取中' : '更新'}
         </button>
         {!readOnly && (
-          <button onClick={unlink} disabled={unlinking} className="ml-auto inline-flex items-center gap-1 text-xs text-muted hover:text-ink px-2 h-9" title="這趟不再使用這份試算表（試算表本身不會被刪除）">
-            <Unlink size={13} />取消連結
-          </button>
+          <span className="ml-auto flex items-center">
+            <button onClick={() => setChanging(true)} className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink px-2 h-9" title="改連另一份試算表">
+              <Replace size={13} />換一份
+            </button>
+            <button onClick={unlink} disabled={unlinking} className="inline-flex items-center gap-1 text-xs text-muted hover:text-neg px-2 h-9" title="這趟不再使用這份試算表（試算表本身不會被刪除，之後可以再連）">
+              {unlinking ? <Loader2 size={13} className="animate-spin" /> : <Unlink size={13} />}取消連結
+            </button>
+          </span>
         )}
       </div>
       {error && (

@@ -426,7 +426,8 @@ const Dashboard: React.FC = () => {
             onPick={handleSetCurrentUser}
             onAdd={readOnly ? undefined : openNewExpense}
             onCategory={goCategory}
-            onOpenRecap={openRecap}
+            // 回顧影片只在相簿分頁出現（David 2026-11-28：電腦版每頁都有很干擾）
+            onOpenRecap={activeTab === 'album' ? openRecap : undefined}
             onOpenChat={openChat}
           />
 
