@@ -19,6 +19,7 @@ import {
 import { resolveMember } from "../../_shared/validate.ts"
 import { buildSavedText } from "../../_shared/savedText.ts"
 import { TRIP_GONE_MSG, WEBAPP_URL } from "../config.ts"
+import { ENTRY_LIMIT_MSG } from "../../_shared/assistant/notices.ts"
 import { photos } from "../photos.ts"
 import { type EventContext, tripToday } from "../context.ts"
 import { supabase } from "../db.ts"
@@ -622,6 +623,8 @@ export async function handlePostback(ctx: EventContext, event: PostbackEvent): P
           text: '😅 這筆的金額是 0（可能沒辨識到金額），不能存入。\n\n請按卡片上的「✏️ 編輯」補上金額，或直接重說一次，例如「晚餐 300」。',
           quickReply: boundQR,
         }], sourceId)
+      } else if (saveResult.reason === 'entry_limit') {
+        await replyMessage(replyToken, [{ type: 'text', text: ENTRY_LIMIT_MSG, quickReply: boundQR }], sourceId)
       } else if (saveResult.reason === 'insert_failed') {
         await replyMessage(replyToken, [{
           type: 'text', text: '❌ 寫入資料庫失敗，這筆還沒存進去。請稍後再按一次「確認存入」。', quickReply: boundQR,

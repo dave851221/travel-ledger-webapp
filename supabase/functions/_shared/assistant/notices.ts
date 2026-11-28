@@ -5,6 +5,8 @@
 // ============================================================
 
 export const RATE_LIMIT_MSG = '⚠️ AI 服務暫時達到免費使用量上限，請隔天再試。'
+/** 開放版：這趟旅程的記帳筆數滿了（跟網頁 src/features/quota/quotaErrors.ts 同一句） */
+export const ENTRY_LIMIT_MSG = '這趟旅程的記帳筆數已經滿了，刪掉不需要的帳就能空出位置。'
 export const AI_BUSY_MSG = '⏳ AI 服務目前忙碌中，請過幾分鐘再試一次。'
 export const AI_QUOTA_MSG = '⚠️ AI 本月的使用額度已經用完了，請管理員到 Anthropic Console 調整上限或儲值。'
 

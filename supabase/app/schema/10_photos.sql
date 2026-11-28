@@ -23,6 +23,8 @@ GRANT ALL ON app.trip_photos TO service_role;
 
 -- 照片張數：這張表＋還留在 Storage app-images 的檔案（已經搬到 R2、表上有的不重複算）。
 -- 正式環境搬完之後 app-images 是空的；本機沒設 R2 金鑰時照片還是放 app-images，張數一樣算得到。
+-- 只算「有帳目用到的」（含垃圾桶裡的）與兩天內剛傳的（LINE 還沒按確認的草稿、正在填的表單）：
+-- 傳了照片卻沒存（草稿放著不管、表單關掉）留下的孤兒照片，過兩天就不再占名額（2026-11-28 深入 review）。
 CREATE OR REPLACE FUNCTION app.count_photos(p_trip_id UUID)
 RETURNS INTEGER
 LANGUAGE sql
@@ -30,10 +32,18 @@ STABLE
 SECURITY DEFINER
 SET search_path = ''
 AS $$
-    SELECT (SELECT count(*) FROM app.trip_photos WHERE trip_id = p_trip_id)::int
+    WITH used AS (
+        SELECT DISTINCT u.path
+        FROM app.expenses e, unnest(e.photo_urls) AS u(path)
+        WHERE e.trip_id = p_trip_id
+    )
+    SELECT (SELECT count(*) FROM app.trip_photos p
+            WHERE p.trip_id = p_trip_id
+              AND (p.created_at > now() - interval '2 days' OR p.path IN (SELECT path FROM used)))::int
          + (SELECT count(*) FROM storage.objects o
             WHERE o.bucket_id = 'app-images' AND o.name LIKE 'expenses/' || p_trip_id::text || '/%'
-              AND NOT EXISTS (SELECT 1 FROM app.trip_photos p WHERE p.path = o.name))::int;
+              AND NOT EXISTS (SELECT 1 FROM app.trip_photos p WHERE p.path = o.name)
+              AND (o.created_at > now() - interval '2 days' OR o.name IN (SELECT path FROM used)))::int;
 $$;
 REVOKE ALL ON FUNCTION app.count_photos(UUID) FROM PUBLIC, anon, authenticated;
 

@@ -133,6 +133,10 @@ BEGIN
             paid = app.deleted_identity_trips.paid OR EXCLUDED.paid,
             deleted_at = now();
 
+    -- 他綁到旅程的 LINE 聊天（一對一與群組）一起解除，跟被移出旅程一樣。
+    -- 不能只靠 trip_members 的 unbind trigger：刪 auth.users 時 bound_by 的 SET NULL 可能先跑，trigger 就比對不到了
+    UPDATE app.line_user_states SET current_trip_id = NULL, bound_by = NULL WHERE bound_by = v_uid;
+
     -- trip_members、line_identities、profiles、auth.identities 都會跟著刪（ON DELETE CASCADE）
     DELETE FROM auth.users WHERE id = v_uid;
 END;

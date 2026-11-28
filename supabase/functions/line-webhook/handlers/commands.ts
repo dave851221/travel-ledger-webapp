@@ -24,6 +24,7 @@ import {
   GROUP_MODE_COMMANDS,
   HELP_KEYWORDS,
   IS_PUBLIC,
+  MAX_AI_PREFERENCE_LENGTH,
   QUICK_CMD_KEYWORDS,
   TRIP_GONE_MSG,
   UNDO_KEYWORDS,
@@ -243,7 +244,9 @@ if (cleanText === '取消綁定' || cleanText === '放棄綁定') {
   if (!isBinding) {
     await replyMessage(replyToken, [{
       type: 'text',
-      text: 'ℹ️ 目前沒有在等待密碼。想解除已綁定的旅程請輸入「斷開」。',
+      text: IS_PUBLIC
+        ? 'ℹ️ 想解除這個聊天綁定的旅程請輸入「斷開」；要換一趟請輸入「綁定」。'
+        : 'ℹ️ 目前沒有在等待密碼。想解除已綁定的旅程請輸入「斷開」。',
       quickReply: isBound ? boundQR : getQuickReply(false),
     }], sourceId)
     return true
@@ -312,6 +315,15 @@ if (isBound && (cleanText.startsWith('設定:') || cleanText.startsWith('設定�
     await replyMessage(replyToken, [{
       type: 'text',
       text: '⚙️ 設定內容不能為空，請輸入偏好內容，例如：\n「設定: 預設由我付款，大家均分」\n\n要清空請輸入「設定:清除」。',
+      quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
+    }], sourceId)
+    return true
+  }
+  // 跟網頁的輸入框、資料庫的 CHECK 同一個上限（整段每次都會送進 AI）
+  if ([...config].length > MAX_AI_PREFERENCE_LENGTH) {
+    await replyMessage(replyToken, [{
+      type: 'text',
+      text: `⚙️ 偏好太長了（上限 ${MAX_AI_PREFERENCE_LENGTH} 字），請精簡一點再設定。`,
       quickReply: preferenceQuickReply(userState.current_trip_id!, isGroup, groupMode),
     }], sourceId)
     return true

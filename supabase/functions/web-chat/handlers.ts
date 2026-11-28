@@ -46,7 +46,7 @@ import {
 } from "../_shared/assistant/chat.ts"
 import { mentionsDraftField } from "../_shared/assistant/guards.ts"
 import { createItineraryLoader } from "../_shared/assistant/itinerary.ts"
-import { aiUnavailableMessage, FALLBACK_NOTICES } from "../_shared/assistant/notices.ts"
+import { aiUnavailableMessage, ENTRY_LIMIT_MSG, FALLBACK_NOTICES } from "../_shared/assistant/notices.ts"
 import { recognizeReceipt } from "../_shared/assistant/receipt.ts"
 import { tripToday } from "../_shared/assistant/time.ts"
 import type { DraftExpense, OutstandingDraft } from "../_shared/assistant/types.ts"
@@ -598,6 +598,8 @@ export async function handleSave(scope: ChatScope, req: ChatRequest): Promise<Ac
           ? `😅 這張卡片上的「${(result.dropped ?? []).join('、')}」已經不在旅程成員裡了，不能就這樣存入 —— 他的那一份會被默默算到別人頭上。\n\n目前成員：${trip.members.join('、')}\n\n請在卡片上重新選分攤的人。`
           : result.reason === 'invalid_amount'
             ? '😅 這筆的金額是 0（可能沒辨識到金額），不能存入。請在卡片上補上金額。'
+            : result.reason === 'entry_limit'
+              ? ENTRY_LIMIT_MSG
             : result.reason === 'insert_failed'
               ? '❌ 寫入資料庫失敗，這筆還沒存進去。請稍後再按一次「確認存入」。'
               : '❌ 財務運算發生錯誤，請聯絡管理員。'

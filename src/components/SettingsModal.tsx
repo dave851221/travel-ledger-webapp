@@ -671,6 +671,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, trip, on
                 <textarea
                   rows={4}
                   aria-label="AI 記帳偏好"
+                  maxLength={10000}
                   placeholder="例如：預設由小明付款，大家均分；日幣一律不換算"
                   className={`${ui.input} resize-none`}
                   value={aiPreference}

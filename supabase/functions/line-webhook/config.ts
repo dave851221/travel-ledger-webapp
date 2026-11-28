@@ -97,3 +97,6 @@ export const GROUP_MODE_COMMANDS: Record<string, GroupMode> = {
 }
 /** 想看完整的自我介紹 */
 export const HELP_KEYWORDS = ['使用說明', '說明', '教學', '怎麼用', '怎麼使用', '如何使用', 'help', 'HELP', 'Help', '功能']
+
+/** 旅程 AI 記帳偏好的字數上限：網頁輸入框、LINE「設定:」與資料庫（app.trips 的 CHECK）同一個數字 */
+export const MAX_AI_PREFERENCE_LENGTH = 10000
