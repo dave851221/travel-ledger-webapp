@@ -74,7 +74,7 @@ const SignInPanel: React.FC<{ returnTo: string; title?: string; hint?: string }>
         </div>
       )}
       <p className="text-[11px] text-muted text-center mt-5 leading-relaxed">
-        登入即表示你同意服務條款與隱私權政策。我們只會取得你的名稱，用來在帳上顯示是誰。
+        登入即表示你同意<a href="#/terms" className="underline">服務條款</a>與<a href="#/privacy" className="underline">隱私權政策</a>。我們只會取得你的名稱，用來在帳上顯示是誰。
       </p>
     </div>
   );

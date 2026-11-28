@@ -528,7 +528,13 @@ const Home: React.FC = () => {
         )}
 
         {/* 開放版不放個人名字 */}
-        <footer className="mt-10 text-center text-xs text-muted">{IS_PUBLIC ? PRODUCT_NAME : 'Made by 代杰'}</footer>
+        <footer className="mt-10 text-center text-xs text-muted">
+          {IS_PUBLIC ? (
+            <span className="inline-flex items-center gap-2">
+              {PRODUCT_NAME}<span aria-hidden>·</span><a href="#/terms" className="hover:text-ink">服務條款</a><span aria-hidden>·</span><a href="#/privacy" className="hover:text-ink">隱私權政策</a>
+            </span>
+          ) : 'Made by 代杰'}
+        </footer>
       </main>
 
       <Toast toast={toast} onDismiss={dismissToast} />
