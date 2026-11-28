@@ -81,6 +81,9 @@ const Dashboard: React.FC = () => {
   const [chatOpen, setChatOpen] = useState(false);
   // 開過一次就一直掛著：關掉聊天室時還在等的回覆（AI、照片辨識）才不會跟著不見
   const [chatMounted, setChatMounted] = useState(false);
+  // 行程分頁看過一次就一直掛著（只是藏起來）：切走再回來不必重新讀試算表、不會轉圈（David 2026-11-28）
+  const [itineraryMounted, setItineraryMounted] = useState(false);
+  if (activeTab === 'itinerary' && !itineraryMounted) setItineraryMounted(true);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // 「我是誰」由資料推導，不另外存一份會過期的 state。
@@ -492,10 +495,12 @@ const Dashboard: React.FC = () => {
             />
           )}
 
-          {activeTab === 'itinerary' && id && (
-            <Suspense fallback={<TabLoading />}>
-              <TripItinerary trip={trip} canManage={!IS_PUBLIC || membership?.role === 'owner' || membership?.role === 'admin'} onChanged={refetchTrip} />
-            </Suspense>
+          {itineraryMounted && id && (
+            <div hidden={activeTab !== 'itinerary'}>
+              <Suspense fallback={<TabLoading />}>
+                <TripItinerary trip={trip} canManage={!IS_PUBLIC || membership?.role === 'owner' || membership?.role === 'admin'} onChanged={refetchTrip} />
+              </Suspense>
+            </div>
           )}
 
           {activeTab === 'album' && <AlbumTab trip={trip} expenses={allExpenses} onOpenExpense={setDetailExpense} onOpenRecap={openRecap} />}

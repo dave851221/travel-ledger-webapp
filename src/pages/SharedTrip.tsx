@@ -45,6 +45,9 @@ const SharedTrip: React.FC = () => {
   const [checking, setChecking] = useState(false);
   const [tab, setTab] = useState<TabType>('ledger');
   const [detail, setDetail] = useState<Expense | null>(null);
+  // 行程分頁看過一次就一直掛著，切回來不必重讀
+  const [itineraryMounted, setItineraryMounted] = useState(false);
+  if (tab === 'itinerary' && !itineraryMounted) setItineraryMounted(true);
   usePhotoUrlVersion();
 
   const accept = (data: Snapshot, pw: string | null) => {
@@ -221,10 +224,12 @@ const SharedTrip: React.FC = () => {
             />
           )}
 
-          {tab === 'itinerary' && (
-            <Suspense fallback={<TabLoading />}>
-              <TripItinerary trip={viewTrip} canManage={false} onChanged={noop} share={share} />
-            </Suspense>
+          {itineraryMounted && (
+            <div hidden={tab !== 'itinerary'}>
+              <Suspense fallback={<TabLoading />}>
+                <TripItinerary trip={viewTrip} canManage={false} onChanged={noop} share={share} />
+              </Suspense>
+            </div>
           )}
 
           {tab === 'album' && <AlbumTab trip={viewTrip} expenses={expenses} onOpenExpense={setDetail} />}
