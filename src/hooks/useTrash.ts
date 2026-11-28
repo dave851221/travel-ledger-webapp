@@ -2,10 +2,11 @@ import { useCallback } from 'react';
 import { supabase } from '../api/supabase';
 import { removePhotos } from '../utils/photoStore';
 import { quotaMessage } from '../features/quota/quotaErrors';
+import { errorText } from '../utils/errorText';
 
 type ShowToast = (message: string, type?: 'success' | 'error') => void;
 
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const errorMessage = (err: unknown) => errorText(err);
 
 /**
  * 垃圾桶的四個動作：軟刪除、還原、永久刪除、清空。

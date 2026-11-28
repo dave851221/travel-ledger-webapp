@@ -35,6 +35,7 @@ import { insertExpenseOrQueue } from '../utils/offlineQueue';
 import { quotaMessage } from '../features/quota/quotaErrors';
 import Decimal from 'decimal.js';
 import imageCompression from 'browser-image-compression';
+import { errorText } from '../utils/errorText';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -594,7 +595,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
         if (IS_PUBLIC) await supabase.rpc('liff_release_nonce', { p_source_id: liffMeta.line_user_id ?? '', p_nonce: liffMeta.nonce });
         else await supabase.from('line_processed_actions').delete().eq('nonce', liffMeta.nonce);
       }
-      setError(quotaMessage(err) ?? (err instanceof Error ? err.message : String(err)));
+      setError(quotaMessage(err) ?? errorText(err));
     } finally { setLoading(false); setSavingLabel('儲存中…'); }
   };
 

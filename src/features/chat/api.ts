@@ -8,6 +8,7 @@ import { ASSISTANT_NAME } from '../../config/assistant';
 import { IS_PUBLIC } from '../../config/mode';
 import { quotaMessage } from '../quota/quotaErrors';
 import type { ActionReply, ChatReply, DraftExpense, HistoryTurn, ReplyTarget, WebDraft } from './types';
+import { errorText } from '../../utils/errorText';
 
 /** 開放版是 tlb-web-chat（要登入、是成員，扣這趟的 AI 次數）；supabase.functions.invoke 會自動帶登入的 JWT */
 const CHAT_FN = IS_PUBLIC ? 'tlb-web-chat' : 'web-chat';
@@ -68,6 +69,6 @@ export async function uploadChatPhoto(tripId: string, file: File): Promise<strin
   try {
     return await uploadPhoto(tripId, new File([compressed], 'photo.jpg', { type: 'image/jpeg' }), 'chat', 'photo.jpg');
   } catch (error) {
-    throw new Error(quotaMessage(error) ?? (error instanceof Error ? error.message : String(error)));
+    throw new Error(quotaMessage(error) ?? errorText(error));
   }
 }

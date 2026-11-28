@@ -5,6 +5,7 @@ import { buildQuickAddDraft, parseQuickAddInput } from '../utils/quickAdd';
 import { formatMoney } from '../utils/money';
 import { isSubmitEnter } from '../utils/keyboard';
 import { insertExpenseOrQueue } from '../utils/offlineQueue';
+import { errorText } from '../utils/errorText';
 
 interface QuickAddBarProps {
   trip: Trip;
@@ -67,7 +68,7 @@ const QuickAddBar: React.FC<QuickAddBarProps> = ({
       showToast(queued ? `目前離線，已先存在手機：${label}，恢復連線後會自動上傳` : `已記一筆：${label}`);
       onSaved();
     } catch (err) {
-      showToast('記帳失敗：' + (err instanceof Error ? err.message : String(err)), 'error');
+      showToast('記帳失敗：' + errorText(err), 'error');
     } finally {
       setSaving(false);
     }

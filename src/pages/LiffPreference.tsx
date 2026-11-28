@@ -9,6 +9,7 @@ import { AI_PREFERENCE_MAX } from '../config/mode';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import type { Trip } from '../types';
 import { Loader2, AlertTriangle, Bot, Save } from 'lucide-react';
+import { errorText } from '../utils/errorText';
 
 /**
  * 在 LINE 裡編輯「這趟旅程的 AI 記帳偏好」。
@@ -78,7 +79,7 @@ const LiffPreference: React.FC = () => {
         setLoading(false);
       } catch (err) {
         console.error('[LIFF_PREFERENCE] Error:', err);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(err));
         setLoading(false);
       }
     };
@@ -101,7 +102,7 @@ const LiffPreference: React.FC = () => {
       if (canCloseWindow) setTimeout(closeLiffWindow, 900);
     } catch (err) {
       console.error('[LIFF_PREFERENCE] Save error:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
     } finally {
       setSaving(false);
     }

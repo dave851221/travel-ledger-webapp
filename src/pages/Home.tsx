@@ -24,6 +24,7 @@ import SortEditor from '../features/home/SortEditor';
 import TripDatesField from '../components/TripDatesField';
 import { normalizeTripDates } from '../utils/tripDates';
 import { getLocalDateString } from '../utils/date';
+import { errorText } from '../utils/errorText';
 
 const TRIPS_PER_GROUP = 3;
 const APP_NAME = PRODUCT_NAME;
@@ -75,6 +76,14 @@ const Home: React.FC = () => {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const groupRefs = useRef<Record<string, HTMLElement | null>>({});
   const { toast, showToast, dismissToast } = useToast();
+
+  // 從旅程頁被送回來（旅程不見了、或已經不是成員）：說一聲為什麼，不要默默跳回首頁
+  const notice = (location.state as { notice?: string } | null)?.notice;
+  useEffect(() => {
+    if (!notice) return;
+    showToast(notice, 'error');
+    navigate('/', { replace: true, state: null });
+  }, [notice, showToast, navigate]);
 
   // 自訂排序：先照這台裝置的快取畫，背景再讀最新的（舊版一列 home_layout、開放版帳號的 user_metadata）
   const [layout, setLayout] = useState<HomeLayout | null>(() => (IS_PUBLIC ? null : readCachedLayout()));
@@ -158,7 +167,7 @@ const Home: React.FC = () => {
     } catch (err) {
       console.error('Error fetching trips:', err);
       // 已經畫出快取的清單時不蓋上錯誤：離線或網路慢時照樣能點進旅程
-      if (readTripsCache().length === 0) setError(err instanceof Error ? err.message : String(err));
+      if (readTripsCache().length === 0) setError(errorText(err));
     } finally {
       setLoading(false);
     }
@@ -298,7 +307,7 @@ const Home: React.FC = () => {
       setNewTrip(EMPTY_NEW_TRIP);
       setCustomCurrency(null);
     } catch (err) {
-      setCreateError('建立失敗：' + (err instanceof Error ? err.message : String(err)));
+      setCreateError('建立失敗：' + errorText(err));
     } finally {
       setSubmitting(false);
     }

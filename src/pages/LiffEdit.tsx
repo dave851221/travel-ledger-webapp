@@ -12,6 +12,7 @@ import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import { getLocalDateString } from '../utils/date';
 import ItemSplitPanel from '../components/ItemSplitPanel';
 import { reconcileReceiptItems, sanitizeReceiptItems, type ReceiptItem } from '../utils/itemSplit';
+import { errorText } from '../utils/errorText';
 
 const LiffEdit: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -209,7 +210,7 @@ const LiffEdit: React.FC = () => {
 
       } catch (err) {
         console.error('[LIFF] Error:', err);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(err));
         setLoading(false);
       }
     };
