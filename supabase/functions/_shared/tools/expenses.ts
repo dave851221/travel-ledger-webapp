@@ -44,6 +44,10 @@ import type {
   ToolContext,
 } from "./types.ts"
 
+/** 品名的長度上限（資料庫 app.expenses 有同樣的 CHECK；超過就截斷，不讓整筆存不進去） */
+export const MAX_DESCRIPTION_LENGTH = 200
+const clampDescription = (s: string): string => [...s].slice(0, MAX_DESCRIPTION_LENGTH).join('')
+
 /** listExpenses 一次最多從資料庫拉幾列（記憶體過濾之前） */
 const MAX_SQL_ROWS = 200
 const DEFAULT_LIST_LIMIT = 20
@@ -267,7 +271,7 @@ export async function commitExpense(
   const { data: saved, error: insertError } = await ctx.db.from('expenses').insert({
     ...(opts.id ? { id: opts.id } : {}),
     trip_id: trip.id,
-    description: prepared.description,
+    description: clampDescription(prepared.description),
     amount: numAmount,
     currency: prepared.currency,
     payer_data: finalPayerData,
@@ -289,6 +293,8 @@ export async function commitExpense(
     }
   }
   if (insertError) {
+    // 開放版的筆數上限（app.enforce_entry_limit）：不是暫時的錯，叫使用者「再按一次」只會一直失敗
+    if (String(insertError.message ?? '').includes('entry_limit')) return { ok: false, reason: 'entry_limit' }
     console.error(`[SAVE] Insert failed. trip=${trip.id}`, insertError)
     return { ok: false, reason: 'insert_failed' }
   }
@@ -459,7 +465,7 @@ export async function commitExpenseUpdate(
 
   const { data } = await ctx.db.from('expenses')
     .update({
-      description: prepared.description,
+      description: clampDescription(prepared.description),
       amount: target.toNumber(),
       currency: prepared.currency,
       date: prepared.date,

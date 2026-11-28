@@ -4,6 +4,8 @@ import { initLiff } from '../utils/liff';
 import { ensureLiffSession } from '../features/auth/liffSession';
 import { supabase, TRIP_COLUMNS } from '../api/supabase';
 import { ui } from '../components/ui';
+import { ASSISTANT_NAME } from '../config/assistant';
+import { AI_PREFERENCE_MAX } from '../config/mode';
 import { LiffError, LiffLoading, LiffSuccess } from '../components/LiffScreens';
 import type { Trip } from '../types';
 import { Loader2, AlertTriangle, Bot, Save } from 'lucide-react';
@@ -112,7 +114,7 @@ const LiffPreference: React.FC = () => {
   if (isSuccess) return (
     <LiffSuccess
       title="偏好已更新"
-      detail="之後記帳時，耀西會參考這份設定。"
+      detail={`之後記帳時，${ASSISTANT_NAME}會參考這份設定。`}
       canClose={canCloseWindow}
       onClose={closeLiffWindow}
       closedHint="已儲存，可以直接關閉這個頁面回到 LINE。"
@@ -131,7 +133,7 @@ const LiffPreference: React.FC = () => {
         </div>
 
         <p className="text-sm text-ink-2 leading-relaxed bg-surface border border-line rounded-xl p-4">
-          耀西解析你說的話或收據時，會參考這段描述。這份設定<strong className="text-ink">整趟旅程共用</strong>，
+          {ASSISTANT_NAME}解析你說的話或收據時，會參考這段描述。這份設定<strong className="text-ink">整趟旅程共用</strong>，
           網頁上的旅程設定看到的也是同一份。留空代表沒有偏好。
         </p>
 
@@ -144,9 +146,10 @@ const LiffPreference: React.FC = () => {
             className={`${ui.input} resize-none`}
             value={preference}
             onChange={e => setPreference(e.target.value)}
+            maxLength={AI_PREFERENCE_MAX}
           />
           <p className={`${ui.hint} mt-1.5`}>
-            不要寫「我是○○」：群組裡每個人看到的都是同一句，耀西會用 LINE 顯示名稱判斷「我」是誰。
+            不要寫「我是○○」：群組裡每個人看到的都是同一句，{ASSISTANT_NAME}會用 LINE 顯示名稱判斷「我」是誰。
           </p>
         </div>
 

@@ -556,6 +556,14 @@ describe('commitExpense', () => {
     expect(result).toEqual({ ok: false, reason: 'insert_failed' });
   });
 
+  it('筆數上限（entry_limit）單獨回報，不叫人「再按一次」；品名超過 200 字截斷', async () => {
+    const limit = await commitExpense(PREPARED, makeInsertDb({ data: null, error: { code: 'P0001', message: 'entry_limit' } }));
+    expect(limit).toEqual({ ok: false, reason: 'entry_limit' });
+    const rows: Record<string, unknown>[] = [];
+    await commitExpense({ ...PREPARED, description: '長'.repeat(250) }, makeInsertDb({ data: { id: 'n' }, error: null }, rows));
+    expect([...(rows[0].description as string)].length).toBe(200);
+  });
+
   it('帶 id 重送、主鍵衝突（上一次其實已經存進去）：回成功，不多存一筆', async () => {
     const rows: Record<string, unknown>[] = [];
     const result = await commitExpense(PREPARED, makeInsertDb({ data: null, error: { code: '23505', message: 'dup' } }, rows), { id: 'fixed-id' });

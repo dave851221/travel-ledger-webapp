@@ -12,6 +12,8 @@ export type AppMode = 'legacy' | 'public';
 export const APP_MODE: AppMode = import.meta.env.VITE_APP_MODE === 'public' ? 'public' : 'legacy';
 
 export const IS_PUBLIC = APP_MODE === 'public';
+/** 旅程 AI 記帳偏好的字數上限（開放版；每次叫 AI 都整段送出）。舊版不限。與 app.trips 的 CHECK、line-webhook/config.ts 一致 */
+export const AI_PREFERENCE_MAX = IS_PUBLIC ? 1000 : undefined;
 
 /** 資料庫 schema：supabase-js 的 `from()` / `rpc()` 都會打到這裡 */
 export const DB_SCHEMA = IS_PUBLIC ? 'app' : 'public';

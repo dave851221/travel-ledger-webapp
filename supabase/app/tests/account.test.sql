@@ -3,7 +3,7 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(13);
+SELECT plan(14);
 
 UPDATE app.quota_settings SET free_trip_creations = 2;
 
@@ -31,6 +31,9 @@ SELECT v::uuid, '餐飲', '拉麵', 100, 'TWD' FROM ids WHERE k = 'shared';
 RESET ROLE;
 INSERT INTO app.trip_members (trip_id, user_id, member_name, role)
 SELECT v::uuid, 'bbbbbbbb-0000-0000-0000-0000000000f2', '乙', 'editor' FROM ids WHERE k = 'shared';
+-- A 把一個 LINE 群組綁到一起的旅程
+INSERT INTO app.line_user_states (line_user_id, current_trip_id, bound_by)
+SELECT 'Cdelgroup', v::uuid, 'aaaaaaaa-0000-0000-0000-0000000000f1' FROM ids WHERE k = 'shared';
 
 SELECT pg_temp.as_user('aaaaaaaa-0000-0000-0000-0000000000f1');
 SELECT is(jsonb_array_length(app.account_deletion_preview() -> 'delete'), 1, '預覽：只剩自己的旅程會刪掉');
@@ -44,6 +47,7 @@ SELECT is((SELECT count(*)::int FROM app.line_identities WHERE line_user_id = 'U
 SELECT is((SELECT count(*)::int FROM app.trips WHERE id = (SELECT v::uuid FROM ids WHERE k = 'solo')), 0, '只剩自己的旅程整趟刪掉');
 SELECT is((SELECT role FROM app.trip_members WHERE user_id = 'bbbbbbbb-0000-0000-0000-0000000000f2'), 'owner', '一起的旅程交給 B');
 SELECT is((SELECT count(*)::int FROM app.expenses WHERE trip_id = (SELECT v::uuid FROM ids WHERE k = 'shared')), 1, '帳都留著');
+SELECT is((SELECT current_trip_id FROM app.line_user_states WHERE line_user_id = 'Cdelgroup'), NULL, '他綁的 LINE 群組一起解除');
 
 -- 同一個 LINE 重新註冊：建立過的趟數接著算
 INSERT INTO auth.users (id, email, aud, role) VALUES ('dddddddd-0000-0000-0000-0000000000f4', 'dd@test.local', 'authenticated', 'authenticated');

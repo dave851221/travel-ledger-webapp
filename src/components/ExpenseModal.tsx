@@ -817,7 +817,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose, trip, curr
 
         <div>
           <label htmlFor="exp-desc" className={ui.label}>項目 <span className="text-muted font-normal">· 選填，留空會記成「{category}」</span></label>
-          <input id="exp-desc" type="text" placeholder="例如：機場晚餐" className={ui.input} value={description} onChange={e => setDescription(e.target.value)} />
+          <input id="exp-desc" type="text" maxLength={200} placeholder="例如：機場晚餐" className={ui.input} value={description} onChange={e => setDescription(e.target.value)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">

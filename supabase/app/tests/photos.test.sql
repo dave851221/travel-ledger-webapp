@@ -4,7 +4,7 @@
 -- ============================================================
 
 BEGIN;
-SELECT plan(10);
+SELECT plan(13);
 
 UPDATE app.plan_limits SET max_photos = 2 WHERE plan = 'free';
 
@@ -50,6 +50,16 @@ SELECT throws_ok($$ SELECT app.add_trip_photo((SELECT v::uuid FROM ids WHERE k =
 SELECT throws_ok($$ SELECT app.add_trip_photo('00000000-0000-0000-0000-0000000000ff', 'expenses/00000000-0000-0000-0000-0000000000ff/c.jpg', NULL) $$,
                  'no_trip', '沒有這趟旅程');
 RESET ROLE;
+
+-- 沒存成帳的照片（草稿放著不管）超過兩天就不占名額；帳上用到的照片一直算
+UPDATE app.trip_photos SET created_at = now() - interval '5 days' WHERE trip_id = (SELECT v::uuid FROM ids WHERE k = 't');
+SELECT is(app.count_photos((SELECT v::uuid FROM ids WHERE k = 't')), 1, '兩天前的孤兒照片不算');
+INSERT INTO app.expenses (trip_id, category, description, amount, currency, photo_urls)
+VALUES ((SELECT v::uuid FROM ids WHERE k = 't'), '餐飲', '晚餐', 100, 'TWD', ARRAY['expenses/' || (SELECT v FROM ids WHERE k = 't') || '/a.jpg']);
+SELECT is(app.count_photos((SELECT v::uuid FROM ids WHERE k = 't')), 2, '帳上用到的舊照片照算');
+SELECT throws_ok($$ INSERT INTO app.expenses (trip_id, category, description, amount, currency)
+                    VALUES ((SELECT v::uuid FROM ids WHERE k = 't'), '餐飲', repeat('長', 201), 1, 'TWD') $$,
+                 '23514', NULL, '品名超過 200 字就擋');
 
 -- 刪旅程時表上的列跟著刪
 DELETE FROM app.trips WHERE id = (SELECT v::uuid FROM ids WHERE k = 't');

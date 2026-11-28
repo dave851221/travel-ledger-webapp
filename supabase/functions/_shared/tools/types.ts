@@ -150,6 +150,8 @@ export type CommitFailureReason =
   | 'sum_mismatch'
   | 'insert_failed'
   | 'invalid_amount'
+  /** 開放版：這趟的記帳筆數已滿（資料庫 trigger 丟 entry_limit） */
+  | 'entry_limit'
 
 export type CommitExpenseResult =
   | {

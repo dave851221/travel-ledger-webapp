@@ -111,6 +111,35 @@ CREATE TABLE IF NOT EXISTS app.expenses (
 CREATE INDEX IF NOT EXISTS app_expenses_trip_id_idx    ON app.expenses (trip_id);
 CREATE INDEX IF NOT EXISTS app_expenses_deleted_at_idx ON app.expenses (deleted_at);
 
+-- ── 文字與陣列的大小上限（2026-11-28 深入 review）─────────────────
+-- 開放給陌生人用之後，一個免費帳號也能把超長的品名、偏好、JSON 塞進資料庫（免費方案只有 500 MB），
+-- AI 記帳偏好更是每次叫 AI 都整段送出。數字都遠大於正常使用（品名平常 20 字內、偏好上限 1000 字（David 2026-11-28））；
+-- 網頁輸入框與 Edge Function 用同樣的上限（品名超過會被截斷，不會整筆存不進去）。
+ALTER TABLE app.trips DROP CONSTRAINT IF EXISTS trips_size_check;
+ALTER TABLE app.trips ADD CONSTRAINT trips_size_check CHECK (
+        (ai_preference IS NULL OR char_length(ai_preference) <= 1000)
+    AND (category IS NULL OR char_length(category) <= 60)
+    AND cardinality(categories) <= 100
+    AND char_length(array_to_string(categories, '')) <= 2000
+    AND cardinality(coalesce(default_payer, '{}')) <= 150
+    AND cardinality(coalesce(default_split_members, '{}')) <= 150
+    AND octet_length(rates::text) <= 8000
+    AND octet_length(precision_config::text) <= 8000
+);
+ALTER TABLE app.expenses DROP CONSTRAINT IF EXISTS expenses_size_check;
+ALTER TABLE app.expenses ADD CONSTRAINT expenses_size_check CHECK (
+        char_length(description) <= 200
+    AND char_length(category) <= 60
+    AND char_length(currency) <= 10
+    AND (adjustment_member IS NULL OR char_length(adjustment_member) <= 40)
+    AND cardinality(coalesce(photo_urls, '{}')) <= 100
+    AND cardinality(coalesce(receipt_photo_urls, '{}')) <= 100
+    AND octet_length(array_to_string(coalesce(photo_urls, '{}'), '')) <= 20000
+    AND octet_length(array_to_string(coalesce(receipt_photo_urls, '{}'), '')) <= 20000
+    AND octet_length(payer_data::text) <= 20000
+    AND octet_length(split_data::text) <= 20000
+);
+
 -- ── 表層權限 ───────────────────────────────────────────────────
 -- anon 對任何表都沒有權限：沒登入的人只能走 SECURITY DEFINER 的 get_trip_snapshot。
 -- authenticated 有表權限，但能碰到哪幾列由 RLS 決定；
