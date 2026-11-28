@@ -70,6 +70,42 @@ function capture(): void {
   url.searchParams.delete('state');
   url.searchParams.delete('friendship_status_changed');
   window.history.replaceState(window.history.state, '', url.toString());
+
+  // 登入（不是連結）：現在就把 code 送去 auth-line，跟畫面的載入同時跑，不等 React 掛好（登入加速，2026-11-28）
+  if (pending.mode !== 'link') {
+    earlySignIn = postAuthLine({ action: 'signin', code, redirectUri: pending.redirectUri, nonce: pending.nonce })
+      .catch(() => ({ error: 'network' }));
+  }
+}
+
+export interface AuthLineResult { tokenHash?: string; error?: string }
+
+/** 已經送出的登入請求（completeLineSignIn 接手），一頁只用一次 */
+let earlySignIn: Promise<AuthLineResult> | null = null;
+
+export function takeEarlySignIn(): Promise<AuthLineResult> | null {
+  const p = earlySignIn;
+  earlySignIn = null;
+  return p;
+}
+
+/** auth-line 的網址。這個檔案不能 import api/supabase，所以自己組 */
+export function authLineUrl(): string {
+  return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-line`;
+}
+
+/**
+ * 呼叫 auth-line 登入。用 text/plain、不帶自訂標頭 —— 這樣是「簡單請求」，瀏覽器不必先送 CORS 預檢，少一趟往返。
+ * 登入前沒有 JWT，函式也不驗（--no-verify-jwt）。連結 LINE 要帶登入的 JWT，走 supabase.functions.invoke。
+ */
+export async function postAuthLine(body: Record<string, string | undefined>): Promise<AuthLineResult> {
+  const res = await fetch(authLineUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({})) as AuthLineResult;
+  return res.ok ? data : { error: data.error || `http_${res.status}` };
 }
 
 try { capture(); } catch { /* sessionStorage 不能用：當作沒登入 */ }

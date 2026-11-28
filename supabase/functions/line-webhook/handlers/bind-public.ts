@@ -7,6 +7,7 @@
 // 按鈕只帶旅程 id，任何人都能偽造 postback，所以第 2 步一定要以「按的人」重新檢查，不能信按鈕。
 // ============================================================
 
+import { type BindableTrip, buildBindPickerFlex } from "../bind-card.ts"
 import { WEBAPP_URL } from "../config.ts"
 import type { EventContext } from "../context.ts"
 import { supabase } from "../db.ts"
@@ -18,18 +19,12 @@ import { buildBindSuccessText, getQuickReply } from "../messages.ts"
 export const PUBLIC_BIND_KEYWORDS = ['綁定', '綁定旅程', '連結旅程', '切換旅程', '選擇旅程']
 
 const BIND_POSTBACK_PREFIX = 'tlb_bind='
-/** LINE quick reply 最多 13 顆 */
-const MAX_TRIP_BUTTONS = 12
+/** 卡片最多列幾趟（再多手機要滑很久；Flex 單則上限 30 KB 也還很遠） */
+const MAX_TRIP_ROWS = 12
 
 export const isPublicBindPostback = (data: string | undefined): boolean => !!data?.startsWith(BIND_POSTBACK_PREFIX)
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-/** 按鈕上的旅程名稱：quick reply 的 label 最多 20 字 */
-export function bindButtonLabel(name: string): string {
-  const chars = Array.from(name.trim())
-  return chars.length <= 18 ? chars.join('') : `${chars.slice(0, 17).join('')}…`
-}
 
 function signInFirstText(): string {
   return `要先讓我認得你喵 🐱\n\n1. 用這個 LINE 帳號登入網頁版：\n${WEBAPP_URL}/\n2. 建立旅程，或用朋友給的邀請連結加入\n3. 回來這裡再輸入一次「綁定」`
@@ -49,7 +44,7 @@ export async function replyBindPicker(ctx: EventContext): Promise<void> {
     await replyMessage(replyToken, [{ type: 'text', text: '剛剛出了點狀況，請再輸入一次「綁定」。' }], sourceId)
     return
   }
-  const trips = (data.trips ?? []) as { id: string; name: string }[]
+  const trips = (data.trips ?? []) as BindableTrip[]
   if (!data.linked) {
     await replyMessage(replyToken, [{ type: 'text', text: signInFirstText(), quickReply: isBound ? boundQR : getQuickReply(false) }], sourceId)
     return
@@ -61,18 +56,15 @@ export async function replyBindPicker(ctx: EventContext): Promise<void> {
     }], sourceId)
     return
   }
-  const shown = trips.slice(0, MAX_TRIP_BUTTONS)
-  const more = trips.length > shown.length ? `\n（只列出最近的 ${shown.length} 趟，其他的請先到網頁封存不用的旅程）` : ''
-  await replyMessage(replyToken, [{
-    type: 'text',
-    text: `要把${ctx.isGroup ? '這個群組' : '這裡'}綁定到哪一趟？點下面的按鈕選一個 👇${more}`,
-    quickReply: {
-      items: shown.map(t => ({
-        type: 'action',
-        action: { type: 'postback', label: bindButtonLabel(t.name), data: `${BIND_POSTBACK_PREFIX}${t.id}`, displayText: `綁定「${t.name}」` },
-      })),
-    },
-  }], sourceId)
+  // 一張 Flex 卡片：每趟一列（日期、名稱、人數），整列可點。以前的 quick reply 小按鈕跟聊天背景混在一起看不出來
+  const shown = trips.slice(0, MAX_TRIP_ROWS)
+  await replyMessage(replyToken, [buildBindPickerFlex(shown, {
+    isGroup: ctx.isGroup,
+    currentTripId: ctx.userState?.current_trip_id ?? null,
+    total: trips.length,
+    webUrl: WEBAPP_URL,
+    postbackPrefix: BIND_POSTBACK_PREFIX,
+  })], sourceId)
 }
 
 /** 按了旅程按鈕：以按的人重新確認是成員，才綁定 */
