@@ -125,7 +125,7 @@ Repo 的 Settings → Secrets and variables → Actions 需要設定：
 
 **Cloudflare 那邊（David 做）**：Workers & Pages → Create → Pages → Connect to Git → 選 `travel-ledger-webapp`
 - Build command：`npm run build`；Output directory：`dist`；Framework preset：None
-- Environment variables：`VITE_APP_MODE=public`、`VITE_BASE=/`、`VITE_SITE_URL=https://<專案>.pages.dev/`、`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`（跟 GitHub repo secrets 一樣）、`NODE_VERSION=22`
+- Environment variables：`VITE_APP_MODE=public`、`VITE_BASE=/`、`VITE_LINE_LOGIN_CHANNEL_ID=2012815845`（沒有的話登入頁沒有 LINE）、`VITE_SITE_URL=https://<專案>.pages.dev/`、`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`（跟 GitHub repo secrets 一樣）、`NODE_VERSION=22`
 
 **接上之後要一起改的地方**（網址換了，登入與 LINE 都要認得新網址）：
 1. Supabase Auth 的 Site URL／Redirect URLs 加新網址（Google 登入回來的地方）

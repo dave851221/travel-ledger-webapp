@@ -22,7 +22,7 @@ export const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') || ''
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 export const WEBAPP_URL = IS_PUBLIC
-  ? (Deno.env.get('TLB_WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp/next')
+  ? (Deno.env.get('TLB_WEBAPP_URL') || 'https://meowtrip.pages.dev')
   : (Deno.env.get('WEBAPP_URL') || 'https://dave851221.github.io/travel-ledger-webapp')
 /** 資料表所在的 schema。開放版用另一個 schema 時設這個（`supabase secrets set APP_DB_SCHEMA=...`） */
 export const APP_DB_SCHEMA = IS_PUBLIC ? 'app' : (Deno.env.get('APP_DB_SCHEMA') || 'public')
